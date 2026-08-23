@@ -1,0 +1,159 @@
+package com.example.pakredirect;
+
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.app.Service;
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Build;
+import android.os.IBinder;
+import android.util.Log;
+
+import java.net.URI;
+
+public class InterceptService extends Service implements ProxyServer.Listener {
+    public static final String ACTION_START = "com.example.pakredirect.START";
+    public static final String ACTION_STOP = "com.example.pakredirect.STOP";
+    public static final String ACTION_STATUS = "com.example.pakredirect.STATUS";
+    public static final String EXTRA_URL = "url";
+    public static final String EXTRA_URI = "uri";
+    public static final String EXTRA_MESSAGE = "message";
+    public static final String EXTRA_HITS = "hits";
+    public static final String EXTRA_RUNNING = "running";
+    private static final int PORT = 18443;
+    private static final String MARKER = "# PakRedirect";
+    private ProxyServer server;
+    private volatile boolean active;
+
+    @Override public void onCreate() {
+        super.onCreate();
+        createChannel();
+    }
+
+    @Override public int onStartCommand(Intent intent, int flags, int startId) {
+        String action = intent == null ? null : intent.getAction();
+        if (ACTION_STOP.equals(action)) {
+            stopIntercept("已停止");
+            stopSelf();
+            return START_NOT_STICKY;
+        }
+        if (ACTION_START.equals(action)) {
+            String url = intent.getStringExtra(EXTRA_URL);
+            String uri = intent.getStringExtra(EXTRA_URI);
+            startForeground(7, notification("正在启动拦截…"));
+            new Thread(() -> startIntercept(url, uri), "PakRedirect-Start").start();
+        }
+        return START_STICKY;
+    }
+
+    private void startIntercept(String url, String uriString) {
+        try {
+            stopIntercept(null);
+            URI parsed = URI.create(url);
+            String host = parsed.getHost();
+            if (!"https".equalsIgnoreCase(parsed.getScheme()) || host == null || host.isEmpty())
+                throw new IllegalArgumentException("仅支持完整 https:// URL");
+            if (uriString == null || uriString.isEmpty()) throw new IllegalArgumentException("尚未选择 PAK 文件");
+
+            server = new ProxyServer(this, url, ProxyServer.DEFAULT_MANIFEST_URL, Uri.parse(uriString), this);
+            // Important: fetch and patch linkspak.txt before redirecting its hostname to localhost.
+            server.prepare();
+
+            RootShell.Result r = applyRootRules(server.interceptedHosts());
+            if (!r.ok()) throw new IllegalStateException("Root 规则失败:\n" + r);
+
+            server.start(PORT);
+            active = true;
+            updateNotification("拦截中 · ui.pak + linkspak.txt");
+            broadcast("拦截已启动", 0, true);
+        } catch (Throwable t) {
+            Log.e("PakRedirect", "start failed", t);
+            stopIntercept(null);
+            broadcast("启动失败: " + t.getMessage(), 0, false);
+            stopSelf();
+        }
+    }
+
+    private RootShell.Result applyRootRules(String[] hosts) {
+        StringBuilder echo = new StringBuilder();
+        for (String host : hosts) {
+            if (host == null) continue;
+            String safeHost = host.replaceAll("[^A-Za-z0-9.-]", "");
+            if (!safeHost.isEmpty()) echo.append("echo '127.0.0.1 ").append(safeHost).append(" ").append(MARKER).append("' >> $tmp; ");
+        }
+        String cmd =
+                "set -e; " +
+                "mount -o rw,remount /system >/dev/null 2>&1 || true; " +
+                "tmp=/data/local/tmp/pakredirect_hosts.$$; " +
+                "grep -v '" + MARKER + "$' /system/etc/hosts > $tmp || true; " +
+                echo +
+                "cat $tmp > /system/etc/hosts; rm -f $tmp; restorecon /system/etc/hosts >/dev/null 2>&1 || true; " +
+                "while iptables -t nat -D OUTPUT -p tcp -d 127.0.0.1 --dport 443 -j REDIRECT --to-ports " + PORT + " >/dev/null 2>&1; do :; done; " +
+                "iptables -t nat -A OUTPUT -p tcp -d 127.0.0.1 --dport 443 -j REDIRECT --to-ports " + PORT + "; " +
+                "while iptables -D OUTPUT -p udp -d 127.0.0.1 --dport 443 -j REJECT >/dev/null 2>&1; do :; done; " +
+                "iptables -A OUTPUT -p udp -d 127.0.0.1 --dport 443 -j REJECT; ";
+        return RootShell.run(cmd);
+    }
+
+    private void stopIntercept(String message) {
+        active = false;
+        if (server != null) { try { server.stop(); } catch (Throwable ignored) {} server = null; }
+        RootShell.run(
+                "tmp=/data/local/tmp/pakredirect_hosts.$$; " +
+                "grep -v '" + MARKER + "$' /system/etc/hosts > $tmp 2>/dev/null || true; " +
+                "if [ -s $tmp ]; then cat $tmp > /system/etc/hosts; fi; rm -f $tmp; " +
+                "while iptables -t nat -D OUTPUT -p tcp -d 127.0.0.1 --dport 443 -j REDIRECT --to-ports " + PORT + " >/dev/null 2>&1; do :; done; " +
+                "while iptables -D OUTPUT -p udp -d 127.0.0.1 --dport 443 -j REJECT >/dev/null 2>&1; do :; done; true");
+        if (message != null) broadcast(message, 0, false);
+    }
+
+    @Override public void onDestroy() {
+        stopIntercept(null);
+        super.onDestroy();
+    }
+
+    @Override public IBinder onBind(Intent intent) { return null; }
+
+    @Override public void onLog(String line) {
+        broadcast(line, -1, active);
+        updateNotification(line.length() > 70 ? line.substring(0, 70) : line);
+    }
+
+    @Override public void onHit(int count) {
+        broadcast("命中本地 PAK", count, true);
+    }
+
+    private void broadcast(String msg, int hits, boolean running) {
+        Intent i = new Intent(ACTION_STATUS);
+        i.setPackage(getPackageName());
+        i.putExtra(EXTRA_MESSAGE, msg);
+        i.putExtra(EXTRA_HITS, hits);
+        i.putExtra(EXTRA_RUNNING, running);
+        sendBroadcast(i);
+    }
+
+    private void createChannel() {
+        if (Build.VERSION.SDK_INT >= 26) {
+            NotificationChannel ch = new NotificationChannel("pakredirect", "PakRedirect", NotificationManager.IMPORTANCE_LOW);
+            getSystemService(NotificationManager.class).createNotificationChannel(ch);
+        }
+    }
+
+    private Notification notification(String text) {
+        Intent open = new Intent(this, MainActivity.class);
+        PendingIntent pi = PendingIntent.getActivity(this, 1, open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        Notification.Builder b = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(this, "pakredirect") : new Notification.Builder(this);
+        return b.setContentTitle("PakRedirect")
+                .setContentText(text)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done)
+                .setOngoing(true)
+                .setContentIntent(pi)
+                .build();
+    }
+
+    private void updateNotification(String text) {
+        getSystemService(NotificationManager.class).notify(7, notification(text));
+    }
+}
