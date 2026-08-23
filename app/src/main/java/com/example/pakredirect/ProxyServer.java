@@ -11,6 +11,8 @@ import java.io.ByteArrayOutputStream;
 import java.io.FileInputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetAddress;
+import java.net.Socket;
 import java.net.URI;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -24,11 +26,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLServerSocket;
 import javax.net.ssl.SSLSocket;
+import javax.net.ssl.SSLSocketFactory;
 
 public final class ProxyServer {
     public interface Listener {
@@ -45,6 +49,8 @@ public final class ProxyServer {
     private final Listener listener;
     private final AtomicInteger hits = new AtomicInteger();
     private final ExecutorService workers = Executors.newCachedThreadPool();
+    private final Map<String, InetAddress[]> originAddresses = new HashMap<>();
+
     private volatile boolean running;
     private SSLServerSocket server;
     private Thread acceptThread;
@@ -59,10 +65,13 @@ public final class ProxyServer {
         this.listener = listener;
     }
 
-    /** Must be called before hosts are redirected. */
+    /** Must run before /system/etc/hosts is redirected. */
     public void prepare() throws Exception {
         pakSize = determinePakSize();
         if (pakSize < 0) throw new IllegalStateException("无法读取所选 PAK 文件大小");
+
+        rememberOrigin(pakTarget.getHost());
+        rememberOrigin(manifestTarget.getHost());
 
         String original;
         try {
@@ -76,6 +85,19 @@ public final class ProxyServer {
         if (patched.equals(original)) throw new IllegalStateException("linkspak.txt 中未找到目标 ui.pak 行");
         patchedManifest = patched.getBytes(StandardCharsets.UTF_8);
         log("ui.pak 实际大小: " + pakSize + " bytes；linkspak.txt 已动态修正");
+    }
+
+    private void rememberOrigin(String host) throws Exception {
+        if (host == null || host.isEmpty() || originAddresses.containsKey(host.toLowerCase(Locale.US))) return;
+        InetAddress[] addresses = InetAddress.getAllByName(host);
+        if (addresses == null || addresses.length == 0) throw new IllegalStateException("无法解析真实地址: " + host);
+        originAddresses.put(host.toLowerCase(Locale.US), addresses);
+        StringBuilder s = new StringBuilder("已缓存真实地址 ").append(host).append(": ");
+        for (int i = 0; i < addresses.length; i++) {
+            if (i > 0) s.append(", ");
+            s.append(addresses[i].getHostAddress());
+        }
+        log(s.toString());
     }
 
     public String[] interceptedHosts() {
@@ -99,7 +121,7 @@ public final class ProxyServer {
         kmf.init(ks, new char[0]);
         SSLContext ssl = SSLContext.getInstance("TLS");
         ssl.init(kmf.getKeyManagers(), null, null);
-        server = (SSLServerSocket) ssl.getServerSocketFactory().createServerSocket(port, 50, java.net.InetAddress.getByName("127.0.0.1"));
+        server = (SSLServerSocket) ssl.getServerSocketFactory().createServerSocket(port, 50, InetAddress.getByName("127.0.0.1"));
         running = true;
         acceptThread = new Thread(this::acceptLoop, "PakRedirect-Accept");
         acceptThread.start();
@@ -116,7 +138,7 @@ public final class ProxyServer {
         while (running) {
             try {
                 SSLSocket s = (SSLSocket) server.accept();
-                s.setSoTimeout(15000);
+                s.setSoTimeout(20000);
                 workers.execute(() -> handle(s));
             } catch (Throwable t) {
                 if (running) log("accept 失败: " + t.getMessage());
@@ -162,11 +184,81 @@ public final class ProxyServer {
                 return;
             }
 
-            log("未匹配: " + host + " " + method + " " + requestTarget);
-            sendText(out, 404, "PakRedirect: URL not matched");
+            if (originAddresses.containsKey(host.toLowerCase(Locale.US))) {
+                log("透传: " + host + " " + method + " " + requestTarget);
+                forwardHttps(out, host, headerText);
+                return;
+            }
+
+            log("未管理 Host: " + host + " " + method + " " + requestTarget);
+            sendText(out, 404, "PakRedirect: host not managed");
         } catch (Throwable t) {
             log("连接失败: " + t.getClass().getSimpleName() + ": " + t.getMessage());
         }
+    }
+
+    /**
+     * Forward unmatched requests to the real origin IP cached before hosts redirection.
+     * This avoids the 127.0.0.1 DNS loop while preserving normal CDN endpoints.
+     */
+    private void forwardHttps(OutputStream clientOut, String host, String originalHeader) throws Exception {
+        InetAddress[] addresses = originAddresses.get(host.toLowerCase(Locale.US));
+        if (addresses == null || addresses.length == 0) throw new IllegalStateException("没有真实地址缓存: " + host);
+        Throwable last = null;
+        for (InetAddress address : addresses) {
+            try {
+                forwardViaAddress(clientOut, host, originalHeader, address);
+                return;
+            } catch (Throwable t) {
+                last = t;
+            }
+        }
+        throw new IllegalStateException("真实服务器连接失败: " + host + (last == null ? "" : " / " + last.getMessage()), last);
+    }
+
+    private void forwardViaAddress(OutputStream clientOut, String host, String originalHeader, InetAddress address) throws Exception {
+        Socket raw = new Socket();
+        raw.connect(new java.net.InetSocketAddress(address, 443), 8000);
+        raw.setSoTimeout(20000);
+        SSLSocketFactory sf = (SSLSocketFactory) SSLSocketFactory.getDefault();
+        try (SSLSocket upstream = (SSLSocket) sf.createSocket(raw, host, 443, true)) {
+            upstream.setUseClientMode(true);
+            upstream.startHandshake();
+            HostnameVerifier verifier = HttpsURLConnection.getDefaultHostnameVerifier();
+            if (!verifier.verify(host, upstream.getSession())) throw new javax.net.ssl.SSLHandshakeException("Hostname verification failed: " + host);
+
+            try (BufferedOutputStream uout = new BufferedOutputStream(upstream.getOutputStream());
+                 BufferedInputStream uin = new BufferedInputStream(upstream.getInputStream())) {
+                String request = makeForwardHeader(originalHeader, host);
+                uout.write(request.getBytes(StandardCharsets.ISO_8859_1));
+                uout.flush();
+
+                byte[] buf = new byte[64 * 1024];
+                int n;
+                while ((n = uin.read(buf)) >= 0) clientOut.write(buf, 0, n);
+                clientOut.flush();
+            }
+        }
+    }
+
+    private static String makeForwardHeader(String originalHeader, String host) {
+        String[] lines = originalHeader.split("\\r?\\n");
+        StringBuilder out = new StringBuilder();
+        if (lines.length > 0) out.append(lines[0]).append("\r\n");
+        boolean hasHost = false;
+        for (int i = 1; i < lines.length; i++) {
+            String line = lines[i];
+            if (line == null || line.isEmpty()) continue;
+            int p = line.indexOf(':');
+            if (p <= 0) continue;
+            String name = line.substring(0, p).trim();
+            if (name.equalsIgnoreCase("connection") || name.equalsIgnoreCase("proxy-connection")) continue;
+            if (name.equalsIgnoreCase("host")) hasHost = true;
+            out.append(line).append("\r\n");
+        }
+        if (!hasHost) out.append("Host: ").append(host).append("\r\n");
+        out.append("Connection: close\r\n\r\n");
+        return out.toString();
     }
 
     private void serveManifest(OutputStream out, boolean headOnly) throws Exception {
@@ -263,7 +355,7 @@ public final class ProxyServer {
         c.setConnectTimeout(8000);
         c.setReadTimeout(8000);
         c.setInstanceFollowRedirects(true);
-        c.setRequestProperty("User-Agent", "PakRedirect/1.1");
+        c.setRequestProperty("User-Agent", "PakRedirect/1.2");
         int code = c.getResponseCode();
         if (code < 200 || code >= 300) throw new IllegalStateException("HTTP " + code);
         try (InputStream in = c.getInputStream(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
