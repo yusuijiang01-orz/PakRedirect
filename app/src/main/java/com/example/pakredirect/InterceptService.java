@@ -22,10 +22,14 @@ public class InterceptService extends Service implements ProxyServer.Listener {
     public static final String EXTRA_MESSAGE = "message";
     public static final String EXTRA_HITS = "hits";
     public static final String EXTRA_RUNNING = "running";
+
     private static final int PORT = 18443;
     private static final String MARKER = "# PakRedirect";
+
+    private final Object lifecycleLock = new Object();
     private ProxyServer server;
     private volatile boolean active;
+    private volatile boolean starting;
 
     @Override public void onCreate() {
         super.onCreate();
@@ -34,44 +38,73 @@ public class InterceptService extends Service implements ProxyServer.Listener {
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent == null ? null : intent.getAction();
+
         if (ACTION_STOP.equals(action)) {
-            stopIntercept("已停止");
-            stopSelf();
+            new Thread(() -> {
+                synchronized (lifecycleLock) {
+                    stopInterceptLocked("已停止");
+                }
+                stopSelf();
+            }, "PakRedirect-Stop").start();
             return START_NOT_STICKY;
         }
+
         if (ACTION_START.equals(action)) {
+            if (starting) {
+                broadcast("正在启动，请稍候…", -1, active);
+                return START_STICKY;
+            }
             String url = intent.getStringExtra(EXTRA_URL);
             String uri = intent.getStringExtra(EXTRA_URI);
             startForeground(7, notification("正在启动拦截…"));
-            new Thread(() -> startIntercept(url, uri), "PakRedirect-Start").start();
+            starting = true;
+            new Thread(() -> {
+                synchronized (lifecycleLock) {
+                    try {
+                        startInterceptLocked(url, uri);
+                    } finally {
+                        starting = false;
+                    }
+                }
+            }, "PakRedirect-Start").start();
         }
         return START_STICKY;
     }
 
-    private void startIntercept(String url, String uriString) {
+    private void startInterceptLocked(String url, String uriString) {
+        ProxyServer newServer = null;
         try {
-            stopIntercept(null);
+            stopInterceptLocked(null);
+
             URI parsed = URI.create(url);
             String host = parsed.getHost();
-            if (!"https".equalsIgnoreCase(parsed.getScheme()) || host == null || host.isEmpty())
+            if (!"https".equalsIgnoreCase(parsed.getScheme()) || host == null || host.isEmpty()) {
                 throw new IllegalArgumentException("仅支持完整 https:// URL");
-            if (uriString == null || uriString.isEmpty()) throw new IllegalArgumentException("尚未选择 PAK 文件");
+            }
+            if (uriString == null || uriString.isEmpty()) {
+                throw new IllegalArgumentException("尚未选择 PAK 文件");
+            }
 
-            server = new ProxyServer(this, url, ProxyServer.DEFAULT_MANIFEST_URL, Uri.parse(uriString), this);
-            // Important: fetch and patch linkspak.txt before redirecting its hostname to localhost.
-            server.prepare();
+            newServer = new ProxyServer(this, url, ProxyServer.DEFAULT_MANIFEST_URL, Uri.parse(uriString), this);
+            newServer.prepare();
 
-            RootShell.Result r = applyRootRules(server.interceptedHosts());
+            RootShell.Result r = applyRootRules(newServer.interceptedHosts());
             if (!r.ok()) throw new IllegalStateException("Root 规则失败:\n" + r);
 
-            server.start(PORT);
+            newServer.start(PORT);
+            server = newServer;
             active = true;
             updateNotification("拦截中 · ui.pak + linkspak.txt");
             broadcast("拦截已启动", 0, true);
         } catch (Throwable t) {
             Log.e("PakRedirect", "start failed", t);
-            stopIntercept(null);
-            broadcast("启动失败: " + t.getMessage(), 0, false);
+            if (newServer != null) {
+                try { newServer.stop(); } catch (Throwable ignored) {}
+            }
+            server = null;
+            active = false;
+            cleanupRootRules();
+            broadcast("启动失败: " + safeMessage(t), 0, false);
             stopSelf();
         }
     }
@@ -81,8 +114,11 @@ public class InterceptService extends Service implements ProxyServer.Listener {
         for (String host : hosts) {
             if (host == null) continue;
             String safeHost = host.replaceAll("[^A-Za-z0-9.-]", "");
-            if (!safeHost.isEmpty()) echo.append("echo '127.0.0.1 ").append(safeHost).append(" ").append(MARKER).append("' >> $tmp; ");
+            if (!safeHost.isEmpty()) {
+                echo.append("echo '127.0.0.1 ").append(safeHost).append(" ").append(MARKER).append("' >> $tmp; ");
+            }
         }
+
         String cmd =
                 "set -e; " +
                 "mount -o rw,remount /system >/dev/null 2>&1 || true; " +
@@ -97,20 +133,30 @@ public class InterceptService extends Service implements ProxyServer.Listener {
         return RootShell.run(cmd);
     }
 
-    private void stopIntercept(String message) {
+    private void stopInterceptLocked(String message) {
         active = false;
-        if (server != null) { try { server.stop(); } catch (Throwable ignored) {} server = null; }
-        RootShell.run(
-                "tmp=/data/local/tmp/pakredirect_hosts.$$; " +
-                "grep -v '" + MARKER + "$' /system/etc/hosts > $tmp 2>/dev/null || true; " +
-                "if [ -s $tmp ]; then cat $tmp > /system/etc/hosts; fi; rm -f $tmp; " +
-                "while iptables -t nat -D OUTPUT -p tcp -d 127.0.0.1 --dport 443 -j REDIRECT --to-ports " + PORT + " >/dev/null 2>&1; do :; done; " +
-                "while iptables -D OUTPUT -p udp -d 127.0.0.1 --dport 443 -j REJECT >/dev/null 2>&1; do :; done; true");
+        ProxyServer old = server;
+        server = null;
+        if (old != null) {
+            try { old.stop(); } catch (Throwable ignored) {}
+        }
+        cleanupRootRules();
         if (message != null) broadcast(message, 0, false);
     }
 
+    private void cleanupRootRules() {
+        RootShell.run(
+                "tmp=/data/local/tmp/pakredirect_hosts.$$; " +
+                "grep -v '" + MARKER + "$' /system/etc/hosts > $tmp 2>/dev/null || true; " +
+                "if [ -f $tmp ]; then cat $tmp > /system/etc/hosts; fi; rm -f $tmp; " +
+                "while iptables -t nat -D OUTPUT -p tcp -d 127.0.0.1 --dport 443 -j REDIRECT --to-ports " + PORT + " >/dev/null 2>&1; do :; done; " +
+                "while iptables -D OUTPUT -p udp -d 127.0.0.1 --dport 443 -j REJECT >/dev/null 2>&1; do :; done; true");
+    }
+
     @Override public void onDestroy() {
-        stopIntercept(null);
+        synchronized (lifecycleLock) {
+            stopInterceptLocked(null);
+        }
         super.onDestroy();
     }
 
@@ -144,7 +190,9 @@ public class InterceptService extends Service implements ProxyServer.Listener {
     private Notification notification(String text) {
         Intent open = new Intent(this, MainActivity.class);
         PendingIntent pi = PendingIntent.getActivity(this, 1, open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        Notification.Builder b = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(this, "pakredirect") : new Notification.Builder(this);
+        Notification.Builder b = Build.VERSION.SDK_INT >= 26
+                ? new Notification.Builder(this, "pakredirect")
+                : new Notification.Builder(this);
         return b.setContentTitle("PakRedirect")
                 .setContentText(text)
                 .setSmallIcon(android.R.drawable.stat_sys_download_done)
@@ -155,5 +203,10 @@ public class InterceptService extends Service implements ProxyServer.Listener {
 
     private void updateNotification(String text) {
         getSystemService(NotificationManager.class).notify(7, notification(text));
+    }
+
+    private static String safeMessage(Throwable t) {
+        String m = t.getMessage();
+        return (m == null || m.trim().isEmpty()) ? t.getClass().getSimpleName() : m;
     }
 }
