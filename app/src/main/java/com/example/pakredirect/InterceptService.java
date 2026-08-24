@@ -6,6 +6,7 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Intent;
+import android.content.pm.ServiceInfo;
 import android.net.Uri;
 import android.os.Build;
 import android.os.IBinder;
@@ -57,7 +58,18 @@ public class InterceptService extends Service implements ProxyServer.Listener {
             }
             String url = intent.getStringExtra(EXTRA_URL);
             String directoryUri = intent.getStringExtra(EXTRA_DIRECTORY_URI);
-            startForeground(7, notification("正在启动拦截…"));
+            try {
+                if (Build.VERSION.SDK_INT >= 29) {
+                    startForeground(7, notification("正在启动拦截…"), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
+                } else {
+                    startForeground(7, notification("正在启动拦截…"));
+                }
+            } catch (Throwable t) {
+                Log.e("PakRedirect", "startForeground failed", t);
+                broadcast("启动失败: 前台服务权限不足或通知权限被限制: " + safeMessage(t), 0, false);
+                stopSelf();
+                return START_NOT_STICKY;
+            }
             starting = true;
             new Thread(() -> {
                 synchronized (lifecycleLock) {
@@ -122,7 +134,7 @@ public class InterceptService extends Service implements ProxyServer.Listener {
 
         String cmd =
                 "set -e; " +
-                "mount -o rw,remount /system >/dev/null 2>&1 || true; " +
+                "for m in / /system /system_root; do mount -o rw,remount $m >/dev/null 2>&1 || true; done; " +
                 "tmp=/data/local/tmp/pakredirect_hosts.$$; " +
                 "grep -v '" + MARKER + "$' /system/etc/hosts > $tmp || true; " +
                 echo +
@@ -147,6 +159,7 @@ public class InterceptService extends Service implements ProxyServer.Listener {
 
     private void cleanupRootRules() {
         RootShell.run(
+                "for m in / /system /system_root; do mount -o rw,remount $m >/dev/null 2>&1 || true; done; " +
                 "tmp=/data/local/tmp/pakredirect_hosts.$$; " +
                 "grep -v '" + MARKER + "$' /system/etc/hosts > $tmp 2>/dev/null || true; " +
                 "if [ -f $tmp ]; then cat $tmp > /system/etc/hosts; fi; rm -f $tmp; " +

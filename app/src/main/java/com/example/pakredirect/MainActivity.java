@@ -1,11 +1,13 @@
 package com.example.pakredirect;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -62,6 +64,7 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         prefs = getSharedPreferences("cfg", MODE_PRIVATE);
         buildUi();
+        requestNotificationPermission();
         restore();
     }
 
@@ -241,8 +244,13 @@ public class MainActivity extends Activity {
                 String dest = "/system/etc/security/cacerts/" + CA_HASH + ".0";
                 String q = "'" + f.getAbsolutePath().replace("'", "'\\''") + "'";
                 RootShell.Result r = RootShell.run(
-                        "mount -o rw,remount /system >/dev/null 2>&1 || true; " +
-                        "cp " + q + " " + dest + " && chown root:root " + dest + " && chmod 644 " + dest + " && restorecon " + dest + "; ls -lZ " + dest);
+                        "set -e; " +
+                        "for m in / /system /system_root; do mount -o rw,remount $m >/dev/null 2>&1 || true; done; " +
+                        "mkdir -p /system/etc/security/cacerts; " +
+                        "cp " + q + " " + dest + "; " +
+                        "chown root:root " + dest + "; chmod 644 " + dest + "; " +
+                        "restorecon " + dest + " >/dev/null 2>&1 || true; " +
+                        "ls -lZ " + dest);
                 runOnUiThread(() -> appendStatus(r.ok() ? "CA 已写入系统目录，首次安装后请重启 MuMu。" : "CA 安装失败：" + r));
             } catch (Throwable t) {
                 runOnUiThread(() -> appendStatus("CA 安装异常：" + t.getMessage()));
@@ -270,6 +278,12 @@ public class MainActivity extends Activity {
                 .putExtra(InterceptService.EXTRA_DIRECTORY_URI, selectedDirectoryUri.toString());
         if (Build.VERSION.SDK_INT >= 26) startForegroundService(i); else startService(i);
         appendStatus("正在启动拦截…");
+    }
+
+    private void requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 3001);
+        }
     }
 
     private void stopIntercept() {
