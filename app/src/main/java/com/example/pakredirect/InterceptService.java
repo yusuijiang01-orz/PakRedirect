@@ -19,6 +19,7 @@ public class InterceptService extends Service implements ProxyServer.Listener {
     public static final String ACTION_STATUS = "com.example.pakredirect.STATUS";
     public static final String EXTRA_URL = "url";
     public static final String EXTRA_URI = "uri";
+    public static final String EXTRA_DIRECTORY_URI = "directory_uri";
     public static final String EXTRA_MESSAGE = "message";
     public static final String EXTRA_HITS = "hits";
     public static final String EXTRA_RUNNING = "running";
@@ -55,13 +56,13 @@ public class InterceptService extends Service implements ProxyServer.Listener {
                 return START_STICKY;
             }
             String url = intent.getStringExtra(EXTRA_URL);
-            String uri = intent.getStringExtra(EXTRA_URI);
+            String directoryUri = intent.getStringExtra(EXTRA_DIRECTORY_URI);
             startForeground(7, notification("正在启动拦截…"));
             starting = true;
             new Thread(() -> {
                 synchronized (lifecycleLock) {
                     try {
-                        startInterceptLocked(url, uri);
+                        startInterceptLocked(url, directoryUri);
                     } finally {
                         starting = false;
                     }
@@ -71,7 +72,7 @@ public class InterceptService extends Service implements ProxyServer.Listener {
         return START_STICKY;
     }
 
-    private void startInterceptLocked(String url, String uriString) {
+    private void startInterceptLocked(String url, String directoryUriString) {
         ProxyServer newServer = null;
         try {
             stopInterceptLocked(null);
@@ -81,11 +82,11 @@ public class InterceptService extends Service implements ProxyServer.Listener {
             if (!"https".equalsIgnoreCase(parsed.getScheme()) || host == null || host.isEmpty()) {
                 throw new IllegalArgumentException("仅支持完整 https:// URL");
             }
-            if (uriString == null || uriString.isEmpty()) {
-                throw new IllegalArgumentException("尚未选择 PAK 文件");
+            if (directoryUriString == null || directoryUriString.isEmpty()) {
+                throw new IllegalArgumentException("尚未选择 PAK 目录");
             }
 
-            newServer = new ProxyServer(this, url, ProxyServer.DEFAULT_MANIFEST_URL, Uri.parse(uriString), this);
+            newServer = new ProxyServer(this, url, ProxyServer.DEFAULT_MANIFEST_URL, Uri.parse(directoryUriString), this);
             newServer.prepare();
 
             RootShell.Result r = applyRootRules(newServer.interceptedHosts());
@@ -94,7 +95,7 @@ public class InterceptService extends Service implements ProxyServer.Listener {
             newServer.start(PORT);
             server = newServer;
             active = true;
-            updateNotification("拦截中 · ui.pak + linkspak.txt");
+            updateNotification("拦截中 · 多 PAK + linkspak.txt");
             broadcast("拦截已启动", 0, true);
         } catch (Throwable t) {
             Log.e("PakRedirect", "start failed", t);

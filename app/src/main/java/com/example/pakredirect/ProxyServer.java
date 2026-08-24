@@ -17,14 +17,15 @@ import java.net.URI;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.HttpsURLConnection;
@@ -45,32 +46,34 @@ public final class ProxyServer {
     private final Context context;
     private final URI pakTarget;
     private final URI manifestTarget;
-    private final Uri fileUri;
+    private final Uri directoryUri;
     private final Listener listener;
     private final AtomicInteger hits = new AtomicInteger();
     private final ExecutorService workers = Executors.newCachedThreadPool();
     private final Map<String, InetAddress[]> originAddresses = new HashMap<>();
+    private final Map<String, PakEntry> pakEntries = new HashMap<>();
+    private final Set<String> pakHosts = new LinkedHashSet<>();
 
     private volatile boolean running;
     private SSLServerSocket server;
     private Thread acceptThread;
-    private long pakSize = -1;
     private byte[] patchedManifest;
 
-    public ProxyServer(Context context, String targetUrl, String manifestUrl, Uri fileUri, Listener listener) {
+    public ProxyServer(Context context, String targetUrl, String manifestUrl, Uri directoryUri, Listener listener) {
         this.context = context.getApplicationContext();
         this.pakTarget = URI.create(targetUrl);
         this.manifestTarget = URI.create(manifestUrl);
-        this.fileUri = fileUri;
+        this.directoryUri = directoryUri;
         this.listener = listener;
     }
 
     /** Must run before /system/etc/hosts is redirected. */
     public void prepare() throws Exception {
-        pakSize = determinePakSize();
-        if (pakSize < 0) throw new IllegalStateException("无法读取所选 PAK 文件大小");
+        PakIndex index = PakDirectoryManager.scan(context, directoryUri);
+        pakEntries.clear();
+        pakEntries.putAll(index.all());
+        if (pakEntries.isEmpty()) throw new IllegalStateException("所选目录内未发现 .pak 文件");
 
-        rememberOrigin(pakTarget.getHost());
         rememberOrigin(manifestTarget.getHost());
 
         String original;
@@ -81,10 +84,12 @@ public final class ProxyServer {
             original = new String(readAsset("linkspak_fallback.txt"), StandardCharsets.UTF_8);
             log("远端 linkspak.txt 读取失败，使用内置模板: " + t.getClass().getSimpleName());
         }
-        String patched = patchManifestSize(original, pakSize);
-        if (patched.equals(original)) throw new IllegalStateException("linkspak.txt 中未找到目标 ui.pak 行");
-        patchedManifest = patched.getBytes(StandardCharsets.UTF_8);
-        log("ui.pak 实际大小: " + pakSize + " bytes；linkspak.txt 已动态修正");
+        PatchResult patched = patchManifest(original);
+        if (patched.changed == 0) throw new IllegalStateException("linkspak.txt 中未匹配到本地 PAK 文件");
+        if (pakHosts.isEmpty() && pakTarget.getHost() != null) pakHosts.add(pakTarget.getHost().toLowerCase(Locale.US));
+        for (String host : pakHosts) rememberOrigin(host);
+        patchedManifest = patched.text.getBytes(StandardCharsets.UTF_8);
+        log("linkspak.txt 已动态修正 " + patched.changed + " 个 PAK 大小；本地索引 " + pakEntries.size() + " 个");
     }
 
     private void rememberOrigin(String host) throws Exception {
@@ -101,18 +106,22 @@ public final class ProxyServer {
     }
 
     public String[] interceptedHosts() {
-        return new String[]{pakTarget.getHost(), manifestTarget.getHost()};
+        ArrayList<String> hosts = new ArrayList<>();
+        if (manifestTarget.getHost() != null) hosts.add(manifestTarget.getHost());
+        for (String host : pakHosts) {
+            if (host != null && !hosts.contains(host)) hosts.add(host);
+        }
+        return hosts.toArray(new String[0]);
     }
 
     public void start(int port) throws Exception {
-        String pakHost = pakTarget.getHost();
         String manifestHost = manifestTarget.getHost();
-        if (pakHost == null || manifestHost == null) throw new IllegalArgumentException("URL 缺少 Host");
-        if (patchedManifest == null || pakSize < 0) throw new IllegalStateException("尚未 prepare");
+        if (manifestHost == null || pakHosts.isEmpty()) throw new IllegalArgumentException("URL 缺少 Host");
+        if (patchedManifest == null || pakEntries.isEmpty()) throw new IllegalStateException("尚未 prepare");
 
         byte[] caPem = readAsset("pakredirect_ca.pem");
         byte[] caKey = readAsset("pakredirect_ca_key.pem");
-        CertUtil.GeneratedIdentity id = CertUtil.issueServerIdentity(new String[]{pakHost, manifestHost}, caPem, caKey);
+        CertUtil.GeneratedIdentity id = CertUtil.issueServerIdentity(interceptedHosts(), caPem, caKey);
 
         KeyStore ks = KeyStore.getInstance("PKCS12");
         ks.load(null, null);
@@ -169,18 +178,20 @@ public final class ProxyServer {
 
             String host = normalizeHost(h.get("host"));
             String path = requestPathOnly(requestTarget);
+            String pakName = pakNameFromPath(path);
+            PakEntry entry = pakEntries.get(pakName.toLowerCase(Locale.US));
 
-            if (host.equalsIgnoreCase(pakTarget.getHost()) && path.equals(rawPath(pakTarget))) {
-                serveFile(out, method.equals("HEAD"), h.get("range"));
+            if (pakHosts.contains(host.toLowerCase(Locale.US)) && entry != null) {
+                serveFile(out, entry, method.equals("HEAD"), h.get("range"));
                 int n = hits.incrementAndGet();
                 if (listener != null) listener.onHit(n);
-                log("PAK 命中 #" + n + ": " + method + " " + requestTarget + (h.get("range") == null ? "" : " | " + h.get("range")));
+                log("PAK 命中 #" + n + ": " + entry.name + " | " + method + " " + requestTarget + (h.get("range") == null ? "" : " | " + h.get("range")));
                 return;
             }
 
             if (host.equalsIgnoreCase(manifestTarget.getHost()) && path.equals(rawPath(manifestTarget))) {
                 serveManifest(out, method.equals("HEAD"));
-                log("linkspak.txt 命中：已返回动态大小 " + pakSize);
+                log("linkspak.txt 命中：已返回动态 PAK 索引");
                 return;
             }
 
@@ -273,12 +284,13 @@ public final class ProxyServer {
         out.flush();
     }
 
-    private void serveFile(OutputStream out, boolean headOnly, String rangeHeader) throws Exception {
+    private void serveFile(OutputStream out, PakEntry entry, boolean headOnly, String rangeHeader) throws Exception {
         ContentResolver cr = context.getContentResolver();
+        Uri fileUri = Uri.parse(entry.uri);
         try (ParcelFileDescriptor pfd = cr.openFileDescriptor(fileUri, "r")) {
-            if (pfd == null) { sendText(out, 500, "Cannot open selected PAK"); return; }
+            if (pfd == null) { sendText(out, 500, "Cannot open local PAK"); return; }
             long total = pfd.getStatSize();
-            if (total < 0) total = pakSize;
+            if (total < 0) total = entry.size;
             if (total < 0) { sendText(out, 500, "Cannot determine PAK size"); return; }
             long start = 0, end = total - 1;
             boolean partial = false;
@@ -329,25 +341,37 @@ public final class ProxyServer {
         }
     }
 
-    private long determinePakSize() {
-        try (ParcelFileDescriptor pfd = context.getContentResolver().openFileDescriptor(fileUri, "r")) {
-            if (pfd != null && pfd.getStatSize() >= 0) return pfd.getStatSize();
-        } catch (Throwable ignored) {}
-        android.database.Cursor c = null;
-        try {
-            c = context.getContentResolver().query(fileUri, new String[]{android.provider.OpenableColumns.SIZE}, null, null, null);
-            if (c != null && c.moveToFirst() && !c.isNull(0)) return c.getLong(0);
-        } catch (Throwable ignored) { } finally { if (c != null) c.close(); }
-        return -1;
+    private PatchResult patchManifest(String original) {
+        String[] lines = original.split("\\r?\\n", -1);
+        StringBuilder out = new StringBuilder(original.length());
+        int changed = 0;
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
+            String patched = patchManifestLine(line);
+            if (!patched.equals(line)) changed++;
+            out.append(patched);
+            if (i < lines.length - 1) out.append('\n');
+        }
+        return new PatchResult(out.toString(), changed);
     }
 
-    private String patchManifestSize(String original, long size) {
-        String base = "https://" + pakTarget.getHost() + rawPath(pakTarget);
-        Pattern p = Pattern.compile("(?m)^(\\s*" + Pattern.quote(base) + "(?:\\?[^,\\r\\n]*)?\\s*,\\s*data/\\s*,\\s*ui\\.pak\\s*,\\s*)\\d+(\\s*,[^\\r\\n]*)$");
-        Matcher m = p.matcher(original);
-        if (!m.find()) return original;
-        String replacement = m.group(1) + size + m.group(2);
-        return original.substring(0, m.start()) + replacement + original.substring(m.end());
+    private String patchManifestLine(String line) {
+        String[] fields = line.split(",", -1);
+        if (fields.length < 4) return line;
+        String name = fields[2].trim();
+        PakEntry entry = pakEntries.get(name.toLowerCase(Locale.US));
+        if (entry == null) return line;
+        try {
+            URI uri = URI.create(fields[0].trim());
+            if (uri.getHost() != null) pakHosts.add(uri.getHost().toLowerCase(Locale.US));
+        } catch (Throwable ignored) {}
+        fields[3] = leadingSpaces(fields[3]) + entry.size + trailingSpaces(fields[3]);
+        StringBuilder out = new StringBuilder(line.length() + 16);
+        for (int i = 0; i < fields.length; i++) {
+            if (i > 0) out.append(',');
+            out.append(fields[i]);
+        }
+        return out.toString();
     }
 
     private String downloadText(String url) throws Exception {
@@ -387,6 +411,34 @@ public final class ProxyServer {
     private static String requestPathOnly(String target) {
         int q = target.indexOf('?');
         return q >= 0 ? target.substring(0, q) : target;
+    }
+
+    private static String pakNameFromPath(String path) {
+        if (path == null) return "";
+        int slash = path.lastIndexOf('/');
+        return slash >= 0 ? path.substring(slash + 1) : path;
+    }
+
+    private static String leadingSpaces(String s) {
+        int i = 0;
+        while (i < s.length() && Character.isWhitespace(s.charAt(i))) i++;
+        return s.substring(0, i);
+    }
+
+    private static String trailingSpaces(String s) {
+        int i = s.length() - 1;
+        while (i >= 0 && Character.isWhitespace(s.charAt(i))) i--;
+        return s.substring(i + 1);
+    }
+
+    private static final class PatchResult {
+        final String text;
+        final int changed;
+
+        PatchResult(String text, int changed) {
+            this.text = text;
+            this.changed = changed;
+        }
     }
 
     private static String readHeaders(InputStream in, int max) throws Exception {

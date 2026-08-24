@@ -42,7 +42,6 @@ public class MainActivity extends Activity {
     private EditText urlEdit;
     private TextView fileText, indexText, statusText, hitsText, stateText;
     private Button startButton, stopButton;
-    private Uri selectedUri;
     private Uri selectedDirectoryUri;
     private SharedPreferences prefs;
     private int hits;
@@ -185,7 +184,7 @@ public class MainActivity extends Activity {
         logCard.addView(statusText, logLp);
         root.addView(logCard, blockParams());
 
-        TextView note = text("A阶段仅建立本地目录 PAK 索引；多 PAK HTTPS 替换将在 B 阶段接入。需要 Root、可写 /system。", 12, MUTED, false);
+        TextView note = text("启动后会动态返回 linkspak.txt，并按文件名把目录内同名 .pak 替换给游戏。需要 Root、可写 /system。", 12, MUTED, false);
         note.setPadding(dp(4), dp(4), dp(4), 0);
         root.addView(note);
 
@@ -198,10 +197,6 @@ public class MainActivity extends Activity {
 
     private void restore() {
         urlEdit.setText(prefs.getString("url", DEFAULT_URL));
-        String s = prefs.getString("uri", null);
-        if (s != null) {
-            selectedUri = Uri.parse(s);
-        }
         String dir = prefs.getString(PREF_PAK_DIRECTORY_URI, null);
         if (dir != null) {
             selectedDirectoryUri = Uri.parse(dir);
@@ -257,16 +252,13 @@ public class MainActivity extends Activity {
 
     private void startIntercept() {
         String url = urlEdit.getText().toString().trim();
-        if (selectedUri == null) {
-            toast(selectedDirectoryUri == null ? "请先选择 PAK 目录" : "A阶段已建立目录索引，B阶段再接入多 PAK 替换");
-            return;
-        }
+        if (selectedDirectoryUri == null) { toast("请先选择 PAK 目录"); return; }
         try {
             URI u = URI.create(url);
             if (!"https".equalsIgnoreCase(u.getScheme()) || u.getHost() == null) throw new Exception();
         } catch (Throwable t) { toast("请输入完整的 https:// URL"); return; }
 
-        prefs.edit().putString("url", url).putString("uri", selectedUri.toString()).apply();
+        prefs.edit().putString("url", url).putString(PREF_PAK_DIRECTORY_URI, selectedDirectoryUri.toString()).apply();
         hits = 0;
         hitsText.setText("0");
         stateText.setText("正在启动…");
@@ -275,7 +267,7 @@ public class MainActivity extends Activity {
 
         Intent i = new Intent(this, InterceptService.class).setAction(InterceptService.ACTION_START)
                 .putExtra(InterceptService.EXTRA_URL, url)
-                .putExtra(InterceptService.EXTRA_URI, selectedUri.toString());
+                .putExtra(InterceptService.EXTRA_DIRECTORY_URI, selectedDirectoryUri.toString());
         if (Build.VERSION.SDK_INT >= 26) startForegroundService(i); else startService(i);
         appendStatus("正在启动拦截…");
     }
