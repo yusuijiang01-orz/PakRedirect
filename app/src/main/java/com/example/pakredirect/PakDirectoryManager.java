@@ -8,7 +8,7 @@ import android.provider.DocumentsContract;
 public class PakDirectoryManager {
     public static PakIndex scan(Context context, Uri treeUri) {
         PakIndex index = new PakIndex();
-        String children = DocumentsContract.buildChildDocumentsUriUsingTree(
+        Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(
                 treeUri, DocumentsContract.getTreeDocumentId(treeUri));
         try (Cursor c = context.getContentResolver().query(children,
                 new String[]{DocumentsContract.Document.COLUMN_DISPLAY_NAME,

@@ -27,7 +27,7 @@ import java.io.InputStream;
 import java.net.URI;
 
 public class MainActivity extends Activity {
-    private static final int PICK_PAK = 1001;
+    private static final String PREF_PAK_DIRECTORY_URI = "pak_directory_uri";
     private static final String DEFAULT_URL = "https://cdn-tgpt.tepaylink.vn/production/ui.pak?ver=2";
     private static final String CA_HASH = "204d3e6e";
 
@@ -40,9 +40,10 @@ public class MainActivity extends Activity {
     private static final int DANGER = Color.rgb(214, 67, 67);
 
     private EditText urlEdit;
-    private TextView fileText, statusText, hitsText, stateText;
+    private TextView fileText, indexText, statusText, hitsText, stateText;
     private Button startButton, stopButton;
     private Uri selectedUri;
+    private Uri selectedDirectoryUri;
     private SharedPreferences prefs;
     private int hits;
 
@@ -122,16 +123,21 @@ public class MainActivity extends Activity {
         urlEdit.setText(DEFAULT_URL);
         config.addView(urlEdit, new LinearLayout.LayoutParams(-1, dp(48)));
 
-        Button pick = button("选择本地 PAK", Color.rgb(235,240,249), TEXT);
-        pick.setOnClickListener(v -> pickPak());
+        Button pick = button("选择 PAK 目录", Color.rgb(235,240,249), TEXT);
+        pick.setOnClickListener(v -> PakDirectoryPicker.open(this));
         LinearLayout.LayoutParams pickLp = new LinearLayout.LayoutParams(-1, dp(48));
         pickLp.topMargin = dp(12);
         config.addView(pick, pickLp);
 
-        fileText = text("尚未选择文件", 12, MUTED, false);
+        fileText = text("当前目录：\n尚未选择目录", 12, MUTED, false);
         fileText.setTextIsSelectable(true);
         fileText.setPadding(dp(2), dp(8), dp(2), 0);
         config.addView(fileText);
+
+        indexText = text("扫描结果：\n尚未扫描", 12, MUTED, false);
+        indexText.setTextIsSelectable(true);
+        indexText.setPadding(dp(2), dp(10), dp(2), 0);
+        config.addView(indexText);
         root.addView(config, blockParams());
 
         LinearLayout actions = card();
@@ -179,7 +185,7 @@ public class MainActivity extends Activity {
         logCard.addView(statusText, logLp);
         root.addView(logCard, blockParams());
 
-        TextView note = text("linkspak.txt 会自动把 ui.pak 大小改为所选文件的实际大小；目标 PAK 匹配忽略 ?ver= 参数。需要 Root、可写 /system。", 12, MUTED, false);
+        TextView note = text("A阶段仅建立本地目录 PAK 索引；多 PAK HTTPS 替换将在 B 阶段接入。需要 Root、可写 /system。", 12, MUTED, false);
         note.setPadding(dp(4), dp(4), dp(4), 0);
         root.addView(note);
 
@@ -195,27 +201,37 @@ public class MainActivity extends Activity {
         String s = prefs.getString("uri", null);
         if (s != null) {
             selectedUri = Uri.parse(s);
-            fileText.setText(shortUri(selectedUri));
-            fileText.setTextColor(TEXT);
         }
-    }
-
-    private void pickPak() {
-        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-        i.addCategory(Intent.CATEGORY_OPENABLE);
-        i.setType("*/*");
-        startActivityForResult(i, PICK_PAK);
+        String dir = prefs.getString(PREF_PAK_DIRECTORY_URI, null);
+        if (dir != null) {
+            selectedDirectoryUri = Uri.parse(dir);
+            scanPakDirectory(selectedDirectoryUri, false);
+        }
     }
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == PICK_PAK && resultCode == RESULT_OK && data != null && data.getData() != null) {
-            selectedUri = data.getData();
-            try { getContentResolver().takePersistableUriPermission(selectedUri, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Throwable ignored) {}
-            prefs.edit().putString("uri", selectedUri.toString()).apply();
-            fileText.setText(shortUri(selectedUri));
-            fileText.setTextColor(TEXT);
-            appendStatus("已选择 PAK 文件");
+        if (requestCode == PakDirectoryPicker.REQUEST_CODE && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            selectedDirectoryUri = data.getData();
+            int flags = Intent.FLAG_GRANT_READ_URI_PERMISSION;
+            try { getContentResolver().takePersistableUriPermission(selectedDirectoryUri, flags); } catch (Throwable ignored) {}
+            prefs.edit().putString(PREF_PAK_DIRECTORY_URI, selectedDirectoryUri.toString()).apply();
+            scanPakDirectory(selectedDirectoryUri, true);
+        }
+    }
+
+    private void scanPakDirectory(Uri uri, boolean selectedNow) {
+        fileText.setText("当前目录：\n" + displayDirectory(uri));
+        fileText.setTextColor(TEXT);
+        try {
+            PakIndex index = PakDirectoryManager.scan(this, uri);
+            indexText.setText("扫描结果：\n\n" + PakIndexFormatter.format(index));
+            indexText.setTextColor(TEXT);
+            appendStatus(selectedNow ? "已选择 PAK 目录并完成扫描" : "已恢复 PAK 目录并完成扫描");
+        } catch (Throwable t) {
+            indexText.setText("扫描结果：\n扫描失败：" + t.getMessage());
+            indexText.setTextColor(DANGER);
+            appendStatus("PAK 目录扫描失败：" + t.getMessage());
         }
     }
 
@@ -241,7 +257,10 @@ public class MainActivity extends Activity {
 
     private void startIntercept() {
         String url = urlEdit.getText().toString().trim();
-        if (selectedUri == null) { toast("请先选择 PAK 文件"); return; }
+        if (selectedUri == null) {
+            toast(selectedDirectoryUri == null ? "请先选择 PAK 目录" : "A阶段已建立目录索引，B阶段再接入多 PAK 替换");
+            return;
+        }
         try {
             URI u = URI.create(url);
             if (!"https".equalsIgnoreCase(u.getScheme()) || u.getHost() == null) throw new Exception();
@@ -317,9 +336,20 @@ public class MainActivity extends Activity {
         return g;
     }
 
-    private String shortUri(Uri uri) {
+    private String displayDirectory(Uri uri) {
         String p = uri.getLastPathSegment();
-        return p == null ? uri.toString() : p.replace("MuMuShared:", "MuMu共享 / ");
+        if (p == null) return uri.toString();
+        if (p.startsWith("primary:")) {
+            String rest = p.substring("primary:".length());
+            return rest.length() == 0 ? "/storage/emulated/0" : "/storage/emulated/0/" + rest;
+        }
+        int colon = p.indexOf(':');
+        if (colon > 0) {
+            String volume = p.substring(0, colon);
+            String rest = p.substring(colon + 1);
+            return rest.length() == 0 ? "/storage/" + volume : "/storage/" + volume + "/" + rest;
+        }
+        return p.replace("MuMuShared:", "MuMu共享 / ");
     }
 
     private void toast(String s) { Toast.makeText(this, s, Toast.LENGTH_SHORT).show(); }
