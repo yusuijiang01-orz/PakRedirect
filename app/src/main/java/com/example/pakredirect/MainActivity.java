@@ -73,6 +73,9 @@ public class MainActivity extends Activity {
         IntentFilter f = new IntentFilter(InterceptService.ACTION_STATUS);
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(statusReceiver, f, RECEIVER_NOT_EXPORTED);
         else registerReceiver(statusReceiver, f);
+        hits = InterceptService.hitCount();
+        hitsText.setText(String.valueOf(hits));
+        setRunningUi(InterceptService.isRunning());
     }
 
     @Override protected void onStop() {
@@ -235,6 +238,7 @@ public class MainActivity extends Activity {
 
     private void installCa() {
         appendStatus("正在安装系统 CA…");
+        Toast.makeText(this, "正在安装 CA，结果将显示在运行日志", Toast.LENGTH_SHORT).show();
         new Thread(() -> {
             try {
                 File f = new File(getFilesDir(), CA_HASH + ".0");
@@ -278,6 +282,7 @@ public class MainActivity extends Activity {
                 .putExtra(InterceptService.EXTRA_DIRECTORY_URI, selectedDirectoryUri.toString());
         if (Build.VERSION.SDK_INT >= 26) startForegroundService(i); else startService(i);
         appendStatus("正在启动拦截…");
+        Toast.makeText(this, "正在启动，请查看运行日志", Toast.LENGTH_SHORT).show();
     }
 
     private void requestNotificationPermission() {

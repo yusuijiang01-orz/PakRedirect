@@ -28,6 +28,8 @@ public class InterceptService extends Service implements ProxyServer.Listener {
 
     private static final int PORT = 18443;
     private static final String MARKER = "# PakRedirect";
+    private static volatile boolean currentRunning;
+    private static volatile int currentHits;
 
     private final Object lifecycleLock = new Object();
     private ProxyServer server;
@@ -115,6 +117,8 @@ public class InterceptService extends Service implements ProxyServer.Listener {
             newServer.start(PORT);
             server = newServer;
             active = true;
+            currentRunning = true;
+            currentHits = 0;
             updateNotification("拦截中 · 多 PAK + linkspak.txt");
             broadcast("拦截已启动", 0, true);
         } catch (Throwable t) {
@@ -124,6 +128,7 @@ public class InterceptService extends Service implements ProxyServer.Listener {
             }
             server = null;
             active = false;
+            currentRunning = false;
             cleanupRootRules();
             broadcast("启动失败: " + safeMessage(t), 0, false);
             stopSelf();
@@ -156,6 +161,7 @@ public class InterceptService extends Service implements ProxyServer.Listener {
 
     private void stopInterceptLocked(String message) {
         active = false;
+        currentRunning = false;
         ProxyServer old = server;
         server = null;
         if (old != null) {
@@ -190,8 +196,12 @@ public class InterceptService extends Service implements ProxyServer.Listener {
     }
 
     @Override public void onHit(int count) {
+        currentHits = count;
         broadcast("命中本地 PAK", count, true);
     }
+
+    public static boolean isRunning() { return currentRunning; }
+    public static int hitCount() { return currentHits; }
 
     private void broadcast(String msg, int hits, boolean running) {
         Intent i = new Intent(ACTION_STATUS);

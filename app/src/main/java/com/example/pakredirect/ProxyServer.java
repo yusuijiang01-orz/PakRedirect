@@ -23,8 +23,11 @@ import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.net.ssl.HostnameVerifier;
@@ -49,7 +52,14 @@ public final class ProxyServer {
     private final Uri directoryUri;
     private final Listener listener;
     private final AtomicInteger hits = new AtomicInteger();
-    private final ExecutorService workers = Executors.newCachedThreadPool();
+    private final AtomicInteger rejectedConnections = new AtomicInteger();
+    // TLS sockets are relatively expensive on Android. An unbounded cached pool lets
+    // a client retry storm create hundreds of simultaneous handshakes and exhaust the
+    // app's ~192 MB heap. Keep both active work and queued sockets strictly bounded.
+    private final ExecutorService workers = new ThreadPoolExecutor(
+            4, 4, 30L, TimeUnit.SECONDS,
+            new ArrayBlockingQueue<>(24),
+            new ThreadPoolExecutor.AbortPolicy());
     private final Map<String, InetAddress[]> originAddresses = new HashMap<>();
     private final Map<String, PakEntry> pakEntries = new HashMap<>();
     private final Set<String> pakHosts = new LinkedHashSet<>();
@@ -130,7 +140,7 @@ public final class ProxyServer {
         kmf.init(ks, new char[0]);
         SSLContext ssl = SSLContext.getInstance("TLS");
         ssl.init(kmf.getKeyManagers(), null, null);
-        server = (SSLServerSocket) ssl.getServerSocketFactory().createServerSocket(port, 50, InetAddress.getByName("127.0.0.1"));
+        server = (SSLServerSocket) ssl.getServerSocketFactory().createServerSocket(port, 16, InetAddress.getByName("127.0.0.1"));
         running = true;
         acceptThread = new Thread(this::acceptLoop, "PakRedirect-Accept");
         acceptThread.start();
@@ -147,8 +157,16 @@ public final class ProxyServer {
         while (running) {
             try {
                 SSLSocket s = (SSLSocket) server.accept();
-                s.setSoTimeout(20000);
-                workers.execute(() -> handle(s));
+                s.setSoTimeout(15000);
+                try {
+                    workers.execute(() -> handle(s));
+                } catch (RejectedExecutionException overloaded) {
+                    try { s.close(); } catch (Exception ignored) {}
+                    int rejected = rejectedConnections.incrementAndGet();
+                    if (rejected == 1 || rejected % 20 == 0) {
+                        log("连接过多，已丢弃重试连接 " + rejected + " 个");
+                    }
+                }
             } catch (Throwable t) {
                 if (running) log("accept 失败: " + t.getMessage());
             }
