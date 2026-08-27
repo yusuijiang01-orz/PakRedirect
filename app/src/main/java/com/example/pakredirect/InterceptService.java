@@ -21,6 +21,7 @@ public class InterceptService extends Service implements ProxyServer.Listener {
     public static final String EXTRA_URL = "url";
     public static final String EXTRA_URI = "uri";
     public static final String EXTRA_DIRECTORY_URI = "directory_uri";
+    public static final String EXTRA_ADB_MANAGED = "adb_managed";
     public static final String EXTRA_MESSAGE = "message";
     public static final String EXTRA_HITS = "hits";
     public static final String EXTRA_RUNNING = "running";
@@ -58,6 +59,7 @@ public class InterceptService extends Service implements ProxyServer.Listener {
             }
             String url = intent.getStringExtra(EXTRA_URL);
             String directoryUri = intent.getStringExtra(EXTRA_DIRECTORY_URI);
+            boolean adbManaged = intent.getBooleanExtra(EXTRA_ADB_MANAGED, false);
             try {
                 if (Build.VERSION.SDK_INT >= 29) {
                     startForeground(7, notification("正在启动拦截…"), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
@@ -74,7 +76,7 @@ public class InterceptService extends Service implements ProxyServer.Listener {
             new Thread(() -> {
                 synchronized (lifecycleLock) {
                     try {
-                        startInterceptLocked(url, directoryUri);
+                        startInterceptLocked(url, directoryUri, adbManaged);
                     } finally {
                         starting = false;
                     }
@@ -84,7 +86,7 @@ public class InterceptService extends Service implements ProxyServer.Listener {
         return START_STICKY;
     }
 
-    private void startInterceptLocked(String url, String directoryUriString) {
+    private void startInterceptLocked(String url, String directoryUriString, boolean adbManaged) {
         ProxyServer newServer = null;
         try {
             stopInterceptLocked(null);
@@ -102,7 +104,13 @@ public class InterceptService extends Service implements ProxyServer.Listener {
             newServer.prepare();
 
             RootShell.Result r = applyRootRules(newServer.interceptedHosts());
-            if (!r.ok()) throw new IllegalStateException("Root 规则失败:\n" + r);
+            if (!r.ok()) {
+                // On MuMu Android 15 ADB may already be root while app processes
+                // are forbidden from executing su. The desktop helper owns the
+                // hosts/iptables rules and this service only runs the TLS proxy.
+                if (!adbManaged) throw new IllegalStateException("Root 规则失败:\n" + r);
+                onLog("ADB-root 托管模式：网络规则由电脑端设置");
+            }
 
             newServer.start(PORT);
             server = newServer;

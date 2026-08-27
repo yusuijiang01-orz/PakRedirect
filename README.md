@@ -1,6 +1,6 @@
 # PakRedirect 1.1
 
-轻量、无第三方运行时依赖的 Android Root 测试工程，面向 **MuMu Android 12**。
+轻量、无第三方运行时依赖的 Android Root 测试工程，支持 **MuMu Android 12**，并提供 Android 15 的 ADB-root 托管模式。
 
 默认完成两件事：
 
@@ -57,6 +57,20 @@ gradle :app:assembleDebug
 
 ```text
 app/build/outputs/apk/debug/app-debug.apk
+```
+
+## MuMu Android 15
+
+Android 15 中 ADB shell 可能已经是 root，但普通应用进程仍无法执行 `su`。安装系统 CA 并将 PAK 放到 `/sdcard/patch` 后，从电脑运行：
+
+```powershell
+.\android15-adb-start.ps1 -Adb "D:\path\to\adb.exe"
+```
+
+测试结束后清理 hosts、iptables 并停止服务：
+
+```powershell
+.\android15-adb-stop.ps1 -Adb "D:\path\to\adb.exe"
 ```
 
 ## 限制
