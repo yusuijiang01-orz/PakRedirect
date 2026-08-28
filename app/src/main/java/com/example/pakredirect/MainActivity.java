@@ -43,7 +43,7 @@ public class MainActivity extends Activity {
 
     private EditText urlEdit;
     private TextView fileText, indexText, statusText, hitsText, stateText;
-    private Button startButton, stopButton;
+    private Button startButton, legacyButton, stopButton;
     private Uri selectedDirectoryUri;
     private SharedPreferences prefs;
     private int hits;
@@ -73,6 +73,9 @@ public class MainActivity extends Activity {
         IntentFilter f = new IntentFilter(InterceptService.ACTION_STATUS);
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(statusReceiver, f, RECEIVER_NOT_EXPORTED);
         else registerReceiver(statusReceiver, f);
+        hits = InterceptService.hitCount();
+        hitsText.setText(String.valueOf(hits));
+        setRunningUi(InterceptService.isRunning());
     }
 
     @Override protected void onStop() {
@@ -92,7 +95,7 @@ public class MainActivity extends Activity {
 
         TextView title = text("PakRedirect", 28, TEXT, true);
         root.addView(title);
-        TextView subtitle = text("轻量 HTTPS PAK 映射工具", 14, MUTED, false);
+        TextView subtitle = text("本地 HTTP PAK 直供工具", 14, MUTED, false);
         subtitle.setPadding(0, dp(2), 0, dp(18));
         root.addView(subtitle);
 
@@ -110,7 +113,7 @@ public class MainActivity extends Activity {
 
         LinearLayout config = card();
         config.addView(sectionTitle("拦截配置"));
-        TextView ulabel = text("目标 HTTPS URL", 13, MUTED, false);
+        TextView ulabel = text("远端 PAK URL（用于识别清单项目）", 13, MUTED, false);
         ulabel.setPadding(0, dp(12), 0, dp(6));
         config.addView(ulabel);
 
@@ -145,17 +148,23 @@ public class MainActivity extends Activity {
         LinearLayout actions = card();
         actions.addView(sectionTitle("控制"));
 
-        Button ca = button("安装系统 CA（Root）", Color.rgb(235,240,249), TEXT);
+        Button ca = button("兼容模式：安装系统 CA（Root）", Color.rgb(235,240,249), TEXT);
         ca.setOnClickListener(v -> installCa());
         LinearLayout.LayoutParams caLp = new LinearLayout.LayoutParams(-1, dp(48));
         caLp.topMargin = dp(12);
         actions.addView(ca, caLp);
 
-        startButton = button("启动拦截", PRIMARY, Color.WHITE);
-        startButton.setOnClickListener(v -> startIntercept());
+        startButton = button("启动本地直供（无需 Root / CA）", PRIMARY, Color.WHITE);
+        startButton.setOnClickListener(v -> startIntercept(InterceptService.MODE_LOCAL_HTTP));
         LinearLayout.LayoutParams startLp = new LinearLayout.LayoutParams(-1, dp(50));
         startLp.topMargin = dp(10);
         actions.addView(startButton, startLp);
+
+        legacyButton = button("启动旧版 HTTPS 拦截", Color.rgb(235,240,249), TEXT);
+        legacyButton.setOnClickListener(v -> startIntercept(InterceptService.MODE_LEGACY_TLS));
+        LinearLayout.LayoutParams legacyLp = new LinearLayout.LayoutParams(-1, dp(48));
+        legacyLp.topMargin = dp(10);
+        actions.addView(legacyButton, legacyLp);
 
         stopButton = button("停止并清理", Color.rgb(253,237,237), DANGER);
         stopButton.setOnClickListener(v -> stopIntercept());
@@ -187,7 +196,7 @@ public class MainActivity extends Activity {
         logCard.addView(statusText, logLp);
         root.addView(logCard, blockParams());
 
-        TextView note = text("启动后会动态返回 linkspak.txt，并按文件名把目录内同名 .pak 替换给游戏。需要 Root、可写 /system。", 12, MUTED, false);
+        TextView note = text("推荐使用本地直供：无需 Root、CA、hosts 或 iptables。修改版游戏的清单地址应指向 http://127.0.0.1:18480/linkspak.txt。", 12, MUTED, false);
         note.setPadding(dp(4), dp(4), dp(4), 0);
         root.addView(note);
 
@@ -235,6 +244,7 @@ public class MainActivity extends Activity {
 
     private void installCa() {
         appendStatus("正在安装系统 CA…");
+        Toast.makeText(this, "正在安装 CA，结果将显示在运行日志", Toast.LENGTH_SHORT).show();
         new Thread(() -> {
             try {
                 File f = new File(getFilesDir(), CA_HASH + ".0");
@@ -258,7 +268,7 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    private void startIntercept() {
+    private void startIntercept(String mode) {
         String url = urlEdit.getText().toString().trim();
         if (selectedDirectoryUri == null) { toast("请先选择 PAK 目录"); return; }
         try {
@@ -275,9 +285,13 @@ public class MainActivity extends Activity {
 
         Intent i = new Intent(this, InterceptService.class).setAction(InterceptService.ACTION_START)
                 .putExtra(InterceptService.EXTRA_URL, url)
-                .putExtra(InterceptService.EXTRA_DIRECTORY_URI, selectedDirectoryUri.toString());
+                .putExtra(InterceptService.EXTRA_DIRECTORY_URI, selectedDirectoryUri.toString())
+                .putExtra(InterceptService.EXTRA_MODE, mode);
         if (Build.VERSION.SDK_INT >= 26) startForegroundService(i); else startService(i);
-        appendStatus("正在启动拦截…");
+        appendStatus(InterceptService.MODE_LOCAL_HTTP.equals(mode)
+                ? "正在启动本地 HTTP 直供…"
+                : "正在启动旧版 HTTPS 拦截…");
+        Toast.makeText(this, "正在启动，请查看运行日志", Toast.LENGTH_SHORT).show();
     }
 
     private void requestNotificationPermission() {
@@ -297,6 +311,7 @@ public class MainActivity extends Activity {
         stateText.setText(running ? "运行中" : "未启动");
         stateText.setTextColor(running ? SUCCESS : TEXT);
         startButton.setEnabled(!running);
+        legacyButton.setEnabled(!running);
         stopButton.setEnabled(running);
     }
 

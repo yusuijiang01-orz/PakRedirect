@@ -12,6 +12,7 @@ import java.io.FileInputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetAddress;
+import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.URI;
 import java.net.URL;
@@ -23,8 +24,11 @@ import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.net.ssl.HostnameVerifier;
@@ -42,29 +46,47 @@ public final class ProxyServer {
     }
 
     public static final String DEFAULT_MANIFEST_URL = "https://cdn.tamgioipt.vn/linkspak.txt";
+    public static final String LOCAL_MANIFEST_PATH = "/linkspak.txt";
+    public static final String LOCAL_PAK_PREFIX = "/pak/";
 
     private final Context context;
     private final URI pakTarget;
     private final URI manifestTarget;
     private final Uri directoryUri;
     private final Listener listener;
+    private final boolean localHttpMode;
+    private final int localHttpPort;
     private final AtomicInteger hits = new AtomicInteger();
-    private final ExecutorService workers = Executors.newCachedThreadPool();
+    private final AtomicInteger rejectedConnections = new AtomicInteger();
+    // TLS sockets are relatively expensive on Android. An unbounded cached pool lets
+    // a client retry storm create hundreds of simultaneous handshakes and exhaust the
+    // app's ~192 MB heap. Keep both active work and queued sockets strictly bounded.
+    private final ExecutorService workers = new ThreadPoolExecutor(
+            4, 4, 30L, TimeUnit.SECONDS,
+            new ArrayBlockingQueue<>(24),
+            new ThreadPoolExecutor.AbortPolicy());
     private final Map<String, InetAddress[]> originAddresses = new HashMap<>();
     private final Map<String, PakEntry> pakEntries = new HashMap<>();
     private final Set<String> pakHosts = new LinkedHashSet<>();
 
     private volatile boolean running;
-    private SSLServerSocket server;
+    private ServerSocket server;
     private Thread acceptThread;
     private byte[] patchedManifest;
 
     public ProxyServer(Context context, String targetUrl, String manifestUrl, Uri directoryUri, Listener listener) {
+        this(context, targetUrl, manifestUrl, directoryUri, listener, false, 0);
+    }
+
+    public ProxyServer(Context context, String targetUrl, String manifestUrl, Uri directoryUri, Listener listener,
+                       boolean localHttpMode, int localHttpPort) {
         this.context = context.getApplicationContext();
         this.pakTarget = URI.create(targetUrl);
         this.manifestTarget = URI.create(manifestUrl);
         this.directoryUri = directoryUri;
         this.listener = listener;
+        this.localHttpMode = localHttpMode;
+        this.localHttpPort = localHttpPort;
     }
 
     /** Must run before /system/etc/hosts is redirected. */
@@ -74,7 +96,7 @@ public final class ProxyServer {
         pakEntries.putAll(index.all());
         if (pakEntries.isEmpty()) throw new IllegalStateException("所选目录内未发现 .pak 文件");
 
-        rememberOrigin(manifestTarget.getHost());
+        if (!localHttpMode) rememberOrigin(manifestTarget.getHost());
 
         String original;
         try {
@@ -87,7 +109,9 @@ public final class ProxyServer {
         PatchResult patched = patchManifest(original);
         if (patched.changed == 0) throw new IllegalStateException("linkspak.txt 中未匹配到本地 PAK 文件");
         if (pakHosts.isEmpty() && pakTarget.getHost() != null) pakHosts.add(pakTarget.getHost().toLowerCase(Locale.US));
-        for (String host : pakHosts) rememberOrigin(host);
+        if (!localHttpMode) {
+            for (String host : pakHosts) rememberOrigin(host);
+        }
         patchedManifest = patched.text.getBytes(StandardCharsets.UTF_8);
         log("linkspak.txt 已动态修正 " + patched.changed + " 个 PAK 大小；本地索引 " + pakEntries.size() + " 个");
     }
@@ -114,7 +138,7 @@ public final class ProxyServer {
         return hosts.toArray(new String[0]);
     }
 
-    public void start(int port) throws Exception {
+    public void startTls(int port) throws Exception {
         String manifestHost = manifestTarget.getHost();
         if (manifestHost == null || pakHosts.isEmpty()) throw new IllegalArgumentException("URL 缺少 Host");
         if (patchedManifest == null || pakEntries.isEmpty()) throw new IllegalStateException("尚未 prepare");
@@ -130,11 +154,22 @@ public final class ProxyServer {
         kmf.init(ks, new char[0]);
         SSLContext ssl = SSLContext.getInstance("TLS");
         ssl.init(kmf.getKeyManagers(), null, null);
-        server = (SSLServerSocket) ssl.getServerSocketFactory().createServerSocket(port, 50, InetAddress.getByName("127.0.0.1"));
+        server = (SSLServerSocket) ssl.getServerSocketFactory().createServerSocket(port, 16, InetAddress.getByName("127.0.0.1"));
         running = true;
         acceptThread = new Thread(this::acceptLoop, "PakRedirect-Accept");
         acceptThread.start();
         log("HTTPS 本地服务已监听 127.0.0.1:" + port);
+    }
+
+    public void startHttp(int port) throws Exception {
+        if (!localHttpMode) throw new IllegalStateException("当前实例不是本地 HTTP 模式");
+        if (patchedManifest == null || pakEntries.isEmpty()) throw new IllegalStateException("尚未 prepare");
+        server = new ServerSocket(port, 16, InetAddress.getByName("127.0.0.1"));
+        running = true;
+        acceptThread = new Thread(this::acceptLoop, "PakRedirect-Http-Accept");
+        acceptThread.start();
+        log("本地 HTTP 直供已监听 127.0.0.1:" + port);
+        log("客户端清单地址：http://127.0.0.1:" + port + LOCAL_MANIFEST_PATH);
     }
 
     public void stop() {
@@ -146,17 +181,25 @@ public final class ProxyServer {
     private void acceptLoop() {
         while (running) {
             try {
-                SSLSocket s = (SSLSocket) server.accept();
-                s.setSoTimeout(20000);
-                workers.execute(() -> handle(s));
+                Socket s = server.accept();
+                s.setSoTimeout(15000);
+                try {
+                    workers.execute(() -> handle(s));
+                } catch (RejectedExecutionException overloaded) {
+                    try { s.close(); } catch (Exception ignored) {}
+                    int rejected = rejectedConnections.incrementAndGet();
+                    if (rejected == 1 || rejected % 20 == 0) {
+                        log("连接过多，已丢弃重试连接 " + rejected + " 个");
+                    }
+                }
             } catch (Throwable t) {
                 if (running) log("accept 失败: " + t.getMessage());
             }
         }
     }
 
-    private void handle(SSLSocket socket) {
-        try (SSLSocket s = socket;
+    private void handle(Socket socket) {
+        try (Socket s = socket;
              BufferedInputStream in = new BufferedInputStream(s.getInputStream());
              BufferedOutputStream out = new BufferedOutputStream(s.getOutputStream())) {
             String headerText = readHeaders(in, 64 * 1024);
@@ -180,6 +223,27 @@ public final class ProxyServer {
             String path = requestPathOnly(requestTarget);
             String pakName = pakNameFromPath(path);
             PakEntry entry = pakEntries.get(pakName.toLowerCase(Locale.US));
+
+            if (localHttpMode) {
+                if (path.equals("/health")) {
+                    sendText(out, 200, "PakRedirect OK");
+                    return;
+                }
+                if (path.equals(LOCAL_MANIFEST_PATH)) {
+                    serveManifest(out, method.equals("HEAD"));
+                    log("本地 linkspak.txt 命中");
+                    return;
+                }
+                if (path.startsWith(LOCAL_PAK_PREFIX) && entry != null) {
+                    serveFile(out, entry, method.equals("HEAD"), h.get("range"));
+                    int n = hits.incrementAndGet();
+                    if (listener != null) listener.onHit(n);
+                    log("本地 PAK 命中 #" + n + ": " + entry.name + (h.get("range") == null ? "" : " | " + h.get("range")));
+                    return;
+                }
+                sendText(out, 404, "PakRedirect: local path not found");
+                return;
+            }
 
             if (pakHosts.contains(host.toLowerCase(Locale.US)) && entry != null) {
                 serveFile(out, entry, method.equals("HEAD"), h.get("range"));
@@ -365,6 +429,9 @@ public final class ProxyServer {
             URI uri = URI.create(fields[0].trim());
             if (uri.getHost() != null) pakHosts.add(uri.getHost().toLowerCase(Locale.US));
         } catch (Throwable ignored) {}
+        if (localHttpMode) {
+            fields[0] = leadingSpaces(fields[0]) + "http://127.0.0.1:" + localHttpPort + LOCAL_PAK_PREFIX + name + trailingSpaces(fields[0]);
+        }
         fields[3] = leadingSpaces(fields[3]) + entry.size + trailingSpaces(fields[3]);
         StringBuilder out = new StringBuilder(line.length() + 16);
         for (int i = 0; i < fields.length; i++) {
@@ -463,7 +530,7 @@ public final class ProxyServer {
 
     private static void sendText(OutputStream out, int code, String text) throws Exception {
         byte[] body = text.getBytes(StandardCharsets.UTF_8);
-        String reason = code == 400 ? "Bad Request" : code == 404 ? "Not Found" : code == 405 ? "Method Not Allowed" : "Error";
+        String reason = code == 200 ? "OK" : code == 400 ? "Bad Request" : code == 404 ? "Not Found" : code == 405 ? "Method Not Allowed" : "Error";
         String h = "HTTP/1.1 " + code + " " + reason + "\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: " + body.length + "\r\nConnection: close\r\n\r\n";
         out.write(h.getBytes(StandardCharsets.US_ASCII)); out.write(body); out.flush();
     }
