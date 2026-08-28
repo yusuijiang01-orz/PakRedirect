@@ -1,0 +1,12 @@
+latest_version ios 330-333 android 575-587 force_dl 1000
+download_url, https://tamgioipt.vn/tai-game-gia-lap,276,173694726
+https://cdn-tgpt.tepaylink.vn/production/updatefs.pak?ver=397,data/,updatefs.pak,37889276,0,397
+https://cdn-tgpt.tepaylink.vn/production/settings.pak?ver=2,data/,settings.pak,2195055,0,2
+https://cdn-tgpt.tepaylink.vn/production/ui.pak?ver=2,data/,ui.pak,415111,0,2
+https://cdn-tgpt.tepaylink.vn/production/resource.pak?ver=1,data/,resource.pak,50178358,0,1
+https://cdn-tgpt.tepaylink.vn/production/spr.pak?ver=1,data/,spr.pak,1426869634,0,1
+https://cdn-tgpt.tepaylink.vn/production/script.pak?ver=1,data/,script.pak,5978344,0,1
+https://cdn-tgpt.tepaylink.vn/production/fs2008.pak?ver=1,data/,fs2008.pak,112577483,0,1
+https://cdn-tgpt.tepaylink.vn/production/maps.pak?ver=1,data/,maps.pak,72912899,0,1
+https://cdn-tgpt.tepaylink.vn/production/update.pak?ver=1,data/,update.pak,18674365,0,1
+https://cdn-tgpt.tepaylink.vn/production/blaze.pak?ver=1,data/,blaze.pak,124242410,0,1
