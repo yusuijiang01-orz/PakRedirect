@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>PakRedirect 管理后台</title>
+  <link rel="stylesheet" href="/admin/assets/styles.css">
+</head>
+<body>
+  <main class="login-shell">
+    <section class="login-card">
+      <div class="brand-row">
+        <div class="brand-mark">PR</div>
+        <div>
+          <h1>PakRedirect</h1>
+          <div class="muted">授权与卡密管理中心</div>
+        </div>
+      </div>
+      <div id="error" class="alert alert-error hidden"></div>
+      <form id="loginForm">
+        <div class="form-group">
+          <label>管理员账号</label>
+          <input class="input" name="username" autocomplete="username" required>
+        </div>
+        <div class="form-group">
+          <label>管理员密码</label>
+          <input class="input" name="password" type="password" autocomplete="current-password" required>
+        </div>
+        <button class="btn btn-primary" style="width:100%" type="submit">登录后台</button>
+      </form>
+      <p class="muted" style="margin:18px 0 0;font-size:12px">首次部署默认账号：admin。登录后会要求立即修改密码。</p>
+    </section>
+  </main>
+  <script src="/admin/assets/login.js"></script>
+</body>
+</html>
