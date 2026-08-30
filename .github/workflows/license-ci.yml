@@ -1,9 +1,9 @@
 name: License branch build check
 
 on:
-  push:
+  pull_request:
     branches:
-      - feature/license-gated-localization
+      - main
 
 jobs:
   build:
