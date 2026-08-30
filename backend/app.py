@@ -121,7 +121,10 @@ def verify_license(payload: VerifyRequest, request: Request):
                 "message": "卡密已到期",
             }
 
-        client_ip = request.client.host if request.client else ""
+        client_ip = request.headers.get("x-real-ip")
+        if not client_ip:
+            client_ip = request.client.host if request.client else ""
+
         now_text = utc_now().isoformat().replace("+00:00", "Z")
         db.execute(
             """
