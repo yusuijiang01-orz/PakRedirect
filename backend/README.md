@@ -11,15 +11,27 @@
 
 客户端当前验证地址：
 
-`https://38.47.107.59/api/v1/license/verify`
+`https://verify.lovenom.eu.org/api/v1/license/verify`
 
-## 1. 安装后端
+## 1. DNS 前置条件
+
+先确保域名：
+
+`verify.lovenom.eu.org`
+
+的 A 记录指向 VPS：
+
+`38.47.107.59`
+
+并确保公网 TCP 80、443 端口可访问。Let's Encrypt HTTP-01 验证需要 80 端口。
+
+## 2. 安装后端
 
 在 VPS 上执行：
 
 ```bash
 apt update
-apt install -y python3 python3-venv nginx curl ca-certificates
+apt install -y python3 python3-venv nginx curl ca-certificates certbot
 useradd --system --home /opt/pakredirect-license --shell /usr/sbin/nologin paklicense 2>/dev/null || true
 
 mkdir -p /opt/pakredirect-license/data
@@ -45,30 +57,22 @@ curl http://127.0.0.1:18888/healthz
 {"ok":true}
 ```
 
-## 2. HTTPS：为公网 IP 申请 Let’s Encrypt IP 证书
+## 3. 为 verify.lovenom.eu.org 申请 Let's Encrypt SSL 证书
 
-Let’s Encrypt 已支持公网 IP 证书。IP 证书属于短期证书，因此必须确保自动续期正常。
-
-先确认 Certbot 版本支持 `--ip-address` 与 WebRoot。建议使用 Certbot 5.4 或更高版本：
-
-```bash
-certbot --version
-```
-
-准备 ACME WebRoot：
+先准备 ACME WebRoot：
 
 ```bash
 mkdir -p /var/www/certbot
 ```
 
-在证书还不存在时，先临时启用只监听 80 端口的 ACME 配置：
+证书尚未存在时，不要直接启用正式 HTTPS 配置，因为 Nginx 会找不到证书文件。先创建临时 HTTP 配置：
 
 ```bash
 cat >/etc/nginx/sites-available/pakredirect-license-bootstrap <<'EOF'
 server {
     listen 80;
     listen [::]:80;
-    server_name 38.47.107.59;
+    server_name verify.lovenom.eu.org;
 
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;
@@ -86,40 +90,65 @@ nginx -t
 systemctl reload nginx
 ```
 
-申请证书：
+确认域名已经能访问到这台 VPS 后申请证书：
 
 ```bash
 certbot certonly \
-  --preferred-profile shortlived \
   --webroot \
   --webroot-path /var/www/certbot \
-  --ip-address 38.47.107.59
+  -d verify.lovenom.eu.org
 ```
 
-证书成功后切换到正式 HTTPS 配置：
+申请成功后，证书应位于：
+
+```text
+/etc/letsencrypt/live/verify.lovenom.eu.org/fullchain.pem
+/etc/letsencrypt/live/verify.lovenom.eu.org/privkey.pem
+```
+
+然后切换到仓库内的正式 HTTPS 配置：
 
 ```bash
 rm -f /etc/nginx/sites-enabled/pakredirect-license-bootstrap
 cp nginx-pakredirect-license.conf /etc/nginx/sites-available/pakredirect-license
-ln -sf /etc/nginx/sites-available/pakredirect-license /etc/nginx/sites-enabled/pakredirect-license
+ln -sf /etc/nginx/sites-available/pakredirect-license \
+  /etc/nginx/sites-enabled/pakredirect-license
 nginx -t
 systemctl reload nginx
 ```
 
-因为最初使用的是 WebRoot 验证，后续自动续期仍可在 Nginx 运行时完成。确认续期：
+确认自动续期：
 
 ```bash
+systemctl enable --now certbot.timer 2>/dev/null || true
 systemctl status certbot.timer || true
 certbot renew --dry-run
 ```
 
-验证：
+验证 HTTPS：
 
 ```bash
-curl https://38.47.107.59/healthz
+curl -i https://verify.lovenom.eu.org/healthz
 ```
 
-## 3. 创建卡密
+应看到 HTTP 200 和：
+
+```json
+{"ok":true}
+```
+
+再验证卡密接口连通性：
+
+```bash
+curl -i \
+  -H 'Content-Type: application/json' \
+  -d '{"license_key":"INVALID-TEST-KEY"}' \
+  https://verify.lovenom.eu.org/api/v1/license/verify
+```
+
+只要 TLS 正常、接口返回 JSON，即说明 Android 客户端能够连接验证服务。
+
+## 4. 创建卡密
 
 进入后端目录：
 
@@ -169,7 +198,7 @@ sudo -u paklicense \
   ./.venv/bin/python manage.py extend "PR-XXXX-XXXX-XXXX-XXXX-XXXX" --days 30
 ```
 
-## 4. 客户端行为
+## 5. 客户端行为
 
 未登录时：
 
@@ -184,7 +213,7 @@ sudo -u paklicense \
 
 点击 `开启汉化` 后：
 
-1. 再次联网验证卡密。
+1. 再次通过 `https://verify.lovenom.eu.org` 联网验证卡密。
 2. 验证通过后读取 APK 内置的所有 `.pak`。
 3. 先关闭目标游戏进程。
 4. 使用 Root 覆盖目标目录中同名的原始 PAK 文件：
@@ -197,4 +226,4 @@ sudo -u paklicense \
 
 ## 安全注意
 
-不要把 VPS root 密码、数据库文件、完整卡密或任何私钥提交到 GitHub。公网验证必须使用 HTTPS，不建议改成明文 HTTP。
+不要把 VPS root 密码、数据库文件、完整卡密或任何私钥提交到 GitHub。Let's Encrypt 私钥只保存在 VPS 的 `/etc/letsencrypt/` 中。公网验证必须使用 HTTPS。
