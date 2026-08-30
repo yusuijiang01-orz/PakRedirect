@@ -14,6 +14,14 @@ android {
         versionName '1.2.0'
     }
 
+    sourceSets {
+        main {
+            // Only package the localization payload from the repository-level pak directory.
+            // The previous interception/CA assets are intentionally no longer bundled.
+            assets.srcDirs = ['../pak']
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled true
