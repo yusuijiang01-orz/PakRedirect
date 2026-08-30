@@ -1,0 +1,57 @@
+name: Admin backend build check
+
+on:
+  push:
+    branches:
+      - feature/admin-web-console
+
+jobs:
+  backend-smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: python -m pip install -r backend/requirements.txt
+
+      - name: Syntax check
+        run: python -m py_compile backend/app.py backend/admin_console.py backend/manage.py
+
+      - name: Admin smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd backend
+          export PAKREDIRECT_LICENSE_DB="$RUNNER_TEMP/licenses.db"
+          export PAKREDIRECT_ADMIN_USER="admin"
+          export PAKREDIRECT_ADMIN_PASSWORD_HASH="$(python manage.py admin-hash --password 'TestPassword123!')"
+          export PAKREDIRECT_ADMIN_SESSION_SECRET="$(python manage.py session-secret)"
+          python - <<'PY'
+          import app
+          import admin_console as admin
+
+          app.init_db()
+          assert admin.configured()
+          assert admin.verify_password('TestPassword123!')
+          assert not admin.verify_password('wrong-password')
+          token = admin.new_session()
+          assert admin.session_user(token) == 'admin'
+          assert len(admin.csrf(token)) == 64
+
+          keys = admin.create_licenses(7, 3, 'ci')
+          assert len(keys) == 3
+          rows, stats = admin.load_rows(keys[0], '')
+          assert len(rows) == 1
+          assert stats['total'] == 3
+          response = admin.dashboard(token)
+          text = response.body.decode('utf-8')
+          assert '/admin/license/create' in text
+          assert '批量' not in text or '生成数量' in text
+          print('admin smoke ok')
+          PY
