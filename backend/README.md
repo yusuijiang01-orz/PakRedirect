@@ -9,10 +9,26 @@
 - 管理员密码使用 PBKDF2-SHA256 哈希保存
 - 管理会话使用 HMAC 签名、Secure + HttpOnly Cookie，并对写操作做 CSRF 校验
 - Nginx 对卡密验证和后台登录分别限流
+- 管理前端与后端 API 分离：`admin_web/` + `admin_v2.py`
+
+## License Console v2
+
+新版管理后台参考成熟卡密系统的后台信息架构，但保持 PakRedirect 自己的技术栈和安全边界，不引入 PHP 或新的数据库。
+
+主要页面：
+
+- 数据概览：全部、有效、到期、禁用、今日验证和最近验证记录；
+- 卡密管理：搜索、筛选、分页、批量生成、禁用 / 启用、续期、CSV 导出；
+- 操作日志：管理员登录、生成、禁用、启用、续期、改密等记录；
+- 系统设置：直接在网页中修改管理员账号和密码。
+
+一次最多可批量生成 1000 张卡密，支持 1 / 7 / 30 / 90 / 180 / 360 天预设。
+
+完整卡密只在生成成功结果中显示一次，可以直接复制或下载 TXT；数据库仍只保存 SHA-256 哈希，历史列表只显示最后 6 位提示。粘贴完整卡密搜索时，服务端会对输入做 SHA-256 后精确匹配。
 
 ## 默认后台账号
 
-首次部署或升级到新版后，后台会自动初始化管理员配置，不再需要手工生成哈希或编辑环境变量。
+首次部署时，后台自动初始化管理员配置，不需要手工生成哈希或编辑环境变量。
 
 默认登录：
 
@@ -21,14 +37,14 @@
 密码：PakRedirect@2026!
 ```
 
-首次登录成功后会强制进入“修改管理员账号和密码”页面。在完成修改之前，不能创建、禁用、启用或续期卡密。
+首次登录成功后会强制进入“系统设置”，在完成修改之前不能使用卡密管理功能。
 
 修改完成后：
 
 - 默认密码立即失效；
 - 新管理员账号和密码哈希保存在 SQLite 数据库的 `admin_settings` 表；
 - 会话密钥同时轮换，之前的管理 Cookie 自动失效；
-- 后续可以在后台右上角点击“修改账号/密码”再次修改，不需要 SSH 命令。
+- 后续可直接在网页“系统设置”中再次修改，不需要 SSH 命令。
 
 > 默认密码是公开的临时引导密码。部署新版后应立即登录后台完成修改。
 
@@ -43,7 +59,9 @@ rm -rf /tmp/PakRedirect-admin
 git clone --depth 1 https://github.com/yusuijiang01-orz/PakRedirect.git /tmp/PakRedirect-admin
 
 cp /tmp/PakRedirect-admin/backend/app.py /opt/pakredirect-license/
-cp /tmp/PakRedirect-admin/backend/admin_console.py /opt/pakredirect-license/
+cp /tmp/PakRedirect-admin/backend/admin_v2.py /opt/pakredirect-license/
+rm -rf /opt/pakredirect-license/admin_web
+cp -a /tmp/PakRedirect-admin/backend/admin_web /opt/pakredirect-license/
 cp /tmp/PakRedirect-admin/backend/manage.py /opt/pakredirect-license/
 cp /tmp/PakRedirect-admin/backend/requirements.txt /opt/pakredirect-license/
 cp /tmp/PakRedirect-admin/backend/pakredirect-license.service /etc/systemd/system/pakredirect-license.service
@@ -79,15 +97,16 @@ https://verify.lovenom.eu.org/admin
 后台支持：
 
 - 一键创建 1 / 7 / 30 / 90 / 180 / 360 天卡；
-- 批量生成，一次最多 200 张；
+- 批量生成，一次最多 1000 张；
 - 查看到期时间和当前状态；
 - 按完整卡密、最后 6 位、标签或最后登录 IP 搜索；
+- 状态筛选和分页；
 - 禁用 / 重新启用；
 - 续期 1 / 7 / 30 / 90 / 180 / 360 天；
 - 查看最后验证时间和最后登录 IP；
+- 导出当前筛选结果为 CSV；
+- 查看管理员操作日志；
 - 页面内修改管理员账号和密码。
-
-完整卡密只会在创建成功时显示一次。历史列表只显示最后 6 位提示；如果粘贴完整卡密搜索，服务端会对输入做 SHA-256 后精确匹配。
 
 ## 首次从零安装
 
@@ -101,7 +120,8 @@ useradd --system \
   paklicense 2>/dev/null || true
 
 mkdir -p /opt/pakredirect-license/data
-cp app.py admin_console.py manage.py requirements.txt /opt/pakredirect-license/
+cp app.py admin_v2.py manage.py requirements.txt /opt/pakredirect-license/
+cp -a admin_web /opt/pakredirect-license/
 
 python3 -m venv /opt/pakredirect-license/.venv
 /opt/pakredirect-license/.venv/bin/pip install --upgrade pip
