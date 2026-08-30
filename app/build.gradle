@@ -16,10 +16,15 @@ android {
 
     sourceSets {
         main {
-            // Only package the localization payload from the repository-level pak directory.
-            // The previous interception/CA assets are intentionally no longer bundled.
+            // Bundle linkspak.txt and the localization PAK payload directly into the APK.
             assets.srcDirs = ['../pak']
         }
+    }
+
+    // Keep PAK assets stored without ZIP compression so their exact lengths are
+    // available through AssetFileDescriptor and Range responses can be served efficiently.
+    androidResources {
+        noCompress += ['pak']
     }
 
     buildTypes {

@@ -17,20 +17,14 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
 
 public class MainActivity extends Activity {
     private static final String TARGET_PACKAGE = "com.tepaylink.tamgioiphantranhmobile";
-    private static final String TARGET_DATA_DIR =
-            "/data/data/com.tepaylink.tamgioiphantranhmobile/files/data";
 
     private static final int BG = Color.rgb(246, 247, 249);
     private static final int CARD = Color.WHITE;
@@ -124,8 +118,7 @@ public class MainActivity extends Activity {
                 setLoginBusy(false);
 
                 if (!result.requestOk) {
-                    if (!autoLogin) toast(result.message);
-                    else toast("网络验证失败，请检查网络后重试");
+                    toast(autoLogin ? "网络验证失败，请检查网络后重试" : result.message);
                     return;
                 }
 
@@ -151,7 +144,7 @@ public class MainActivity extends Activity {
                 currentLicenseKey = key;
                 showAuthorizedUi(result.expiresAt);
             });
-        }).start();
+        }, "PakRedirect-License-Login").start();
     }
 
     private void showAuthorizedUi(String expiresAt) {
@@ -186,11 +179,7 @@ public class MainActivity extends Activity {
             LicenseClient.VerifyResult result = LicenseClient.verify(currentLicenseKey);
 
             if (!result.requestOk) {
-                runOnUiThread(() -> {
-                    activateButton.setEnabled(true);
-                    activateButton.setText("开启汉化");
-                    toast("网络验证失败，未执行汉化");
-                });
+                resetActivateButton(activateButton, "网络验证失败，未开启汉化");
                 return;
             }
 
@@ -203,115 +192,66 @@ public class MainActivity extends Activity {
                 return;
             }
 
-            runOnUiThread(() -> activateButton.setText("正在替换 PAK…"));
+            if (getPackageManager().getLaunchIntentForPackage(TARGET_PACKAGE) == null) {
+                resetActivateButton(activateButton, "未检测到目标游戏");
+                return;
+            }
 
-            String error = replaceBundledPakFiles();
-            if (error != null) {
-                runOnUiThread(() -> {
-                    activateButton.setEnabled(true);
-                    activateButton.setText("开启汉化");
-                    toast(error);
-                });
+            runOnUiThread(() -> activateButton.setText("正在启动本地汉化…"));
+
+            try {
+                Intent service = new Intent(this, InterceptService.class)
+                        .setAction(InterceptService.ACTION_START);
+                if (Build.VERSION.SDK_INT >= 26) startForegroundService(service);
+                else startService(service);
+            } catch (Throwable t) {
+                resetActivateButton(activateButton, "本地汉化服务启动失败：" + safeMessage(t));
+                return;
+            }
+
+            if (!waitForLocalServer()) {
+                resetActivateButton(activateButton, "本地汉化服务启动失败");
                 return;
             }
 
             runOnUiThread(() -> {
                 activateButton.setEnabled(true);
                 activateButton.setText("开启汉化");
-                if (!launchGame()) {
-                    toast("PAK 已替换，但未找到游戏启动入口");
-                }
+                if (!launchGame()) toast("本地汉化已启动，但未找到游戏启动入口");
             });
-        }).start();
+        }, "PakRedirect-Activate").start();
     }
 
-    private String replaceBundledPakFiles() {
-        try {
-            Intent launchIntent = getPackageManager().getLaunchIntentForPackage(TARGET_PACKAGE);
-            if (launchIntent == null) {
-                return "未检测到目标游戏";
+    private boolean waitForLocalServer() {
+        for (int i = 0; i < 30; i++) {
+            HttpURLConnection connection = null;
+            try {
+                URL url = new URL("http://127.0.0.1:" + InterceptService.LOCAL_HTTP_PORT + "/health");
+                connection = (HttpURLConnection) url.openConnection();
+                connection.setConnectTimeout(500);
+                connection.setReadTimeout(500);
+                connection.setUseCaches(false);
+                if (connection.getResponseCode() == 200) return true;
+            } catch (Throwable ignored) {
+            } finally {
+                if (connection != null) connection.disconnect();
             }
-
-            String[] assetNames = getAssets().list("");
-            if (assetNames == null) return "未找到内置 PAK 文件";
-
-            List<String> pakNames = new ArrayList<>();
-            for (String name : assetNames) {
-                if (name != null && name.toLowerCase().endsWith(".pak")) {
-                    pakNames.add(name);
-                }
+            try {
+                Thread.sleep(200);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
             }
-            Collections.sort(pakNames);
-            if (pakNames.isEmpty()) return "未找到内置 PAK 文件";
-
-            File payloadDir = new File(getCacheDir(), "pak-payload");
-            if (!payloadDir.exists() && !payloadDir.mkdirs()) {
-                return "无法准备临时文件";
-            }
-
-            List<File> extracted = new ArrayList<>();
-            for (String name : pakNames) {
-                File outFile = new File(payloadDir, name);
-                try (InputStream in = getAssets().open(name);
-                     FileOutputStream out = new FileOutputStream(outFile, false)) {
-                    byte[] buffer = new byte[1024 * 64];
-                    int n;
-                    while ((n = in.read(buffer)) >= 0) {
-                        out.write(buffer, 0, n);
-                    }
-                    out.flush();
-                }
-                extracted.add(outFile);
-            }
-
-            StringBuilder command = new StringBuilder();
-            command.append("set -e; ");
-            command.append("TARGET=").append(shellQuote(TARGET_DATA_DIR)).append("; ");
-            command.append("[ -d \"$TARGET\" ] || { echo 'target data dir missing'; exit 20; }; ");
-            command.append("am force-stop ").append(shellQuote(TARGET_PACKAGE)).append(" >/dev/null 2>&1 || true; ");
-
-            for (int i = 0; i < pakNames.size(); i++) {
-                String name = pakNames.get(i);
-                File src = extracted.get(i);
-                String targetPath = TARGET_DATA_DIR + "/" + name;
-
-                command.append("[ -f ")
-                        .append(shellQuote(targetPath))
-                        .append(" ] || { echo ")
-                        .append(shellQuote("missing target: " + name))
-                        .append("; exit 21; }; ");
-
-                // Copy onto the existing destination file so its game-data metadata is preserved.
-                command.append("cp ")
-                        .append(shellQuote(src.getAbsolutePath()))
-                        .append(" ")
-                        .append(shellQuote(targetPath))
-                        .append("; ");
-
-                command.append("[ \"$(wc -c < ")
-                        .append(shellQuote(src.getAbsolutePath()))
-                        .append(")\" = \"$(wc -c < ")
-                        .append(shellQuote(targetPath))
-                        .append(")\" ] || { echo ")
-                        .append(shellQuote("size verify failed: " + name))
-                        .append("; exit 22; }; ");
-            }
-
-            command.append("sync; echo OK");
-            RootShell.Result rootResult = RootShell.run(command.toString());
-            if (!rootResult.ok()) {
-                if (rootResult.output.contains("target data dir missing")) {
-                    return "目标游戏数据目录不存在";
-                }
-                if (rootResult.output.contains("missing target:")) {
-                    return "目标目录中的原 PAK 文件不完整";
-                }
-                return "替换失败，请确认已授予 Root 权限";
-            }
-            return null;
-        } catch (Throwable t) {
-            return "替换失败：" + safeMessage(t);
         }
+        return false;
+    }
+
+    private void resetActivateButton(Button button, String message) {
+        runOnUiThread(() -> {
+            button.setEnabled(true);
+            button.setText("开启汉化");
+            toast(message);
+        });
     }
 
     private boolean launchGame() {
@@ -410,8 +350,7 @@ public class MainActivity extends Activity {
 
     private String safeMessage(Throwable t) {
         String msg = t.getMessage();
-        if (msg == null || msg.trim().isEmpty()) return t.getClass().getSimpleName();
-        return msg;
+        return msg == null || msg.trim().isEmpty() ? t.getClass().getSimpleName() : msg;
     }
 
     private void toast(String value) {
@@ -420,9 +359,5 @@ public class MainActivity extends Activity {
 
     private int dp(int value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
-    }
-
-    private static String shellQuote(String value) {
-        return "'" + value.replace("'", "'\\''") + "'";
     }
 }
