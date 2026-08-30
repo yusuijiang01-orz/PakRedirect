@@ -12,7 +12,7 @@ import java.nio.charset.StandardCharsets;
 
 public final class LicenseClient {
     private static final String VERIFY_URL =
-            "https://38.47.107.59/api/v1/license/verify";
+            "https://verify.lovenom.eu.org/api/v1/license/verify";
 
     private LicenseClient() {}
 
