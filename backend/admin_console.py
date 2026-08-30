@@ -14,13 +14,14 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 DB_PATH = Path(os.environ.get("PAKREDIRECT_LICENSE_DB", "./data/licenses.db")).resolve()
-ADMIN_USER = os.environ.get("PAKREDIRECT_ADMIN_USER", "").strip()
-ADMIN_PASSWORD_HASH = os.environ.get("PAKREDIRECT_ADMIN_PASSWORD_HASH", "").strip()
-ADMIN_SESSION_SECRET = os.environ.get("PAKREDIRECT_ADMIN_SESSION_SECRET", "").strip().encode("utf-8")
 COOKIE = "pakredirect_admin"
 SESSION_SECONDS = 8 * 60 * 60
 MAX_BATCH = 200
 PRESETS = (1, 7, 30, 90, 180, 360)
+PBKDF2_ITERATIONS = 310_000
+DEFAULT_ADMIN_USER = "admin"
+# Hash for the temporary first-login password: PakRedirect@2026!
+DEFAULT_ADMIN_PASSWORD_HASH = "pbkdf2_sha256$310000$UGFrUmVkaXJlY3RCb290c3RyYXA$ir6hc4X3vpfLe1L9df89hGhcTbVnbcCQWrksMxcv248"
 router = APIRouter()
 
 
@@ -63,11 +64,49 @@ def init_admin_indexes():
     with open_db() as db:
         db.execute("CREATE INDEX IF NOT EXISTS idx_licenses_key_hint ON licenses(key_hint)")
         db.execute("CREATE INDEX IF NOT EXISTS idx_licenses_last_seen_ip ON licenses(last_seen_ip)")
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS admin_settings (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                username TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                must_change_password INTEGER NOT NULL DEFAULT 1,
+                session_secret TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        row = db.execute("SELECT id FROM admin_settings WHERE id=1").fetchone()
+        if row is None:
+            db.execute(
+                """
+                INSERT INTO admin_settings
+                    (id, username, password_hash, must_change_password, session_secret, updated_at)
+                VALUES (1, ?, ?, 1, ?, ?)
+                """,
+                (
+                    DEFAULT_ADMIN_USER,
+                    DEFAULT_ADMIN_PASSWORD_HASH,
+                    secrets.token_urlsafe(48),
+                    iso(utc_now()),
+                ),
+            )
         db.commit()
 
 
+def admin_config():
+    with open_db() as db:
+        return db.execute(
+            "SELECT username,password_hash,must_change_password,session_secret,updated_at FROM admin_settings WHERE id=1"
+        ).fetchone()
+
+
 def configured():
-    return bool(ADMIN_USER and ADMIN_PASSWORD_HASH and len(ADMIN_SESSION_SECRET) >= 32)
+    try:
+        row = admin_config()
+        return bool(row and row["username"] and row["password_hash"] and len(row["session_secret"] or "") >= 32)
+    except sqlite3.OperationalError:
+        return False
 
 
 def b64e(value):
@@ -79,9 +118,17 @@ def b64d(value):
     return base64.urlsafe_b64decode(value.encode())
 
 
-def verify_password(password):
+def make_password_hash(password):
+    if len(password) < 10:
+        raise ValueError("新密码至少 10 个字符")
+    salt = secrets.token_bytes(18)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, PBKDF2_ITERATIONS)
+    return f"pbkdf2_sha256${PBKDF2_ITERATIONS}${b64e(salt)}${b64e(digest)}"
+
+
+def verify_hash(encoded, password):
     try:
-        scheme, iterations_text, salt_text, digest_text = ADMIN_PASSWORD_HASH.split("$", 3)
+        scheme, iterations_text, salt_text, digest_text = encoded.split("$", 3)
         iterations = int(iterations_text)
         if scheme != "pbkdf2_sha256" or not 100000 <= iterations <= 2000000:
             return False
@@ -92,31 +139,50 @@ def verify_password(password):
         return False
 
 
+def verify_password(password):
+    row = admin_config()
+    return bool(row and verify_hash(row["password_hash"], password))
+
+
 def new_session():
+    row = admin_config()
+    if not row:
+        raise RuntimeError("管理员配置不存在")
     expires = int(time.time()) + SESSION_SECONDS
-    payload = b64e(f"{ADMIN_USER}|{expires}|{secrets.token_hex(12)}".encode())
-    sig = b64e(hmac.new(ADMIN_SESSION_SECRET, payload.encode(), hashlib.sha256).digest())
+    payload = b64e(f"{row['username']}|{expires}|{secrets.token_hex(12)}".encode())
+    sig = b64e(hmac.new(row["session_secret"].encode(), payload.encode(), hashlib.sha256).digest())
     return payload + "." + sig
 
 
 def session_user(token):
-    if not token or not configured():
+    if not token:
+        return None
+    row = admin_config()
+    if not row:
         return None
     try:
         payload, sig = token.split(".", 1)
-        expected = hmac.new(ADMIN_SESSION_SECRET, payload.encode(), hashlib.sha256).digest()
+        expected = hmac.new(row["session_secret"].encode(), payload.encode(), hashlib.sha256).digest()
         if not hmac.compare_digest(expected, b64d(sig)):
             return None
         username, expires, _nonce = b64d(payload).decode().split("|", 2)
-        if username != ADMIN_USER or int(expires) < int(time.time()):
+        if username != row["username"] or int(expires) < int(time.time()):
             return None
         return username
     except Exception:
         return None
 
 
+def must_change_password():
+    row = admin_config()
+    return bool(row and int(row["must_change_password"]) == 1)
+
+
 def csrf(token):
-    return hmac.new(ADMIN_SESSION_SECRET, ("csrf|" + token).encode(), hashlib.sha256).hexdigest()
+    row = admin_config()
+    if not row:
+        return ""
+    return hmac.new(row["session_secret"].encode(), ("csrf|" + token).encode(), hashlib.sha256).hexdigest()
 
 
 async def form_data(request):
@@ -137,12 +203,12 @@ STYLE = """<style>
 .w{max-width:1180px;margin:auto;padding:24px}.top,.row,.acts,.quick{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.top{justify-content:space-between}
 .p{background:var(--p);border:1px solid var(--l);border-radius:14px;padding:18px;margin:16px 0}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
 .s{border:1px solid var(--l);border-radius:10px;padding:12px}.s b{display:block;font-size:24px}.m{color:var(--m)}input,select{height:40px;border:1px solid #d1d5db;border-radius:8px;padding:0 10px}
-input{min-width:180px}button{height:38px;border:0;border-radius:8px;padding:0 13px;background:var(--b);color:#fff;font-weight:600;cursor:pointer}
+input{min-width:180px}button,.btn{display:inline-flex;align-items:center;justify-content:center;height:38px;border:0;border-radius:8px;padding:0 13px;background:var(--b);color:#fff;font-weight:600;cursor:pointer;text-decoration:none;font-size:13px}
 .sec{background:#eef2ff;color:#1e40af}.bad{background:#fee2e2;color:#991b1b}.good{background:#dcfce7;color:#166534}
 table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:10px 7px;border-bottom:1px solid var(--l);text-align:left;vertical-align:middle}
 th{color:var(--m)}.badge{padding:3px 7px;border-radius:999px;font-size:12px;font-weight:600}.ok{background:#dcfce7;color:#166534}.off{background:#fee2e2;color:#991b1b}.exp{background:#fef3c7;color:#92400e}
 .acts form{display:flex;gap:5px}.acts select,.acts button{height:31px;font-size:12px}.created{background:#ecfdf5}.created textarea{width:100%;height:150px}
-.notice{padding:10px;border-radius:8px;background:#fff7ed;color:#9a3412}.login{max-width:420px;margin:80px auto}.login input,.login button{width:100%;margin-top:8px}
+.notice{padding:10px;border-radius:8px;background:#fff7ed;color:#9a3412}.login{max-width:440px;margin:80px auto}.login input,.login button{width:100%;margin-top:8px}
 .search{display:grid;grid-template-columns:1fr 150px auto;gap:8px}.search input{width:100%}label{font-size:13px;color:var(--m)}
 @media(max-width:850px){.grid{grid-template-columns:repeat(2,1fr)}.search{grid-template-columns:1fr}.w{padding:12px}table{display:block;overflow-x:auto;white-space:nowrap}}
 </style>"""
@@ -163,15 +229,14 @@ def page(title, body, status=200):
 
 
 def login_page(error="", status=200):
-    cfg = configured()
-    note = "" if cfg else "<div class='notice'>后台未配置，请先设置管理员环境变量。</div>"
     err = f"<p style='color:#b91c1c'>{esc(error)}</p>" if error else ""
+    first = "<div class='notice'>首次登录请使用默认账号 admin。登录后会强制修改密码。</div>" if must_change_password() else ""
     return page("PakRedirect 管理后台", f"""
-    <div class='w login'><div class='p'><h1>PakRedirect</h1><p class='m'>卡密管理后台</p>{note}
+    <div class='w login'><div class='p'><h1>PakRedirect</h1><p class='m'>卡密管理后台</p>{first}
     <form method='post' action='/admin/login'>
     <label>管理员账号</label><input name='username' autocomplete='username' required>
     <label>管理员密码</label><input name='password' type='password' autocomplete='current-password' required>
-    <button {'disabled' if not cfg else ''}>登录</button></form>{err}</div></div>""", status)
+    <button>登录</button></form>{err}</div></div>""", status)
 
 
 def auth(request):
@@ -259,7 +324,8 @@ def dashboard(token, query="", state="", created=None, message=""):
     options = "".join(f"<option value='{v}' {'selected' if state==v else ''}>{label}</option>" for v, label in states)
     return page("PakRedirect 卡密管理", f"""
     <div class='w'><div class='top'><div><h1>PakRedirect 卡密管理</h1><div class='m'>verify.lovenom.eu.org/admin</div></div>
-    <form method='post' action='/admin/logout'><input type='hidden' name='csrf' value='{c}'><button class='sec'>退出登录</button></form></div>
+    <div class='row'><a class='btn sec' href='/admin/change-password'>修改账号/密码</a>
+    <form method='post' action='/admin/logout'><input type='hidden' name='csrf' value='{c}'><button class='sec'>退出登录</button></form></div></div>
     {msg}{created_html}
     <div class='p grid'><div class='s'><span class='m'>全部</span><b>{stats['total']}</b></div><div class='s'><span class='m'>有效</span><b>{stats['active']}</b></div>
     <div class='s'><span class='m'>禁用</span><b>{stats['disabled']}</b></div><div class='s'><span class='m'>到期</span><b>{stats['expired']}</b></div></div>
@@ -272,6 +338,26 @@ def dashboard(token, query="", state="", created=None, message=""):
     <div class='p' style='overflow:hidden'><table><thead><tr><th>ID</th><th>卡密</th><th>标签</th><th>状态</th><th>到期时间</th><th>最后登录</th><th>最后 IP</th><th>操作</th></tr></thead>
     <tbody>{''.join(tr)}</tbody></table></div></div>
     <script>document.querySelectorAll('.lt').forEach(function(x){{var v=x.dataset.v;if(!v)return;var d=new Date(v);if(!isNaN(d))x.textContent=d.toLocaleString('zh-CN',{{hour12:false}})}})</script>""")
+
+
+def change_password_page(token, error="", message=""):
+    row = admin_config()
+    c = csrf(token)
+    forced = must_change_password()
+    title = "首次登录：请修改管理员账号和密码" if forced else "修改管理员账号和密码"
+    note = "<div class='notice'>默认密码仅用于首次登录。完成修改后默认密码立即失效。</div>" if forced else ""
+    err = f"<p style='color:#b91c1c'>{esc(error)}</p>" if error else ""
+    msg = f"<p style='color:#166534'>{esc(message)}</p>" if message else ""
+    return page(title, f"""
+    <div class='w login'><div class='p'><h2>{esc(title)}</h2>{note}{err}{msg}
+    <form method='post' action='/admin/change-password'>
+    <input type='hidden' name='csrf' value='{c}'>
+    <label>当前密码</label><input name='current_password' type='password' autocomplete='current-password' required>
+    <label>管理员账号</label><input name='username' value='{esc(row['username'] if row else DEFAULT_ADMIN_USER)}' minlength='3' maxlength='32' required>
+    <label>新密码</label><input name='new_password' type='password' autocomplete='new-password' minlength='10' required>
+    <label>确认新密码</label><input name='confirm_password' type='password' autocomplete='new-password' minlength='10' required>
+    <button>保存并继续</button></form>
+    {'' if forced else "<p><a href='/admin'>返回后台</a></p>"}</div></div>""")
 
 
 def create_licenses(days, quantity, label):
@@ -301,22 +387,24 @@ def create_licenses(days, quantity, label):
 
 @router.get("/admin/login", response_class=HTMLResponse)
 def login_get(request: Request):
-    return RedirectResponse("/admin", 303) if auth(request) else login_page(status=200 if configured() else 503)
+    return RedirectResponse("/admin", 303) if auth(request) else login_page()
 
 
 @router.post("/admin/login", response_class=HTMLResponse)
 async def login_post(request: Request):
-    if not configured():
-        return login_page("后台尚未配置", 503)
     try:
         f = await form_data(request)
     except ValueError as exc:
         return login_page(str(exc), 400)
-    user_ok = hmac.compare_digest(f.get("username", "").encode(), ADMIN_USER.encode())
+    row = admin_config()
+    if not row:
+        return login_page("后台初始化失败", 503)
+    user_ok = hmac.compare_digest(f.get("username", "").encode(), row["username"].encode())
     if not (user_ok and verify_password(f.get("password", ""))):
         return login_page("账号或密码错误", 401)
     token = new_session()
-    r = RedirectResponse("/admin", 303)
+    target = "/admin/change-password" if must_change_password() else "/admin"
+    r = RedirectResponse(target, 303)
     r.set_cookie(COOKIE, token, max_age=SESSION_SECONDS, httponly=True, secure=True, samesite="lax", path="/admin")
     return r
 
@@ -326,9 +414,52 @@ def admin_get(request: Request, q: str = "", status: str = ""):
     token = auth(request)
     if not token:
         return need_login()
+    if must_change_password():
+        return RedirectResponse("/admin/change-password", 303)
     if status not in ("", "enabled", "disabled", "expired"):
         status = ""
     return dashboard(token, q[:128], status)
+
+
+@router.get("/admin/change-password", response_class=HTMLResponse)
+def change_password_get(request: Request):
+    token = auth(request)
+    if not token:
+        return need_login()
+    return change_password_page(token)
+
+
+@router.post("/admin/change-password", response_class=HTMLResponse)
+async def change_password_post(request: Request):
+    token = auth(request)
+    if not token:
+        return need_login()
+    try:
+        f = await form_data(request)
+        if not hmac.compare_digest(csrf(token), f.get("csrf", "")):
+            raise PermissionError("CSRF 校验失败")
+        if not verify_password(f.get("current_password", "")):
+            raise ValueError("当前密码错误")
+        username = f.get("username", "").strip()
+        if not 3 <= len(username) <= 32 or any(ch.isspace() for ch in username):
+            raise ValueError("管理员账号需为 3-32 个字符且不能包含空格")
+        new_password = f.get("new_password", "")
+        if new_password != f.get("confirm_password", ""):
+            raise ValueError("两次输入的新密码不一致")
+        password_hash = make_password_hash(new_password)
+        new_secret = secrets.token_urlsafe(48)
+        with open_db() as db:
+            db.execute(
+                "UPDATE admin_settings SET username=?,password_hash=?,must_change_password=0,session_secret=?,updated_at=? WHERE id=1",
+                (username, password_hash, new_secret, iso(utc_now())),
+            )
+            db.commit()
+        new_token = new_session()
+        r = RedirectResponse("/admin", 303)
+        r.set_cookie(COOKIE, new_token, max_age=SESSION_SECONDS, httponly=True, secure=True, samesite="lax", path="/admin")
+        return r
+    except Exception as exc:
+        return change_password_page(token, error=str(exc))
 
 
 @router.post("/admin/logout")
@@ -349,14 +480,14 @@ async def create_post(request: Request):
     token = auth(request)
     if not token:
         return need_login()
+    if must_change_password():
+        return RedirectResponse("/admin/change-password", 303)
     try:
         f = await form_data(request)
         if not hmac.compare_digest(csrf(token), f.get("csrf", "")):
             raise PermissionError("CSRF 校验失败")
         keys = create_licenses(int(f.get("days", "0")), int(f.get("quantity", "1")), f.get("label", ""))
         return dashboard(token, created=keys)
-    except PermissionError as exc:
-        return dashboard(token, message=str(exc))
     except Exception as exc:
         return dashboard(token, message=f"创建失败：{exc}")
 
@@ -366,6 +497,8 @@ async def toggle_post(license_id: int, request: Request):
     token = auth(request)
     if not token:
         return need_login()
+    if must_change_password():
+        return RedirectResponse("/admin/change-password", 303)
     f = await form_data(request)
     if not hmac.compare_digest(csrf(token), f.get("csrf", "")):
         return dashboard(token, message="CSRF 校验失败")
@@ -381,6 +514,8 @@ async def extend_post(license_id: int, request: Request):
     token = auth(request)
     if not token:
         return need_login()
+    if must_change_password():
+        return RedirectResponse("/admin/change-password", 303)
     try:
         f = await form_data(request)
         if not hmac.compare_digest(csrf(token), f.get("csrf", "")):
