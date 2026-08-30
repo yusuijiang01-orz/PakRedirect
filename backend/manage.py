@@ -1,4 +1,6 @@
 import argparse
+import base64
+import getpass
 import hashlib
 import os
 import secrets
@@ -7,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 DB_PATH = Path(os.environ.get("PAKREDIRECT_LICENSE_DB", "./data/licenses.db")).resolve()
+PBKDF2_ITERATIONS = 310_000
 
 
 def utc_now() -> datetime:
@@ -57,6 +60,23 @@ def generate_key() -> str:
     raw = secrets.token_hex(10).upper()
     groups = [raw[i:i + 4] for i in range(0, len(raw), 4)]
     return "PR-" + "-".join(groups)
+
+
+def b64url(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
+
+
+def make_admin_password_hash(password: str) -> str:
+    if len(password) < 10:
+        raise SystemExit("管理员密码至少 10 个字符")
+    salt = secrets.token_bytes(18)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt,
+        PBKDF2_ITERATIONS,
+    )
+    return f"pbkdf2_sha256${PBKDF2_ITERATIONS}${b64url(salt)}${b64url(digest)}"
 
 
 def create_license(days: int, label: str, requested_key: str | None) -> None:
@@ -184,6 +204,11 @@ def main() -> None:
 
     sub.add_parser("list", help="列出卡密")
 
+    admin_hash = sub.add_parser("admin-hash", help="生成网页后台管理员密码哈希")
+    admin_hash.add_argument("--password", default=None, help="可选；不建议留在 shell history")
+
+    sub.add_parser("session-secret", help="生成网页后台会话密钥")
+
     args = parser.parse_args()
     if args.command == "create":
         create_license(args.days, args.label, args.key)
@@ -195,6 +220,16 @@ def main() -> None:
         extend_license(args.key, args.days)
     elif args.command == "list":
         list_licenses()
+    elif args.command == "admin-hash":
+        password = args.password
+        if password is None:
+            password = getpass.getpass("管理员密码: ")
+            confirm = getpass.getpass("再次输入: ")
+            if password != confirm:
+                raise SystemExit("两次输入的密码不一致")
+        print(make_admin_password_hash(password))
+    elif args.command == "session-secret":
+        print(secrets.token_urlsafe(48))
 
 
 if __name__ == "__main__":
