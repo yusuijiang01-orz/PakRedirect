@@ -1,4 +1,4 @@
-const state={csrf:"",username:"",mustChange:false,view:"overview",licensePage:1,licensePages:1,logPage:1,logPages:1,days:30};
+const state={csrf:"",username:"",mustChange:false,view:"overview",licensePage:1,licensePages:1,logPage:1,logPages:1,days:30,revealKeys:false};
 
 const $=(id)=>document.getElementById(id);
 const qs=(s,root=document)=>root.querySelector(s);
@@ -66,15 +66,21 @@ async function loadOverview(){
     </tr>`).join(""):`<tr><td class="empty" colspan="7">暂无验证记录</td></tr>`;
   }catch(e){alertMsg(e.message,"error")}
 }
+function keyCell(r){
+  if(!state.revealKeys)return `<span class="code">***${esc(r.key_hint)}</span>`;
+  if(!r.key_available||!r.key_value)return `<span class="code">***${esc(r.key_hint)}</span><div class="muted">历史卡密不可恢复</div>`;
+  return `<div class="actions"><span class="code">${esc(r.key_value)}</span><button class="btn btn-ghost btn-sm" data-copy-key="${esc(r.key_value)}">复制</button></div>`;
+}
 async function loadLicenses(){
   try{
     const q=encodeURIComponent($("searchInput").value.trim()), status=encodeURIComponent($("statusFilter").value);
-    const d=await api(`/admin/api/licenses?q=${q}&status=${status}&page=${state.licensePage}&page_size=30`);
+    const d=await api(`/admin/api/licenses?q=${q}&status=${status}&page=${state.licensePage}&page_size=30&reveal=${state.revealKeys?1:0}`);
     state.licensePages=d.pages;
+    $("toggleRevealBtn").textContent=state.revealKeys?"隐藏完整卡密":"显示完整卡密";
     $("licenseBody").innerHTML=d.items.length?d.items.map(r=>{
       const toggleText=r.enabled?"禁用":"启用",toggleClass=r.enabled?"btn-danger":"btn-success";
       return `<tr>
-        <td>#${r.id}</td><td class="code">***${esc(r.key_hint)}</td><td>${esc(r.label||"-")}</td>
+        <td>#${r.id}</td><td>${keyCell(r)}</td><td>${esc(r.label||"-")}</td>
         <td>${badge(r.status)}</td><td>${fmt(r.expires_at)}</td><td>${fmt(r.last_seen_at)}</td><td>${esc(r.last_seen_ip||"-")}</td>
         <td><div class="actions">
           <button class="btn ${toggleClass} btn-sm" data-toggle="${r.id}" data-enabled="${r.enabled?0:1}">${toggleText}</button>
@@ -92,6 +98,10 @@ async function loadLicenses(){
   }catch(e){alertMsg(e.message,"error")}
 }
 function bindLicenseActions(){
+  qsa("[data-copy-key]").forEach(b=>b.onclick=async()=>{
+    try{await navigator.clipboard.writeText(b.dataset.copyKey);alertMsg("卡密已复制")}
+    catch{alertMsg("复制失败，请手动复制","error")}
+  });
   qsa("[data-toggle]").forEach(b=>b.onclick=async()=>{
     try{
       await api(`/admin/api/licenses/${b.dataset.toggle}/toggle`,{method:"POST",body:{enabled:b.dataset.enabled==="1"}});
@@ -106,6 +116,16 @@ function bindLicenseActions(){
       alertMsg(`已续期 ${days} 天`);loadLicenses();loadOverview();
     }catch(e){alertMsg(e.message,"error")}
   });
+}
+async function copyAllFilteredKeys(){
+  try{
+    const q=encodeURIComponent($("searchInput").value.trim()),s=encodeURIComponent($("statusFilter").value);
+    const text=await api(`/admin/api/licenses/export.txt?q=${q}&status=${s}`);
+    if(!text.trim()){alertMsg("当前范围没有可恢复的完整卡密","error");return}
+    await navigator.clipboard.writeText(text.trim());
+    const count=text.trim().split(/\r?\n/).filter(Boolean).length;
+    alertMsg(`已复制 ${count} 张完整卡密`);
+  }catch(e){alertMsg(e.message||"复制失败","error")}
 }
 async function loadLogs(){
   try{
@@ -162,6 +182,8 @@ function bind(){
   $("menuBtn").onclick=()=>$("sidebar").classList.toggle("open");
   $("logoutBtn").onclick=logout;
   $("generateBtn").onclick=()=>openModal("generateModal");
+  $("toggleRevealBtn").onclick=()=>{state.revealKeys=!state.revealKeys;loadLicenses()};
+  $("copyAllBtn").onclick=copyAllFilteredKeys;
   qsa("[data-close]").forEach(b=>b.onclick=()=>closeModal(b.dataset.close));
   qsa(".day-btn").forEach(b=>b.onclick=(e)=>{e.preventDefault();state.days=Number(b.dataset.days);qsa(".day-btn").forEach(x=>x.classList.toggle("active",x===b))});
   $("confirmGenerate").onclick=generate;$("copyKeysBtn").onclick=copyKeys;$("downloadKeysBtn").onclick=downloadText;

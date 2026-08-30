@@ -57,8 +57,13 @@
       <section id="view-licenses" class="hidden">
         <div class="panel">
           <div class="panel-head">
-            <div><h3>卡密列表</h3><div class="muted" style="margin-top:4px">完整卡密仅在生成时显示一次，数据库只保存 SHA-256 哈希。</div></div>
+            <div>
+              <h3>卡密列表</h3>
+              <div class="muted" style="margin-top:4px">新版生成的卡密可隐藏、显示和复制。旧版仅保存 SHA-256 的历史卡密无法恢复完整原文。</div>
+            </div>
             <div class="toolbar">
+              <button class="btn btn-secondary" id="toggleRevealBtn">显示完整卡密</button>
+              <button class="btn btn-secondary" id="copyAllBtn">复制全部卡密</button>
               <button class="btn btn-secondary" id="exportBtn">导出 CSV</button>
               <button class="btn btn-primary" id="generateBtn">+ 生成卡密</button>
             </div>
@@ -121,7 +126,7 @@
             <div class="panel-body info-list">
               <div class="info-row"><span class="muted">验证接口</span><span class="code">/api/v1/license/verify</span></div>
               <div class="info-row"><span class="muted">管理后台</span><span class="code">/admin</span></div>
-              <div class="info-row"><span class="muted">数据库</span><span>SQLite / Hash-only keys</span></div>
+              <div class="info-row"><span class="muted">数据库</span><span>SQLite / Hash 验证 + 管理员完整卡密</span></div>
               <div class="info-row"><span class="muted">生成上限</span><span>1000 张 / 次</span></div>
               <div class="info-row"><span class="muted">有效期预设</span><span>1 / 7 / 30 / 90 / 180 / 360 天</span></div>
             </div>
@@ -152,7 +157,7 @@
   <div class="modal">
     <div class="modal-head"><h3>生成成功</h3><button class="btn btn-ghost btn-sm" data-close="resultModal">关闭</button></div>
     <div class="modal-body">
-      <div class="alert alert-warn">完整卡密只在这里显示一次。请立即复制或下载保存。</div>
+      <div class="alert alert-warn">完整卡密已保存到管理员后台，可随时隐藏、显示、复制或导出。</div>
       <textarea class="keys" id="generatedKeys" readonly></textarea>
       <div class="muted" id="generatedExpiry" style="margin-top:8px"></div>
     </div>
