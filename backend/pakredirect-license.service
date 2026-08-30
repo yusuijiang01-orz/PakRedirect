@@ -9,9 +9,11 @@ User=paklicense
 Group=paklicense
 WorkingDirectory=/opt/pakredirect-license
 Environment=PAKREDIRECT_LICENSE_DB=/opt/pakredirect-license/data/licenses.db
+EnvironmentFile=-/etc/pakredirect-license.env
 ExecStart=/opt/pakredirect-license/.venv/bin/uvicorn app:app --host 127.0.0.1 --port 18888 --workers 1
 Restart=on-failure
 RestartSec=3
+UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

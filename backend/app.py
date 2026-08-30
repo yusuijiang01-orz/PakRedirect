@@ -7,6 +7,8 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from pydantic import BaseModel, Field
 
+from admin_console import router as admin_router, init_admin_indexes
+
 DB_PATH = Path(os.environ.get("PAKREDIRECT_LICENSE_DB", "./data/licenses.db")).resolve()
 
 app = FastAPI(
@@ -15,6 +17,7 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
+app.include_router(admin_router)
 
 
 class VerifyRequest(BaseModel):
@@ -63,6 +66,7 @@ def init_db() -> None:
             "CREATE INDEX IF NOT EXISTS idx_licenses_expires_at ON licenses(expires_at)"
         )
         db.commit()
+    init_admin_indexes()
 
 
 @app.on_event("startup")
@@ -92,11 +96,7 @@ def verify_license(payload: VerifyRequest, request: Request):
         ).fetchone()
 
         if row is None:
-            return {
-                "valid": False,
-                "expires_at": None,
-                "message": "卡密无效",
-            }
+            return {"valid": False, "expires_at": None, "message": "卡密无效"}
 
         if int(row["enabled"]) != 1:
             return {
