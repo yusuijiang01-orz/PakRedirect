@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from pydantic import BaseModel, Field
 
-from admin_console import router as admin_router, init_admin_indexes
+from admin_v2 import init_admin, router as admin_router
 
 DB_PATH = Path(os.environ.get("PAKREDIRECT_LICENSE_DB", "./data/licenses.db")).resolve()
 
@@ -66,7 +66,7 @@ def init_db() -> None:
             "CREATE INDEX IF NOT EXISTS idx_licenses_expires_at ON licenses(expires_at)"
         )
         db.commit()
-    init_admin_indexes()
+    init_admin()
 
 
 @app.on_event("startup")
