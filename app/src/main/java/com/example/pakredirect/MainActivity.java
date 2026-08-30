@@ -1,322 +1,358 @@
 package com.example.pakredirect;
 
-import android.Manifest;
 import android.app.Activity;
-import android.content.BroadcastReceiver;
-import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
-import android.content.SharedPreferences;
-import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
-import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.text.InputType;
 import android.view.Gravity;
+import android.view.View;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
-import java.net.URI;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 public class MainActivity extends Activity {
-    private static final String PREF_PAK_DIRECTORY_URI = "pak_directory_uri";
-    private static final String DEFAULT_URL = "https://cdn-tgpt.tepaylink.vn/production/ui.pak?ver=2";
-    private static final String CA_HASH = "204d3e6e";
+    private static final String TARGET_PACKAGE = "com.tepaylink.tamgioiphantranhmobile";
+    private static final String TARGET_DATA_DIR =
+            "/data/data/com.tepaylink.tamgioiphantranhmobile/files/data";
 
     private static final int BG = Color.rgb(246, 247, 249);
     private static final int CARD = Color.WHITE;
     private static final int TEXT = Color.rgb(30, 35, 43);
     private static final int MUTED = Color.rgb(105, 113, 126);
     private static final int PRIMARY = Color.rgb(47, 111, 237);
-    private static final int SUCCESS = Color.rgb(30, 155, 95);
-    private static final int DANGER = Color.rgb(214, 67, 67);
 
-    private EditText urlEdit;
-    private TextView fileText, indexText, statusText, hitsText, stateText;
-    private Button startButton, legacyButton, stopButton;
-    private Uri selectedDirectoryUri;
-    private SharedPreferences prefs;
-    private int hits;
+    private LicenseStorage licenseStorage;
+    private String currentLicenseKey;
 
-    private final BroadcastReceiver statusReceiver = new BroadcastReceiver() {
-        @Override public void onReceive(Context context, Intent intent) {
-            String msg = intent.getStringExtra(InterceptService.EXTRA_MESSAGE);
-            int h = intent.getIntExtra(InterceptService.EXTRA_HITS, -1);
-            boolean running = intent.getBooleanExtra(InterceptService.EXTRA_RUNNING, false);
-            if (h >= 0) hits = h;
-            if (msg != null) appendStatus((running ? "● " : "○ ") + msg);
-            hitsText.setText(String.valueOf(hits));
-            setRunningUi(running);
-        }
-    };
+    private EditText keyEdit;
+    private CheckBox rememberCheck;
+    private Button loginButton;
+    private ProgressBar progress;
 
-    @Override protected void onCreate(Bundle savedInstanceState) {
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        prefs = getSharedPreferences("cfg", MODE_PRIVATE);
-        buildUi();
-        requestNotificationPermission();
-        restore();
+        licenseStorage = new LicenseStorage(this);
+        showLoginUi();
+
+        String remembered = licenseStorage.loadKey();
+        if (remembered != null && !remembered.trim().isEmpty()) {
+            keyEdit.setText(remembered);
+            rememberCheck.setChecked(true);
+            verifyLicense(remembered, true);
+        }
     }
 
-    @Override protected void onStart() {
-        super.onStart();
-        IntentFilter f = new IntentFilter(InterceptService.ACTION_STATUS);
-        if (Build.VERSION.SDK_INT >= 33) registerReceiver(statusReceiver, f, RECEIVER_NOT_EXPORTED);
-        else registerReceiver(statusReceiver, f);
-        hits = InterceptService.hitCount();
-        hitsText.setText(String.valueOf(hits));
-        setRunningUi(InterceptService.isRunning());
-    }
+    private void showLoginUi() {
+        currentLicenseKey = null;
 
-    @Override protected void onStop() {
-        try { unregisterReceiver(statusReceiver); } catch (Throwable ignored) {}
-        super.onStop();
-    }
-
-    private void buildUi() {
-        getWindow().setStatusBarColor(BG);
-        if (Build.VERSION.SDK_INT >= 23) getWindow().getDecorView().setSystemUiVisibility(android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
-
-        int pad = dp(18);
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(pad, dp(18), pad, dp(30));
-        root.setBackgroundColor(BG);
-
-        TextView title = text("PakRedirect", 28, TEXT, true);
-        root.addView(title);
-        TextView subtitle = text("本地 HTTP PAK 直供工具", 14, MUTED, false);
+        LinearLayout root = baseRoot();
+        root.addView(title("PakRedirect"));
+        TextView subtitle = text("卡密登录", 14, MUTED, false);
         subtitle.setPadding(0, dp(2), 0, dp(18));
         root.addView(subtitle);
 
-        LinearLayout overview = card();
-        TextView stateLabel = text("拦截状态", 12, MUTED, false);
-        overview.addView(stateLabel);
-        stateText = text("未启动", 20, TEXT, true);
-        stateText.setPadding(0, dp(4), 0, dp(14));
-        overview.addView(stateText);
-        TextView hitLabel = text("本地 PAK 命中次数", 12, MUTED, false);
-        overview.addView(hitLabel);
-        hitsText = text("0", 30, PRIMARY, true);
-        overview.addView(hitsText);
-        root.addView(overview, blockParams());
+        LinearLayout card = card();
+        card.addView(text("请输入卡密", 14, TEXT, true));
 
-        LinearLayout config = card();
-        config.addView(sectionTitle("拦截配置"));
-        TextView ulabel = text("远端 PAK URL（用于识别清单项目）", 13, MUTED, false);
-        ulabel.setPadding(0, dp(12), 0, dp(6));
-        config.addView(ulabel);
+        keyEdit = new EditText(this);
+        keyEdit.setSingleLine(true);
+        keyEdit.setTextSize(15);
+        keyEdit.setTextColor(TEXT);
+        keyEdit.setHintTextColor(MUTED);
+        keyEdit.setHint("PR-XXXX-XXXX-XXXX-XXXX");
+        keyEdit.setPadding(dp(12), 0, dp(12), 0);
+        keyEdit.setBackground(round(Color.rgb(242, 244, 247), 10));
+        LinearLayout.LayoutParams keyLp = new LinearLayout.LayoutParams(-1, dp(50));
+        keyLp.topMargin = dp(12);
+        card.addView(keyEdit, keyLp);
 
-        urlEdit = new EditText(this);
-        urlEdit.setSingleLine(true);
-        urlEdit.setTextSize(15);
-        urlEdit.setTextColor(TEXT);
-        urlEdit.setHintTextColor(MUTED);
-        urlEdit.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-        urlEdit.setPadding(dp(12), 0, dp(12), 0);
-        urlEdit.setBackground(round(Color.rgb(242,244,247), 10));
-        urlEdit.setText(DEFAULT_URL);
-        config.addView(urlEdit, new LinearLayout.LayoutParams(-1, dp(48)));
+        rememberCheck = new CheckBox(this);
+        rememberCheck.setText("记住卡密");
+        rememberCheck.setTextSize(14);
+        rememberCheck.setTextColor(TEXT);
+        LinearLayout.LayoutParams rememberLp = new LinearLayout.LayoutParams(-1, -2);
+        rememberLp.topMargin = dp(8);
+        card.addView(rememberCheck, rememberLp);
 
-        Button pick = button("选择 PAK 目录", Color.rgb(235,240,249), TEXT);
-        pick.setOnClickListener(v -> PakDirectoryPicker.open(this));
-        LinearLayout.LayoutParams pickLp = new LinearLayout.LayoutParams(-1, dp(48));
-        pickLp.topMargin = dp(12);
-        config.addView(pick, pickLp);
-
-        fileText = text("当前目录：\n尚未选择目录", 12, MUTED, false);
-        fileText.setTextIsSelectable(true);
-        fileText.setPadding(dp(2), dp(8), dp(2), 0);
-        config.addView(fileText);
-
-        indexText = text("扫描结果：\n尚未扫描", 12, MUTED, false);
-        indexText.setTextIsSelectable(true);
-        indexText.setPadding(dp(2), dp(10), dp(2), 0);
-        config.addView(indexText);
-        root.addView(config, blockParams());
-
-        LinearLayout actions = card();
-        actions.addView(sectionTitle("控制"));
-
-        Button ca = button("兼容模式：安装系统 CA（Root）", Color.rgb(235,240,249), TEXT);
-        ca.setOnClickListener(v -> installCa());
-        LinearLayout.LayoutParams caLp = new LinearLayout.LayoutParams(-1, dp(48));
-        caLp.topMargin = dp(12);
-        actions.addView(ca, caLp);
-
-        startButton = button("启动本地直供（无需 Root / CA）", PRIMARY, Color.WHITE);
-        startButton.setOnClickListener(v -> startIntercept(InterceptService.MODE_LOCAL_HTTP));
-        LinearLayout.LayoutParams startLp = new LinearLayout.LayoutParams(-1, dp(50));
-        startLp.topMargin = dp(10);
-        actions.addView(startButton, startLp);
-
-        legacyButton = button("启动旧版 HTTPS 拦截", Color.rgb(235,240,249), TEXT);
-        legacyButton.setOnClickListener(v -> startIntercept(InterceptService.MODE_LEGACY_TLS));
-        LinearLayout.LayoutParams legacyLp = new LinearLayout.LayoutParams(-1, dp(48));
-        legacyLp.topMargin = dp(10);
-        actions.addView(legacyButton, legacyLp);
-
-        stopButton = button("停止并清理", Color.rgb(253,237,237), DANGER);
-        stopButton.setOnClickListener(v -> stopIntercept());
-        LinearLayout.LayoutParams stopLp = new LinearLayout.LayoutParams(-1, dp(48));
-        stopLp.topMargin = dp(10);
-        actions.addView(stopButton, stopLp);
-        root.addView(actions, blockParams());
-
-        LinearLayout logCard = card();
-        LinearLayout logHeader = new LinearLayout(this);
-        logHeader.setOrientation(LinearLayout.HORIZONTAL);
-        logHeader.setGravity(Gravity.CENTER_VERTICAL);
-        TextView logTitle = sectionTitle("运行日志");
-        logHeader.addView(logTitle, new LinearLayout.LayoutParams(0, -2, 1));
-        Button clear = button("清空", Color.TRANSPARENT, PRIMARY);
-        clear.setMinWidth(0); clear.setMinimumWidth(0);
-        clear.setPadding(dp(10), 0, dp(10), 0);
-        clear.setOnClickListener(v -> statusText.setText(""));
-        logHeader.addView(clear, new LinearLayout.LayoutParams(-2, dp(36)));
-        logCard.addView(logHeader);
-
-        statusText = text("等待配置…\n", 12, Color.rgb(74,82,94), false);
-        statusText.setTextIsSelectable(true);
-        statusText.setTypeface(Typeface.MONOSPACE);
-        statusText.setPadding(dp(12), dp(10), dp(12), dp(10));
-        statusText.setBackground(round(Color.rgb(247,248,250), 8));
-        LinearLayout.LayoutParams logLp = new LinearLayout.LayoutParams(-1, dp(190));
-        logLp.topMargin = dp(10);
-        logCard.addView(statusText, logLp);
-        root.addView(logCard, blockParams());
-
-        TextView note = text("推荐使用本地直供：无需 Root、CA、hosts 或 iptables。修改版游戏的清单地址应指向 http://127.0.0.1:18480/linkspak.txt。", 12, MUTED, false);
-        note.setPadding(dp(4), dp(4), dp(4), 0);
-        root.addView(note);
-
-        ScrollView sv = new ScrollView(this);
-        sv.setFillViewport(true);
-        sv.addView(root);
-        setContentView(sv);
-        setRunningUi(false);
-    }
-
-    private void restore() {
-        urlEdit.setText(prefs.getString("url", DEFAULT_URL));
-        String dir = prefs.getString(PREF_PAK_DIRECTORY_URI, null);
-        if (dir != null) {
-            selectedDirectoryUri = Uri.parse(dir);
-            scanPakDirectory(selectedDirectoryUri, false);
-        }
-    }
-
-    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == PakDirectoryPicker.REQUEST_CODE && resultCode == RESULT_OK && data != null && data.getData() != null) {
-            selectedDirectoryUri = data.getData();
-            int flags = Intent.FLAG_GRANT_READ_URI_PERMISSION;
-            try { getContentResolver().takePersistableUriPermission(selectedDirectoryUri, flags); } catch (Throwable ignored) {}
-            prefs.edit().putString(PREF_PAK_DIRECTORY_URI, selectedDirectoryUri.toString()).apply();
-            scanPakDirectory(selectedDirectoryUri, true);
-        }
-    }
-
-    private void scanPakDirectory(Uri uri, boolean selectedNow) {
-        fileText.setText("当前目录：\n" + displayDirectory(uri));
-        fileText.setTextColor(TEXT);
-        try {
-            PakIndex index = PakDirectoryManager.scan(this, uri);
-            indexText.setText("扫描结果：\n\n" + PakIndexFormatter.format(index));
-            indexText.setTextColor(TEXT);
-            appendStatus(selectedNow ? "已选择 PAK 目录并完成扫描" : "已恢复 PAK 目录并完成扫描");
-        } catch (Throwable t) {
-            indexText.setText("扫描结果：\n扫描失败：" + t.getMessage());
-            indexText.setTextColor(DANGER);
-            appendStatus("PAK 目录扫描失败：" + t.getMessage());
-        }
-    }
-
-    private void installCa() {
-        appendStatus("正在安装系统 CA…");
-        Toast.makeText(this, "正在安装 CA，结果将显示在运行日志", Toast.LENGTH_SHORT).show();
-        new Thread(() -> {
-            try {
-                File f = new File(getFilesDir(), CA_HASH + ".0");
-                try (InputStream in = getAssets().open("pakredirect_ca.pem"); FileOutputStream out = new FileOutputStream(f)) {
-                    byte[] b = new byte[8192]; int n; while ((n = in.read(b)) >= 0) out.write(b,0,n);
-                }
-                String dest = "/system/etc/security/cacerts/" + CA_HASH + ".0";
-                String q = "'" + f.getAbsolutePath().replace("'", "'\\''") + "'";
-                RootShell.Result r = RootShell.run(
-                        "set -e; " +
-                        "for m in / /system /system_root; do mount -o rw,remount $m >/dev/null 2>&1 || true; done; " +
-                        "mkdir -p /system/etc/security/cacerts; " +
-                        "cp " + q + " " + dest + "; " +
-                        "chown root:root " + dest + "; chmod 644 " + dest + "; " +
-                        "restorecon " + dest + " >/dev/null 2>&1 || true; " +
-                        "ls -lZ " + dest);
-                runOnUiThread(() -> appendStatus(r.ok() ? "CA 已写入系统目录，首次安装后请重启 MuMu。" : "CA 安装失败：" + r));
-            } catch (Throwable t) {
-                runOnUiThread(() -> appendStatus("CA 安装异常：" + t.getMessage()));
+        loginButton = button("登录", PRIMARY, Color.WHITE);
+        loginButton.setOnClickListener(v -> {
+            String key = keyEdit.getText().toString().trim();
+            if (key.isEmpty()) {
+                toast("请输入卡密");
+                return;
             }
+            verifyLicense(key, false);
+        });
+        LinearLayout.LayoutParams loginLp = new LinearLayout.LayoutParams(-1, dp(50));
+        loginLp.topMargin = dp(12);
+        card.addView(loginButton, loginLp);
+
+        progress = new ProgressBar(this);
+        progress.setVisibility(View.GONE);
+        LinearLayout.LayoutParams progressLp = new LinearLayout.LayoutParams(dp(34), dp(34));
+        progressLp.gravity = Gravity.CENTER_HORIZONTAL;
+        progressLp.topMargin = dp(12);
+        card.addView(progress, progressLp);
+
+        root.addView(card, blockParams());
+        setContentView(root);
+    }
+
+    private void verifyLicense(String key, boolean autoLogin) {
+        setLoginBusy(true);
+        new Thread(() -> {
+            LicenseClient.VerifyResult result = LicenseClient.verify(key);
+            runOnUiThread(() -> {
+                setLoginBusy(false);
+
+                if (!result.requestOk) {
+                    if (!autoLogin) toast(result.message);
+                    else toast("网络验证失败，请检查网络后重试");
+                    return;
+                }
+
+                if (!result.valid) {
+                    if (autoLogin) {
+                        licenseStorage.clear();
+                        rememberCheck.setChecked(false);
+                    }
+                    toast(result.message);
+                    return;
+                }
+
+                if (!autoLogin) {
+                    if (rememberCheck.isChecked()) {
+                        if (!licenseStorage.saveKey(key)) {
+                            toast("卡密验证成功，但记住卡密失败");
+                        }
+                    } else {
+                        licenseStorage.clear();
+                    }
+                }
+
+                currentLicenseKey = key;
+                showAuthorizedUi(result.expiresAt);
+            });
         }).start();
     }
 
-    private void startIntercept(String mode) {
-        String url = urlEdit.getText().toString().trim();
-        if (selectedDirectoryUri == null) { toast("请先选择 PAK 目录"); return; }
-        try {
-            URI u = URI.create(url);
-            if (!"https".equalsIgnoreCase(u.getScheme()) || u.getHost() == null) throw new Exception();
-        } catch (Throwable t) { toast("请输入完整的 https:// URL"); return; }
+    private void showAuthorizedUi(String expiresAt) {
+        LinearLayout root = baseRoot();
+        root.addView(title("PakRedirect"));
 
-        prefs.edit().putString("url", url).putString(PREF_PAK_DIRECTORY_URI, selectedDirectoryUri.toString()).apply();
-        hits = 0;
-        hitsText.setText("0");
-        stateText.setText("正在启动…");
-        stateText.setTextColor(PRIMARY);
-        startButton.setEnabled(false);
+        LinearLayout card = card();
+        card.addView(text("卡密到期时间", 13, MUTED, false));
 
-        Intent i = new Intent(this, InterceptService.class).setAction(InterceptService.ACTION_START)
-                .putExtra(InterceptService.EXTRA_URL, url)
-                .putExtra(InterceptService.EXTRA_DIRECTORY_URI, selectedDirectoryUri.toString())
-                .putExtra(InterceptService.EXTRA_MODE, mode);
-        if (Build.VERSION.SDK_INT >= 26) startForegroundService(i); else startService(i);
-        appendStatus(InterceptService.MODE_LOCAL_HTTP.equals(mode)
-                ? "正在启动本地 HTTP 直供…"
-                : "正在启动旧版 HTTPS 拦截…");
-        Toast.makeText(this, "正在启动，请查看运行日志", Toast.LENGTH_SHORT).show();
+        TextView expiry = text(formatExpiry(expiresAt), 22, TEXT, true);
+        expiry.setPadding(0, dp(8), 0, dp(4));
+        card.addView(expiry);
+        root.addView(card, blockParams());
+
+        Button activate = button("开启汉化", PRIMARY, Color.WHITE);
+        activate.setOnClickListener(v -> activateLocalization(activate));
+        root.addView(activate, new LinearLayout.LayoutParams(-1, dp(54)));
+
+        setContentView(root);
     }
 
-    private void requestNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 3001);
+    private void activateLocalization(Button activateButton) {
+        if (currentLicenseKey == null || currentLicenseKey.trim().isEmpty()) {
+            showLoginUi();
+            return;
+        }
+
+        activateButton.setEnabled(false);
+        activateButton.setText("正在验证…");
+
+        new Thread(() -> {
+            LicenseClient.VerifyResult result = LicenseClient.verify(currentLicenseKey);
+
+            if (!result.requestOk) {
+                runOnUiThread(() -> {
+                    activateButton.setEnabled(true);
+                    activateButton.setText("开启汉化");
+                    toast("网络验证失败，未执行汉化");
+                });
+                return;
+            }
+
+            if (!result.valid) {
+                licenseStorage.clear();
+                runOnUiThread(() -> {
+                    toast(result.message);
+                    showLoginUi();
+                });
+                return;
+            }
+
+            runOnUiThread(() -> activateButton.setText("正在替换 PAK…"));
+
+            String error = replaceBundledPakFiles();
+            if (error != null) {
+                runOnUiThread(() -> {
+                    activateButton.setEnabled(true);
+                    activateButton.setText("开启汉化");
+                    toast(error);
+                });
+                return;
+            }
+
+            runOnUiThread(() -> {
+                activateButton.setEnabled(true);
+                activateButton.setText("开启汉化");
+                if (!launchGame()) {
+                    toast("PAK 已替换，但未找到游戏启动入口");
+                }
+            });
+        }).start();
+    }
+
+    private String replaceBundledPakFiles() {
+        try {
+            Intent launchIntent = getPackageManager().getLaunchIntentForPackage(TARGET_PACKAGE);
+            if (launchIntent == null) {
+                return "未检测到目标游戏";
+            }
+
+            String[] assetNames = getAssets().list("");
+            if (assetNames == null) return "未找到内置 PAK 文件";
+
+            List<String> pakNames = new ArrayList<>();
+            for (String name : assetNames) {
+                if (name != null && name.toLowerCase().endsWith(".pak")) {
+                    pakNames.add(name);
+                }
+            }
+            Collections.sort(pakNames);
+            if (pakNames.isEmpty()) return "未找到内置 PAK 文件";
+
+            File payloadDir = new File(getCacheDir(), "pak-payload");
+            if (!payloadDir.exists() && !payloadDir.mkdirs()) {
+                return "无法准备临时文件";
+            }
+
+            List<File> extracted = new ArrayList<>();
+            for (String name : pakNames) {
+                File outFile = new File(payloadDir, name);
+                try (InputStream in = getAssets().open(name);
+                     FileOutputStream out = new FileOutputStream(outFile, false)) {
+                    byte[] buffer = new byte[1024 * 64];
+                    int n;
+                    while ((n = in.read(buffer)) >= 0) {
+                        out.write(buffer, 0, n);
+                    }
+                    out.flush();
+                }
+                extracted.add(outFile);
+            }
+
+            StringBuilder command = new StringBuilder();
+            command.append("set -e; ");
+            command.append("TARGET=").append(shellQuote(TARGET_DATA_DIR)).append("; ");
+            command.append("[ -d \"$TARGET\" ] || { echo 'target data dir missing'; exit 20; }; ");
+            command.append("am force-stop ").append(shellQuote(TARGET_PACKAGE)).append(" >/dev/null 2>&1 || true; ");
+
+            for (int i = 0; i < pakNames.size(); i++) {
+                String name = pakNames.get(i);
+                File src = extracted.get(i);
+                String targetPath = TARGET_DATA_DIR + "/" + name;
+
+                command.append("[ -f ")
+                        .append(shellQuote(targetPath))
+                        .append(" ] || { echo ")
+                        .append(shellQuote("missing target: " + name))
+                        .append("; exit 21; }; ");
+
+                // Copy onto the existing destination file so its game-data metadata is preserved.
+                command.append("cp ")
+                        .append(shellQuote(src.getAbsolutePath()))
+                        .append(" ")
+                        .append(shellQuote(targetPath))
+                        .append("; ");
+
+                command.append("[ \"$(wc -c < ")
+                        .append(shellQuote(src.getAbsolutePath()))
+                        .append(")\" = \"$(wc -c < ")
+                        .append(shellQuote(targetPath))
+                        .append(")\" ] || { echo ")
+                        .append(shellQuote("size verify failed: " + name))
+                        .append("; exit 22; }; ");
+            }
+
+            command.append("sync; echo OK");
+            RootShell.Result rootResult = RootShell.run(command.toString());
+            if (!rootResult.ok()) {
+                if (rootResult.output.contains("target data dir missing")) {
+                    return "目标游戏数据目录不存在";
+                }
+                if (rootResult.output.contains("missing target:")) {
+                    return "目标目录中的原 PAK 文件不完整";
+                }
+                return "替换失败，请确认已授予 Root 权限";
+            }
+            return null;
+        } catch (Throwable t) {
+            return "替换失败：" + safeMessage(t);
         }
     }
 
-    private void stopIntercept() {
-        Intent i = new Intent(this, InterceptService.class).setAction(InterceptService.ACTION_STOP);
-        startService(i);
-        appendStatus("正在停止并清理规则…");
+    private boolean launchGame() {
+        try {
+            Intent launchIntent = getPackageManager().getLaunchIntentForPackage(TARGET_PACKAGE);
+            if (launchIntent == null) return false;
+            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+            startActivity(launchIntent);
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
-    private void setRunningUi(boolean running) {
-        if (stateText == null) return;
-        stateText.setText(running ? "运行中" : "未启动");
-        stateText.setTextColor(running ? SUCCESS : TEXT);
-        startButton.setEnabled(!running);
-        legacyButton.setEnabled(!running);
-        stopButton.setEnabled(running);
+    private void setLoginBusy(boolean busy) {
+        if (loginButton != null) {
+            loginButton.setEnabled(!busy);
+            loginButton.setText(busy ? "验证中…" : "登录");
+        }
+        if (keyEdit != null) keyEdit.setEnabled(!busy);
+        if (rememberCheck != null) rememberCheck.setEnabled(!busy);
+        if (progress != null) progress.setVisibility(busy ? View.VISIBLE : View.GONE);
     }
 
-    private void appendStatus(String s) {
-        statusText.append(s + "\n");
+    private LinearLayout baseRoot() {
+        getWindow().setStatusBarColor(BG);
+        if (Build.VERSION.SDK_INT >= 23) {
+            getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+        }
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(18), dp(18), dp(18), dp(30));
+        root.setBackgroundColor(BG);
+        return root;
+    }
+
+    private TextView title(String value) {
+        TextView title = text(value, 28, TEXT, true);
+        title.setPadding(0, 0, 0, dp(16));
+        return title;
     }
 
     private LinearLayout card() {
@@ -334,45 +370,59 @@ public class MainActivity extends Activity {
         return lp;
     }
 
-    private TextView sectionTitle(String s) { return text(s, 16, TEXT, true); }
-
     private TextView text(String s, int sp, int color, boolean bold) {
         TextView v = new TextView(this);
-        v.setText(s); v.setTextSize(sp); v.setTextColor(color);
-        if (bold) v.setTypeface(Typeface.DEFAULT_BOLD);
+        v.setText(s);
+        v.setTextSize(sp);
+        v.setTextColor(color);
+        if (bold) v.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         return v;
     }
 
     private Button button(String label, int bg, int fg) {
         Button b = new Button(this);
-        b.setText(label); b.setTextSize(14); b.setTextColor(fg);
-        b.setAllCaps(false); b.setGravity(Gravity.CENTER);
+        b.setText(label);
+        b.setTextSize(14);
+        b.setAllCaps(false);
+        b.setTextColor(fg);
         b.setBackground(round(bg, 10));
+        b.setPadding(dp(12), 0, dp(12), 0);
         return b;
     }
 
     private GradientDrawable round(int color, int radiusDp) {
         GradientDrawable g = new GradientDrawable();
-        g.setColor(color); g.setCornerRadius(dp(radiusDp));
+        g.setColor(color);
+        g.setCornerRadius(dp(radiusDp));
         return g;
     }
 
-    private String displayDirectory(Uri uri) {
-        String p = uri.getLastPathSegment();
-        if (p == null) return uri.toString();
-        if (p.startsWith("primary:")) {
-            String rest = p.substring("primary:".length());
-            return rest.length() == 0 ? "/storage/emulated/0" : "/storage/emulated/0/" + rest;
+    private String formatExpiry(String iso) {
+        if (iso == null || iso.trim().isEmpty()) return "未知";
+        try {
+            OffsetDateTime dt = OffsetDateTime.parse(iso);
+            return dt.atZoneSameInstant(ZoneId.systemDefault())
+                    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+        } catch (Throwable ignored) {
+            return iso;
         }
-        int colon = p.indexOf(':');
-        if (colon > 0) {
-            String volume = p.substring(0, colon);
-            String rest = p.substring(colon + 1);
-            return rest.length() == 0 ? "/storage/" + volume : "/storage/" + volume + "/" + rest;
-        }
-        return p.replace("MuMuShared:", "MuMu共享 / ");
     }
 
-    private void toast(String s) { Toast.makeText(this, s, Toast.LENGTH_SHORT).show(); }
-    private int dp(int n) { return Math.round(n * getResources().getDisplayMetrics().density); }
+    private String safeMessage(Throwable t) {
+        String msg = t.getMessage();
+        if (msg == null || msg.trim().isEmpty()) return t.getClass().getSimpleName();
+        return msg;
+    }
+
+    private void toast(String value) {
+        Toast.makeText(this, value, Toast.LENGTH_LONG).show();
+    }
+
+    private int dp(int value) {
+        return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    private static String shellQuote(String value) {
+        return "'" + value.replace("'", "'\\''") + "'";
+    }
 }
