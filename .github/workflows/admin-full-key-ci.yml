@@ -1,0 +1,72 @@
+name: Admin full-key smoke test
+
+on:
+  push:
+    branches:
+      - feature/admin-reveal-full-keys
+
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: python -m pip install -r backend/requirements.txt httpx
+      - name: Syntax check
+        run: python -m py_compile backend/app.py backend/admin_v2.py backend/admin_key_access.py backend/manage.py
+      - name: Full-key admin smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd backend
+          export PAKREDIRECT_LICENSE_DB="$RUNNER_TEMP/licenses.db"
+          python - <<'PY'
+          import hashlib
+          from fastapi.testclient import TestClient
+          import app
+          import admin_v2 as admin
+
+          app.init_db()
+          with admin.open_db() as db:
+              cols={r['name'] for r in db.execute('PRAGMA table_info(licenses)').fetchall()}
+              assert 'key_value' in cols
+              # Simulate one historical hash-only row.
+              old='PR-OLD1-OLD2-OLD3-OLD4-OLD5'
+              db.execute('INSERT INTO licenses(key_hash,key_hint,key_value,label,expires_at,enabled,created_at) VALUES(?,?,NULL,?,?,1,?)',(
+                  hashlib.sha256(old.encode()).hexdigest(),'OLDOLD','legacy','2099-01-01T00:00:00Z','2026-01-01T00:00:00Z'))
+              db.commit()
+
+          client=TestClient(app.app,base_url='https://testserver')
+          r=client.post('/admin/api/login',json={'username':'admin','password':'PakRedirect@2026!'})
+          assert r.status_code==200
+          me=client.get('/admin/api/me').json(); csrf=me['csrf']
+          r=client.post('/admin/api/credentials',headers={'X-CSRF-Token':csrf},json={
+              'current_password':'PakRedirect@2026!','username':'owner','new_password':'ChangedPassword123!','confirm_password':'ChangedPassword123!'
+          })
+          assert r.status_code==200
+          me=client.get('/admin/api/me').json(); csrf=me['csrf']
+
+          r=client.post('/admin/api/licenses/generate',headers={'X-CSRF-Token':csrf},json={'days':30,'quantity':2,'label':'copy-test'})
+          assert r.status_code==200
+          made=r.json()['keys']; assert len(made)==2
+
+          hidden=client.get('/admin/api/licenses?page_size=30&reveal=0').json()['items']
+          assert all(x['key_value'] is None for x in hidden)
+          shown=client.get('/admin/api/licenses?page_size=30&reveal=1').json()['items']
+          new_rows=[x for x in shown if x['label']=='copy-test']
+          assert {x['key_value'] for x in new_rows}==set(made)
+          legacy=[x for x in shown if x['label']=='legacy'][0]
+          assert legacy['key_available'] is False and legacy['key_value'] is None
+
+          txt=client.get('/admin/api/licenses/export.txt').text.strip().splitlines()
+          assert set(made).issubset(set(txt)) and old not in txt
+          csv=client.get('/admin/api/licenses/export.csv').text
+          assert made[0] in csv
+
+          verify=client.post('/api/v1/license/verify',json={'license_key':made[0]}).json()
+          assert verify['valid'] is True
+          print('admin full-key smoke ok')
+          PY
