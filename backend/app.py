@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from pydantic import BaseModel, Field
 
+from admin_key_access import init_full_key_support, router as admin_key_router
 from admin_v2 import init_admin, router as admin_router
 
 DB_PATH = Path(os.environ.get("PAKREDIRECT_LICENSE_DB", "./data/licenses.db")).resolve()
@@ -17,6 +18,10 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
+# Full-key routes intentionally register before admin_v2 so their matching
+# license list/generate/export endpoints take precedence while all other
+# License Console v2 routes continue to come from admin_v2.
+app.include_router(admin_key_router)
 app.include_router(admin_router)
 
 
@@ -67,6 +72,7 @@ def init_db() -> None:
         )
         db.commit()
     init_admin()
+    init_full_key_support()
 
 
 @app.on_event("startup")
