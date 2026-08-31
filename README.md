@@ -1,64 +1,115 @@
-# PakRedirect 1.2
+# RYLUX V1
 
-Android 本地 PAK 直供工具。推荐模式不依赖 Root、系统 CA、hosts 或 iptables，适合配合已修改下载入口的测试版游戏客户端。
+RYLUX 是从原 PakRedirect 演进而来的账号 / VIP 驱动游戏模块启动器。V1 保留已经验证过的本机 PAK 直供能力，同时把产品入口从“卡密直接登录”升级为“用户账号 + 使用时间 + 游戏模块”。
 
-## 推荐模式：本地 HTTP 直供
+> V1 为保持 Android 升级兼容，应用包名暂时仍是 `com.example.pakredirect`；用户可见名称已经改为 `RYLUX`。
 
-PakRedirect 在设备本机监听：
+## V1 功能
+
+- 用户注册 / 账号密码登录；
+- 新注册用户自动获得 24 小时体验时间；
+- 账号使用时间统一由 `vip_expires_at` 管理；
+- 套餐模型：7 / 30 / 90 / 180 / 365 天；
+- V1 暂不接在线支付，使用兑换码给账号充值时间；
+- 管理后台可查看用户、VIP 到期时间、最后登录时间与 IP；
+- 管理员可禁用 / 启用用户并直接续期；
+- 兑换码支持批量生成、隐藏 / 显示、复制、CSV / TXT 导出；
+- 首个游戏模块为“三国汉化”；
+- 点击启动前由服务端检查账号与 VIP 权限；
+- 授权通过后启动本机 `127.0.0.1:18480` PAK 服务并自动启动目标游戏；
+- 旧 `/api/v1/license/verify` 继续保留，方便旧 APK 过渡。
+
+## 用户 API
+
+```text
+POST /api/v1/auth/register
+POST /api/v1/auth/login
+POST /api/v1/auth/logout
+GET  /api/v1/me
+GET  /api/v1/plans
+POST /api/v1/redeem
+GET  /api/v1/modules
+POST /api/v1/modules/sg_localization/authorize
+```
+
+用户密码使用 PBKDF2-SHA256 保存。登录 Token 只把 SHA-256 摘要写入数据库；Android 端 Token 使用 Android Keystore + AES-GCM 保存。
+
+## 24 小时体验
+
+注册成功时：
+
+```text
+trial_started_at = 注册时间
+trial_expires_at = 注册时间 + 24小时
+vip_expires_at = trial_expires_at
+```
+
+兑换或管理员续期时：
+
+```text
+当前仍有效 -> 从原到期时间继续累加
+已经过期   -> 从当前时间重新计算
+```
+
+## 兑换码
+
+原“卡密系统”在 RYLUX V1 中继续保留，但主要用途改为账号充值码。
+
+新生成兑换码记录充值天数 `duration_days`，用户兑换成功后：
+
+1. 对账号 `vip_expires_at` 增加对应天数；
+2. 记录兑换用户与兑换时间；
+3. 立即停用该兑换码，防止重复使用。
+
+旧版直接卡密登录接口仍保留用于兼容过渡。
+
+## 本地游戏模块
+
+RYLUX 通过本机回环地址监听：
 
 ```text
 http://127.0.0.1:18480
 ```
 
-提供以下接口：
+提供：
 
-- `GET /health`：服务状态。
-- `GET` / `HEAD /linkspak.txt`：动态清单。
-- `GET` / `HEAD /pak/<文件名>`：本地 PAK，支持单段 Range、HTTP 200/206。
+- `GET /health`
+- `GET` / `HEAD /linkspak.txt`
+- `GET` / `HEAD /pak/<文件名>`
+- PAK Range / HTTP 200 / 206
 
-启动时会读取远端 `https://cdn.tamgioipt.vn/linkspak.txt`；读取失败时使用内置模板。对于所选目录内存在的同名 `.pak`，工具会同时修改清单中的下载 URL 和文件大小。例如：
+目标游戏仍由自己的 UID 下载并写入自己的私有目录，所以这个推荐模式不依赖 Root。
 
-```text
-https://cdn-tgpt.tepaylink.vn/production/updatefs.pak?ver=403,data/,updatefs.pak,38101521,0,403
-```
-
-会变为：
+启动链路：
 
 ```text
-http://127.0.0.1:18480/pak/updatefs.pak,data/,updatefs.pak,38101521,0,403
+RYLUX 登录
+  -> 服务端检查账号 / VIP
+  -> 授权 sg_localization
+  -> 启动 127.0.0.1:18480
+  -> 提供 linkspak.txt + PAK
+  -> 启动 com.tepaylink.tamgioiphantranhmobile
 ```
 
-修改版游戏客户端只需把清单入口改为：
+## 管理后台
 
 ```text
-http://127.0.0.1:18480/linkspak.txt
+https://verify.lovenom.eu.org/admin
 ```
 
-登录、支付、服务器列表等其他 HTTPS 接口不会经过 PakRedirect。
+页面包括：
 
-## 使用步骤
+- 数据概览
+- 用户 / VIP
+- 兑换码
+- 操作日志
+- 系统设置
 
-1. 安装并打开 PakRedirect。
-2. 选择包含本地 `.pak` 的目录。
-3. 点击“启动本地直供（无需 Root / CA）”。
-4. 确认日志显示本地 HTTP 服务监听于 `127.0.0.1:18480`。
-5. 启动已修改清单地址的游戏客户端。
-6. 测试结束后点击“停止并清理”。
-
-## 旧版 HTTPS 兼容模式
-
-应用仍保留旧版 HTTPS MITM 模式和 CA 安装入口。该模式需要可用的 root、系统信任库、hosts 与 iptables。在 Android 14/15 上，Conscrypt APEX 和挂载命名空间可能导致系统 CA 或 hosts 修改不生效，因此不再推荐。
-
-Android 15 的 ADB 托管脚本仍保留：
-
-```powershell
-.\android15-adb-start.ps1 -Adb "D:\path\to\adb.exe"
-.\android15-adb-stop.ps1 -Adb "D:\path\to\adb.exe"
-```
+后台仍复用现有 HTTPS 域名、SQLite 数据库和管理员登录体系。
 
 ## 编译
 
-需要 Android SDK 35 与 JDK 17+：
+Android SDK 35 + JDK 17：
 
 ```text
 gradle :app:assembleDebug
@@ -70,4 +121,10 @@ gradle :app:assembleDebug
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-项目无 AndroidX、OkHttp、BouncyCastle 等第三方运行时依赖。
+## 服务端
+
+部署与升级说明见：
+
+```text
+backend/README.md
+```
