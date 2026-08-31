@@ -1,13 +1,13 @@
 {
   "schema": 1,
   "module": "sg_localization",
-  "version": "ed01b867ac09",
+  "version": "84f4bc17c2fe",
   "files": [
     {
       "name": "linkspak.txt",
       "size": 1049,
-      "sha256": "e914b1b47a0832c10a5e83469e5b86ddfbfc545f4258584cc3e8eab6fe65dd6c",
-      "revision": 2026083119,
+      "sha256": "bd700246d652505ea89948401b89ee972582188638840535e984570137aaed03",
+      "revision": 2026083121,
       "url": "https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/pak/linkspak.txt"
     },
     {
@@ -19,9 +19,9 @@
     },
     {
       "name": "ui.pak",
-      "size": 464206,
-      "sha256": "5a2b8ff49eb4db7719b61711dfc8c42be844292ae7f772cf53916f9db0ecedc5",
-      "revision": 2026083118,
+      "size": 463353,
+      "sha256": "964292eb92034603969a84c82e714b0fda22279e1c6635bbfd4ddbfe2979d0c4",
+      "revision": 2026083120,
       "url": "https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/pak/ui.pak"
     },
     {
