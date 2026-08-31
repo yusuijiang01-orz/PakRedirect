@@ -46,6 +46,7 @@ public class MainActivity extends Activity {
     private static final int ORANGE = Color.rgb(255, 159, 10);
     private static final int RED = Color.rgb(255, 69, 58);
     private static final int BORDER = Color.rgb(47, 53, 64);
+    private static final int DISABLED = Color.rgb(70, 75, 84);
 
     private AuthStorage authStorage;
     private String currentToken;
@@ -358,8 +359,17 @@ public class MainActivity extends Activity {
         row.addView(info, new LinearLayout.LayoutParams(0, -2, 1f));
         card.addView(row);
 
-        Button start = button("启动游戏", PRIMARY, Color.WHITE);
-        start.setOnClickListener(v -> activateModule(start));
+        boolean canLaunch = profile.membershipActive;
+        Button start = button(
+                canLaunch ? "启动游戏" : "暂时无法使用",
+                canLaunch ? PRIMARY : DISABLED,
+                canLaunch ? Color.WHITE : MUTED
+        );
+        start.setEnabled(canLaunch);
+        start.setAlpha(canLaunch ? 1.0f : 0.72f);
+        if (canLaunch) {
+            start.setOnClickListener(v -> activateModule(start));
+        }
         LinearLayout.LayoutParams startLp = new LinearLayout.LayoutParams(-1, dp(52));
         startLp.topMargin = dp(14);
         card.addView(start, startLp);
@@ -390,6 +400,9 @@ public class MainActivity extends Activity {
     }
 
     private void activateModule(Button button) {
+        if (!currentMembershipActive) {
+            return;
+        }
         if (currentToken == null || currentToken.trim().isEmpty()) {
             showAuthUi(false);
             return;
