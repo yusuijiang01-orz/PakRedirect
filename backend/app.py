@@ -12,6 +12,7 @@ from admin_key_access import init_full_key_support, router as admin_key_router
 from admin_v2 import init_admin, router as admin_router
 from registration_guard_v1 import init_registration_guard_v1, router as registration_guard_router
 from user_v1 import init_user_v1, router as user_router
+from admin_user_controls import router as admin_user_controls_router
 
 DB_PATH = Path(os.environ.get("PAKREDIRECT_LICENSE_DB", "./data/licenses.db")).resolve()
 
@@ -26,6 +27,7 @@ app = FastAPI(
 app.include_router(admin_key_router)
 app.include_router(admin_code_router)
 app.include_router(registration_guard_router)
+app.include_router(admin_user_controls_router)
 app.include_router(user_router)
 app.include_router(admin_router)
 
