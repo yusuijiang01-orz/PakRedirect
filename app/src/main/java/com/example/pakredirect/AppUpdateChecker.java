@@ -3,6 +3,7 @@ package com.example.pakredirect;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
+import android.content.pm.PackageInfo;
 import android.net.Uri;
 
 import org.json.JSONArray;
@@ -22,11 +23,21 @@ public final class AppUpdateChecker {
     private AppUpdateChecker() {}
 
     public static void check(Activity activity) {
+        final String installed = installedVersion(activity);
         new Thread(() -> {
             ReleaseInfo info = fetchLatest();
-            if (info == null || !isNewer(info.versionName, BuildConfig.VERSION_NAME)) return;
+            if (info == null || !isNewer(info.versionName, installed)) return;
             activity.runOnUiThread(() -> showDialog(activity, info));
         }, "RYLUX-App-Update").start();
+    }
+
+    private static String installedVersion(Activity activity) {
+        try {
+            PackageInfo info = activity.getPackageManager().getPackageInfo(activity.getPackageName(), 0);
+            return info.versionName == null ? "0" : info.versionName;
+        } catch (Throwable ignored) {
+            return "0";
+        }
     }
 
     private static ReleaseInfo fetchLatest() {
@@ -58,9 +69,7 @@ public final class AppUpdateChecker {
                     }
                 }
             }
-            if (apkUrl == null || apkUrl.trim().isEmpty()) {
-                apkUrl = json.optString("html_url", "");
-            }
+            if (apkUrl == null || apkUrl.trim().isEmpty()) apkUrl = json.optString("html_url", "");
             if (apkUrl == null || apkUrl.trim().isEmpty()) return null;
             return new ReleaseInfo(version, apkUrl);
         } catch (Throwable ignored) {
