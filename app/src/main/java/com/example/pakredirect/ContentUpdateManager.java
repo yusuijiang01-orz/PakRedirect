@@ -26,8 +26,20 @@ public final class ContentUpdateManager {
 
     private ContentUpdateManager() {}
 
+    public interface ProgressListener {
+        void onProgress(String message, int percent, boolean indeterminate);
+    }
+
+    private interface DownloadProgress {
+        void onBytes(long bytesWritten);
+    }
+
     public static File moduleDir(Context context) {
         return new File(context.getFilesDir(), "rylux-content/" + MODULE_CODE);
+    }
+
+    public static UpdateResult checkAndApply(Context context) throws Exception {
+        return checkAndApply(context, null);
     }
 
     /**
@@ -37,17 +49,21 @@ public final class ContentUpdateManager {
      * has been received, any download, checksum or write failure is thrown so the
      * launcher does not silently start the game with a partial/stale PAK set.
      */
-    public static UpdateResult checkAndApply(Context context) throws Exception {
+    public static UpdateResult checkAndApply(Context context, ProgressListener listener) throws Exception {
+        notifyProgress(listener, "正在检查封神榜资源更新…", -1, true);
+
         String jsonText;
         HttpURLConnection connection = null;
         try {
             connection = open(cacheBust(MANIFEST_URL, String.valueOf(System.currentTimeMillis())));
             int code = connection.getResponseCode();
             if (code != 200) {
+                notifyProgress(listener, "更新检查暂不可用，继续使用本地资源", -1, true);
                 return UpdateResult.softFailure("资源更新检查失败 HTTP " + code);
             }
             jsonText = readUtf8(connection.getInputStream(), 512 * 1024);
         } catch (Throwable t) {
+            notifyProgress(listener, "更新检查暂不可用，继续使用本地资源", -1, true);
             return UpdateResult.softFailure("资源更新检查暂不可用");
         } finally {
             if (connection != null) connection.disconnect();
@@ -100,22 +116,64 @@ public final class ContentUpdateManager {
 
         for (ContentItem item : all) recoverStaleFiles(item);
 
+        notifyProgress(listener, "正在核对本地 PAK…", -1, true);
         List<ContentItem> changed = new ArrayList<>();
+        long totalDownloadBytes = 0L;
+        for (ContentItem item : all) {
+            if (!matches(item.target, item.expectedSize, item.expectedSha)) {
+                changed.add(item);
+                totalDownloadBytes += Math.max(0L, item.expectedSize);
+            }
+        }
+
+        if (changed.isEmpty()) {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .edit().putString("version", version).apply();
+            notifyProgress(listener, "资源已是最新", 100, false);
+            return UpdateResult.noUpdate(version);
+        }
+
+        final long totalBytes = Math.max(1L, totalDownloadBytes);
+        long completedBytes = 0L;
+        List<ContentItem> staged = new ArrayList<>();
         try {
             // Stage and verify every changed resource before touching a live file.
-            for (ContentItem item : all) {
-                if (matches(item.target, item.expectedSize, item.expectedSha)) continue;
+            for (ContentItem item : changed) {
                 deleteIfExists(item.stage);
                 String token = version + "-" + item.revision;
-                download(cacheBust(item.url, token), item.stage, item.expectedSize);
+                final long baseBytes = completedBytes;
+                final String displayName = item.name;
+                download(
+                        cacheBust(item.url, token),
+                        item.stage,
+                        item.expectedSize,
+                        written -> {
+                            long overall = Math.min(totalBytes, baseBytes + written);
+                            int percent = (int) Math.min(99L, (overall * 100L) / totalBytes);
+                            notifyProgress(
+                                    listener,
+                                    "正在下载 " + displayName + " · " + percent + "%",
+                                    percent,
+                                    false
+                            );
+                        }
+                );
+                completedBytes += Math.max(0L, item.expectedSize);
+                notifyProgress(
+                        listener,
+                        "正在校验 " + item.name + "…",
+                        (int) Math.min(99L, (completedBytes * 100L) / totalBytes),
+                        false
+                );
                 if (!matches(item.stage, item.expectedSize, item.expectedSha)) {
                     deleteIfExists(item.stage);
                     throw new IllegalStateException("资源校验失败：" + item.name);
                 }
-                changed.add(item);
+                staged.add(item);
             }
 
-            commitAtomically(changed);
+            notifyProgress(listener, "正在写入最新 PAK…", 99, false);
+            commitAtomically(staged);
 
             // Final verification is against the manifest after all renames.
             for (ContentItem item : all) {
@@ -126,12 +184,12 @@ public final class ContentUpdateManager {
 
             // The transaction is now accepted. Backup deletion is best effort;
             // a leftover backup is safely cleaned on the next launch.
-            for (ContentItem item : changed) {
+            for (ContentItem item : staged) {
                 item.committed = false;
                 quietDelete(item.backup);
             }
         } catch (Throwable t) {
-            rollback(changed);
+            rollback(staged);
             for (ContentItem item : changed) quietDelete(item.stage);
             if (t instanceof Exception) throw (Exception) t;
             throw new IllegalStateException("资源更新失败", t);
@@ -139,14 +197,26 @@ public final class ContentUpdateManager {
 
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .edit().putString("version", version).apply();
-        return changed.isEmpty()
-                ? UpdateResult.noUpdate(version)
-                : UpdateResult.updated(changed.size(), version);
+        notifyProgress(listener, "PAK 更新完成", 100, false);
+        return UpdateResult.updated(changed.size(), version);
     }
 
     public static String installedVersion(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         return prefs.getString("version", "内置版本");
+    }
+
+    private static void notifyProgress(
+            ProgressListener listener,
+            String message,
+            int percent,
+            boolean indeterminate
+    ) {
+        if (listener == null) return;
+        try {
+            listener.onProgress(message, percent, indeterminate);
+        } catch (Throwable ignored) {
+        }
     }
 
     private static void recoverStaleFiles(ContentItem item) throws Exception {
@@ -225,7 +295,7 @@ public final class ContentUpdateManager {
         c.setRequestProperty("Accept", "application/json,application/octet-stream,*/*");
         c.setRequestProperty("Cache-Control", "no-cache, no-store");
         c.setRequestProperty("Pragma", "no-cache");
-        c.setRequestProperty("User-Agent", "RYLUX/2.1.2");
+        c.setRequestProperty("User-Agent", "RYLUX/2.1.3");
         return c;
     }
 
@@ -234,7 +304,12 @@ public final class ContentUpdateManager {
         return url + separator + "rylux_rev=" + token.replaceAll("[^A-Za-z0-9._-]", "");
     }
 
-    private static void download(String url, File target, long expectedSize) throws Exception {
+    private static void download(
+            String url,
+            File target,
+            long expectedSize,
+            DownloadProgress progress
+    ) throws Exception {
         HttpURLConnection c = null;
         try {
             c = open(url);
@@ -252,8 +327,12 @@ public final class ContentUpdateManager {
                     if (expectedSize >= 0 && total > expectedSize) {
                         throw new IllegalStateException("文件长度超过清单");
                     }
+                    if (progress != null) progress.onBytes(total);
                 }
                 out.getFD().sync();
+                if (expectedSize >= 0 && total != expectedSize) {
+                    throw new IllegalStateException("文件长度与清单不一致");
+                }
             }
         } finally {
             if (c != null) c.disconnect();
@@ -336,10 +415,13 @@ public final class ContentUpdateManager {
         static UpdateResult updated(int count, String version) {
             return new UpdateResult(true, false, count, version, "资源已更新");
         }
+
         static UpdateResult noUpdate() { return noUpdate(""); }
+
         static UpdateResult noUpdate(String version) {
             return new UpdateResult(false, false, 0, version, "资源已是最新");
         }
+
         static UpdateResult softFailure(String message) {
             return new UpdateResult(false, false, 0, "", message);
         }
