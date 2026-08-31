@@ -1,77 +1,103 @@
-# PakRedirect 卡密后端
+# RYLUX V1 后端
 
-自托管卡密验证与网页管理后台。
+RYLUX V1 后端继续运行在现有 `verify.lovenom.eu.org`，使用 FastAPI + SQLite，并在现有卡密数据库上增量加入用户、VIP、会话、套餐和模块权限。
 
-- FastAPI + SQLite
-- 验证接口：`https://verify.lovenom.eu.org/api/v1/license/verify`
-- 网页后台：`https://verify.lovenom.eu.org/admin`
-- 卡密只保存 SHA-256 哈希，不保存完整明文
-- 管理员密码使用 PBKDF2-SHA256 哈希保存
-- 管理会话使用 HMAC 签名、Secure + HttpOnly Cookie，并对写操作做 CSRF 校验
-- Nginx 对卡密验证和后台登录分别限流
-- 管理前端与后端 API 分离：`admin_web/` + `admin_v2.py`
+## V1 数据
 
-## License Console v2
+新增：
 
-新版管理后台参考成熟卡密系统的后台信息架构，但保持 PakRedirect 自己的技术栈和安全边界，不引入 PHP 或新的数据库。
+- `app_users`：账号、密码哈希、状态、VIP 到期、24h 体验、最后登录/IP；
+- `app_sessions`：登录 Token 摘要、会话到期、设备哈希；
+- `vip_events`：体验、兑换、管理员续期流水；
+- `plans`：7 / 30 / 90 / 180 / 365 天套餐；
+- `modules`：游戏模块；
+- `module_access_logs`：模块启动授权日志。
 
-主要页面：
+现有 `licenses` 表继续保留，并增量加入：
 
-- 数据概览：全部、有效、到期、禁用、今日验证和最近验证记录；
-- 卡密管理：搜索、筛选、分页、批量生成、禁用 / 启用、续期、CSV 导出；
-- 操作日志：管理员登录、生成、禁用、启用、续期、改密等记录；
-- 系统设置：直接在网页中修改管理员账号和密码。
+- `duration_days`
+- `redeemed_by_user_id`
+- `redeemed_at`
 
-一次最多可批量生成 1000 张卡密，支持 1 / 7 / 30 / 90 / 180 / 360 天预设。
+因此升级不会删除原有卡密数据。
 
-完整卡密只在生成成功结果中显示一次，可以直接复制或下载 TXT；数据库仍只保存 SHA-256 哈希，历史列表只显示最后 6 位提示。粘贴完整卡密搜索时，服务端会对输入做 SHA-256 后精确匹配。
-
-## 默认后台账号
-
-首次部署时，后台自动初始化管理员配置，不需要手工生成哈希或编辑环境变量。
-
-默认登录：
+## 用户接口
 
 ```text
-账号：admin
-密码：PakRedirect@2026!
+POST /api/v1/auth/register
+POST /api/v1/auth/login
+POST /api/v1/auth/logout
+GET  /api/v1/me
+GET  /api/v1/plans
+POST /api/v1/redeem
+GET  /api/v1/modules
+POST /api/v1/modules/sg_localization/authorize
 ```
 
-首次登录成功后会强制进入“系统设置”，在完成修改之前不能使用卡密管理功能。
+注册默认赠送 24 小时体验。登录会返回 Bearer Token；服务端数据库只保存 Token 的 SHA-256 摘要。
 
-修改完成后：
+旧接口仍保留：
 
-- 默认密码立即失效；
-- 新管理员账号和密码哈希保存在 SQLite 数据库的 `admin_settings` 表；
-- 会话密钥同时轮换，之前的管理 Cookie 自动失效；
-- 后续可直接在网页“系统设置”中再次修改，不需要 SSH 命令。
+```text
+POST /api/v1/license/verify
+```
 
-> 默认密码是公开的临时引导密码。部署新版后应立即登录后台完成修改。
+用于旧版 APK 过渡。
 
-## 已有服务器升级
+## 管理后台
 
-不会删除现有 `/opt/pakredirect-license/data/licenses.db`，原有卡密和登录记录会保留。
+```text
+https://verify.lovenom.eu.org/admin
+```
+
+V1 增加：
+
+- 用户 / VIP 列表；
+- 用户名 / 最后 IP 搜索；
+- 有效、到期、禁用筛选；
+- 管理员禁用 / 启用用户；
+- 管理员给用户 +1 / 7 / 30 / 90 / 180 / 365 天；
+- 兑换码生成、完整值显示/隐藏/复制；
+- 兑换码套餐天数；
+- 已兑换兑换码禁止重新启用。
+
+管理员登录体系、PBKDF2-SHA256、Secure + HttpOnly Cookie、CSRF 和登录限流继续保留。
+
+## 已有 VPS 升级
+
+数据库文件：
+
+```text
+/opt/pakredirect-license/data/licenses.db
+```
+
+不会删除。
 
 ```bash
 set -e
 
-rm -rf /tmp/PakRedirect-admin
-git clone --depth 1 https://github.com/yusuijiang01-orz/PakRedirect.git /tmp/PakRedirect-admin
+rm -rf /tmp/RYLUX-v1
+git clone --depth 1 https://github.com/yusuijiang01-orz/PakRedirect.git /tmp/RYLUX-v1
 
-cp /tmp/PakRedirect-admin/backend/app.py /opt/pakredirect-license/
-cp /tmp/PakRedirect-admin/backend/admin_v2.py /opt/pakredirect-license/
+cp /tmp/RYLUX-v1/backend/app.py /opt/pakredirect-license/
+cp /tmp/RYLUX-v1/backend/admin_v2.py /opt/pakredirect-license/
+cp /tmp/RYLUX-v1/backend/admin_key_access.py /opt/pakredirect-license/
+cp /tmp/RYLUX-v1/backend/admin_code_v1.py /opt/pakredirect-license/
+cp /tmp/RYLUX-v1/backend/user_v1.py /opt/pakredirect-license/
+cp /tmp/RYLUX-v1/backend/manage.py /opt/pakredirect-license/
+cp /tmp/RYLUX-v1/backend/requirements.txt /opt/pakredirect-license/
+cp /tmp/RYLUX-v1/backend/pakredirect-license.service /etc/systemd/system/pakredirect-license.service
+cp /tmp/RYLUX-v1/backend/nginx-pakredirect-license.conf /etc/nginx/sites-available/pakredirect-license
+
 rm -rf /opt/pakredirect-license/admin_web
-cp -a /tmp/PakRedirect-admin/backend/admin_web /opt/pakredirect-license/
-cp /tmp/PakRedirect-admin/backend/manage.py /opt/pakredirect-license/
-cp /tmp/PakRedirect-admin/backend/requirements.txt /opt/pakredirect-license/
-cp /tmp/PakRedirect-admin/backend/pakredirect-license.service /etc/systemd/system/pakredirect-license.service
-cp /tmp/PakRedirect-admin/backend/nginx-pakredirect-license.conf /etc/nginx/sites-available/pakredirect-license
+cp -a /tmp/RYLUX-v1/backend/admin_web /opt/pakredirect-license/
 
 chown -R paklicense:paklicense /opt/pakredirect-license
 /opt/pakredirect-license/.venv/bin/pip install -r /opt/pakredirect-license/requirements.txt
 
 systemctl daemon-reload
 systemctl restart pakredirect-license
+
 nginx -t
 systemctl reload nginx
 ```
@@ -79,102 +105,54 @@ systemctl reload nginx
 检查：
 
 ```bash
-curl -i https://verify.lovenom.eu.org/healthz
+curl -sS https://verify.lovenom.eu.org/healthz
 ```
 
-然后浏览器访问：
+预期包含：
 
-```text
-https://verify.lovenom.eu.org/admin
+```json
+{"ok":true,"product":"RYLUX","api":"v1"}
 ```
 
-首次使用默认账号密码登录并立即修改。
-
-旧的 `/etc/pakredirect-license.env` 不再用于管理员登录，可以保留或删除；新版 systemd 服务不会读取它。
-
-## 网页后台功能
-
-后台支持：
-
-- 一键创建 1 / 7 / 30 / 90 / 180 / 360 天卡；
-- 批量生成，一次最多 1000 张；
-- 查看到期时间和当前状态；
-- 按完整卡密、最后 6 位、标签或最后登录 IP 搜索；
-- 状态筛选和分页；
-- 禁用 / 重新启用；
-- 续期 1 / 7 / 30 / 90 / 180 / 360 天；
-- 查看最后验证时间和最后登录 IP；
-- 导出当前筛选结果为 CSV；
-- 查看管理员操作日志；
-- 页面内修改管理员账号和密码。
-
-## 首次从零安装
+## 注册测试
 
 ```bash
-apt update
-apt install -y python3 python3-venv nginx curl ca-certificates certbot git
-
-useradd --system \
-  --home /opt/pakredirect-license \
-  --shell /usr/sbin/nologin \
-  paklicense 2>/dev/null || true
-
-mkdir -p /opt/pakredirect-license/data
-cp app.py admin_v2.py manage.py requirements.txt /opt/pakredirect-license/
-cp -a admin_web /opt/pakredirect-license/
-
-python3 -m venv /opt/pakredirect-license/.venv
-/opt/pakredirect-license/.venv/bin/pip install --upgrade pip
-/opt/pakredirect-license/.venv/bin/pip install -r /opt/pakredirect-license/requirements.txt
-
-chown -R paklicense:paklicense /opt/pakredirect-license
-chmod 750 /opt/pakredirect-license
-chmod 750 /opt/pakredirect-license/data
-
-cp pakredirect-license.service /etc/systemd/system/
-systemctl daemon-reload
-systemctl enable --now pakredirect-license
+curl -sS \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"testuser","password":"test123456","device_id":"manual-test"}' \
+  https://verify.lovenom.eu.org/api/v1/auth/register
 ```
 
-Nginx 使用仓库中的：
-
-```text
-backend/nginx-pakredirect-license.conf
-```
-
-证书路径：
-
-```text
-/etc/letsencrypt/live/verify.lovenom.eu.org/fullchain.pem
-/etc/letsencrypt/live/verify.lovenom.eu.org/privkey.pem
-```
-
-## CLI
-
-CLI 仍保留用于卡密维护，例如：
+返回 Token 后：
 
 ```bash
-cd /opt/pakredirect-license
-
-sudo -u paklicense \
-  PAKREDIRECT_LICENSE_DB=/opt/pakredirect-license/data/licenses.db \
-  ./.venv/bin/python manage.py create --days 30 --label "测试"
+curl -sS \
+  -H 'Authorization: Bearer 这里填写Token' \
+  https://verify.lovenom.eu.org/api/v1/me
 ```
 
-网页后台是日常管理的推荐入口。
+## V1 支付边界
 
-## Android 客户端链路
-
-客户端登录和点击“开启汉化”时继续验证：
+V1 只建立套餐模型，不处理真实支付：
 
 ```text
-https://verify.lovenom.eu.org/api/v1/license/verify
+7 / 30 / 90 / 180 / 365 天
 ```
 
-验证通过后，PakRedirect 在本机监听 `127.0.0.1:18480`，游戏读取：
+用户通过兑换码充值。订单、支付回调、退款和补单放到后续版本。
+
+## Android 模块链路
+
+用户登录 -> VIP 授权 -> 本机启动：
+
+```text
+http://127.0.0.1:18480
+```
+
+游戏继续读取：
 
 ```text
 http://127.0.0.1:18480/linkspak.txt
 ```
 
-并自行下载本地 PAK。游戏使用自身 UID 写入自己的私有数据目录，因此该模式不需要 Root。
+因此用户系统的升级不改变已经验证过的 localhost PAK 推送机制。
