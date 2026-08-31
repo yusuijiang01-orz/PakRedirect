@@ -7,11 +7,12 @@ android {
     compileSdk 35
 
     defaultConfig {
+        // Keep the existing package id for upgrade compatibility in V1.
         applicationId 'com.example.pakredirect'
         minSdk 26
         targetSdk 35
-        versionCode 4
-        versionName '1.2.0'
+        versionCode 5
+        versionName '2.0.0'
     }
 
     sourceSets {
