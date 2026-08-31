@@ -29,10 +29,12 @@ android {
     signingConfigs {
         release {
             def storePath = System.getenv('RYLUX_KEYSTORE_PATH')
-            if (storePath) storeFile file(storePath)
-            storePassword System.getenv('RYLUX_KEYSTORE_PASSWORD')
-            keyAlias System.getenv('RYLUX_KEY_ALIAS')
-            keyPassword System.getenv('RYLUX_KEY_PASSWORD')
+            if (storePath) {
+                storeFile file(storePath)
+                storePassword System.getenv('RYLUX_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('RYLUX_KEY_ALIAS')
+                keyPassword System.getenv('RYLUX_KEY_PASSWORD')
+            }
         }
     }
 
