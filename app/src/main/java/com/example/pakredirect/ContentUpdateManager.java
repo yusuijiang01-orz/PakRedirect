@@ -169,6 +169,7 @@ public final class ContentUpdateManager {
                     if (item.hadTarget && item.backup.exists()) item.backup.renameTo(item.target);
                     throw new IllegalStateException("无法替换资源：" + item.name);
                 }
+                item.committed = true;
                 committed.add(item);
             }
         } catch (Throwable t) {
@@ -181,10 +182,12 @@ public final class ContentUpdateManager {
     private static void rollback(List<ContentItem> items) {
         for (int i = items.size() - 1; i >= 0; i--) {
             ContentItem item = items.get(i);
+            if (!item.committed) continue;
             try {
                 if (item.target.exists()) item.target.delete();
                 if (item.hadTarget && item.backup.exists()) item.backup.renameTo(item.target);
                 if (!item.hadTarget && item.backup.exists()) item.backup.delete();
+                item.committed = false;
             } catch (Throwable ignored) {
             }
         }
@@ -289,6 +292,7 @@ public final class ContentUpdateManager {
         final File stage;
         final File backup;
         boolean hadTarget;
+        boolean committed;
 
         ContentItem(File dir, String name, String url, String expectedSha, long expectedSize, long revision) {
             this.name = name;
