@@ -25,32 +25,116 @@ jobs:
         shell: bash
         run: |
           python - <<'PY'
-          import hashlib, json, pathlib, os
+          import datetime
+          import hashlib
+          import json
+          import os
+          import pathlib
 
           root = pathlib.Path('pak')
           repo = os.environ['GITHUB_REPOSITORY']
-          files = []
-          fingerprint = hashlib.sha256()
-          for path in sorted(root.iterdir()):
-              if not path.is_file():
-                  continue
-              if path.name != 'linkspak.txt' and path.suffix.lower() != '.pak':
-                  continue
-              data_hash = hashlib.sha256()
+          manifest_path = root / 'manifest.json'
+
+          old = {}
+          if manifest_path.exists():
+              try:
+                  old = json.loads(manifest_path.read_text(encoding='utf-8'))
+              except Exception:
+                  old = {}
+          old_by_name = {
+              item.get('name'): item
+              for item in old.get('files', [])
+              if isinstance(item, dict) and item.get('name')
+          }
+
+          def digest(path):
+              h = hashlib.sha256()
               with path.open('rb') as f:
                   for chunk in iter(lambda: f.read(1024 * 1024), b''):
-                      data_hash.update(chunk)
-              sha = data_hash.hexdigest()
+                      h.update(chunk)
+              return h.hexdigest()
+
+          max_old_revision = 0
+          for item in old_by_name.values():
+              try:
+                  max_old_revision = max(max_old_revision, int(item.get('revision', 0) or 0))
+              except Exception:
+                  pass
+
+          # Signed-32-bit-safe monotonic content revision. YYYYMMDD00 leaves
+          # room for many same-day updates and stays below 2,147,483,647.
+          today_base = int(datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d')) * 100
+          next_revision = max(today_base, max_old_revision + 1)
+
+          pak_entries = {}
+          for path in sorted(root.glob('*.pak')):
+              sha = digest(path)
               size = path.stat().st_size
-              fingerprint.update(path.name.encode('utf-8'))
-              fingerprint.update(str(size).encode('ascii'))
-              fingerprint.update(sha.encode('ascii'))
-              files.append({
+              previous = old_by_name.get(path.name, {})
+              try:
+                  previous_revision = int(previous.get('revision', 0) or 0)
+              except Exception:
+                  previous_revision = 0
+              if previous.get('sha256') == sha and previous_revision > 0:
+                  revision = previous_revision
+              else:
+                  revision = next_revision
+                  next_revision += 1
+              pak_entries[path.name] = {
                   'name': path.name,
                   'size': size,
                   'sha256': sha,
+                  'revision': revision,
                   'url': f'https://raw.githubusercontent.com/{repo}/main/pak/{path.name}',
-              })
+              }
+
+          # Keep linkspak.txt synchronized with the exact PAK byte size and the
+          # monotonic revision. BundledPakServer later rewrites only the URL and
+          # preserves these values for the game's own update comparison.
+          link_path = root / 'linkspak.txt'
+          lines = link_path.read_text(encoding='utf-8').splitlines()
+          rewritten = []
+          for line in lines:
+              fields = line.split(',')
+              if len(fields) >= 6:
+                  pak_name = fields[2].strip()
+                  item = pak_entries.get(pak_name)
+                  if item is not None:
+                      fields[3] = str(item['size'])
+                      fields[5] = str(item['revision'])
+                      line = ','.join(fields)
+              rewritten.append(line)
+          link_path.write_text('\n'.join(rewritten) + '\n', encoding='utf-8')
+
+          link_sha = digest(link_path)
+          link_size = link_path.stat().st_size
+          previous_link = old_by_name.get('linkspak.txt', {})
+          try:
+              previous_link_revision = int(previous_link.get('revision', 0) or 0)
+          except Exception:
+              previous_link_revision = 0
+          if previous_link.get('sha256') == link_sha and previous_link_revision > 0:
+              link_revision = previous_link_revision
+          else:
+              link_revision = next_revision
+              next_revision += 1
+
+          files = list(pak_entries.values())
+          files.append({
+              'name': 'linkspak.txt',
+              'size': link_size,
+              'sha256': link_sha,
+              'revision': link_revision,
+              'url': f'https://raw.githubusercontent.com/{repo}/main/pak/linkspak.txt',
+          })
+          files.sort(key=lambda item: item['name'])
+
+          fingerprint = hashlib.sha256()
+          for item in files:
+              fingerprint.update(item['name'].encode('utf-8'))
+              fingerprint.update(str(item['size']).encode('ascii'))
+              fingerprint.update(item['sha256'].encode('ascii'))
+              fingerprint.update(str(item['revision']).encode('ascii'))
 
           manifest = {
               'schema': 1,
@@ -58,22 +142,22 @@ jobs:
               'version': fingerprint.hexdigest()[:12],
               'files': files,
           }
-          (root / 'manifest.json').write_text(
+          manifest_path.write_text(
               json.dumps(manifest, ensure_ascii=False, indent=2) + '\n',
               encoding='utf-8'
           )
           PY
 
-      - name: Commit manifest if changed
+      - name: Commit content metadata if changed
         shell: bash
         run: |
           set -euo pipefail
-          if git diff --quiet -- pak/manifest.json; then
-            echo 'Manifest unchanged'
+          if git diff --quiet -- pak/linkspak.txt pak/manifest.json; then
+            echo 'Content metadata unchanged'
             exit 0
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add pak/manifest.json
+          git add pak/linkspak.txt pak/manifest.json
           git commit -m 'Update RYLUX content manifest'
           git push
