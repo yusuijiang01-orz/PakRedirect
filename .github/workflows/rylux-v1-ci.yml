@@ -32,7 +32,6 @@ jobs:
           app.init_db()
           client = TestClient(app.app, base_url='https://testserver')
 
-          # Public RYLUX account flow.
           r = client.post('/api/v1/auth/register', json={
               'username':'v1user', 'password':'password123', 'device_id':'device-a'
           })
@@ -50,7 +49,6 @@ jobs:
           authz = client.post('/api/v1/modules/sg_localization/authorize', headers=headers, json={})
           assert authz.status_code == 200 and authz.json()['allowed'] is True
 
-          # Admin login + mandatory password change.
           r = client.post('/admin/api/login', json={'username':'admin','password':'PakRedirect@2026!'})
           assert r.status_code == 200, r.text
           admin_me = client.get('/admin/api/me').json()
@@ -64,7 +62,6 @@ jobs:
           assert r.status_code == 200, r.text
           csrf = client.get('/admin/api/me').json()['csrf']
 
-          # Generate a 7-day redeem code and redeem it into the account.
           r = client.post('/admin/api/licenses/generate', headers={'X-CSRF-Token':csrf}, json={
               'days':7, 'quantity':1, 'label':'v1-test'
           })
@@ -93,6 +90,9 @@ jobs:
 
           print('RYLUX V1 backend smoke passed')
           PY
+
+      - name: Admin frontend syntax check
+        run: node --check backend/admin_web/app.js && node --check backend/admin_web/login.js
 
       - uses: actions/setup-java@v5
         with:
