@@ -124,10 +124,15 @@ public final class ContentUpdateManager {
                 }
             }
 
-            for (ContentItem item : changed) deleteIfExists(item.backup);
+            // The transaction is now accepted. Backup deletion is best effort;
+            // a leftover backup is safely cleaned on the next launch.
+            for (ContentItem item : changed) {
+                item.committed = false;
+                quietDelete(item.backup);
+            }
         } catch (Throwable t) {
             rollback(changed);
-            for (ContentItem item : changed) deleteIfExists(item.stage);
+            for (ContentItem item : changed) quietDelete(item.stage);
             if (t instanceof Exception) throw (Exception) t;
             throw new IllegalStateException("资源更新失败", t);
         }
@@ -202,6 +207,13 @@ public final class ContentUpdateManager {
     private static void deleteIfExists(File file) throws Exception {
         if (file.exists() && !file.delete()) {
             throw new IllegalStateException("无法清理临时资源：" + file.getName());
+        }
+    }
+
+    private static void quietDelete(File file) {
+        try {
+            if (file.exists()) file.delete();
+        } catch (Throwable ignored) {
         }
     }
 
