@@ -11,7 +11,7 @@
 
     <application
         android:allowBackup="false"
-        android:label="PakRedirect"
+        android:label="RYLUX"
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
         android:theme="@style/AppTheme">
