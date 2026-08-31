@@ -1,0 +1,117 @@
+name: RYLUX V1 integration test
+
+on:
+  push:
+    branches:
+      - feature/rylux-v1
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install backend dependencies
+        run: python -m pip install -r backend/requirements.txt httpx
+
+      - name: Backend syntax and V1 smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile backend/app.py backend/admin_v2.py backend/admin_key_access.py backend/admin_code_v1.py backend/user_v1.py backend/manage.py
+          cd backend
+          export PAKREDIRECT_LICENSE_DB="$RUNNER_TEMP/rylux-v1.db"
+          python - <<'PY'
+          from fastapi.testclient import TestClient
+          import app
+
+          app.init_db()
+          client = TestClient(app.app, base_url='https://testserver')
+
+          # Public RYLUX account flow.
+          r = client.post('/api/v1/auth/register', json={
+              'username':'v1user', 'password':'password123', 'device_id':'device-a'
+          })
+          assert r.status_code == 200, r.text
+          reg = r.json()
+          assert reg['user']['membership']['kind'] == 'trial'
+          token = reg['token']
+          headers = {'Authorization': f'Bearer {token}'}
+
+          me = client.get('/api/v1/me', headers=headers)
+          assert me.status_code == 200 and me.json()['user']['membership']['active'] is True
+          plans = client.get('/api/v1/plans')
+          assert plans.status_code == 200
+          assert [x['days'] for x in plans.json()['plans']] == [7,30,90,180,365]
+          authz = client.post('/api/v1/modules/sg_localization/authorize', headers=headers, json={})
+          assert authz.status_code == 200 and authz.json()['allowed'] is True
+
+          # Admin login + mandatory password change.
+          r = client.post('/admin/api/login', json={'username':'admin','password':'PakRedirect@2026!'})
+          assert r.status_code == 200, r.text
+          admin_me = client.get('/admin/api/me').json()
+          csrf = admin_me['csrf']
+          r = client.post('/admin/api/credentials', headers={'X-CSRF-Token':csrf}, json={
+              'current_password':'PakRedirect@2026!',
+              'username':'owner',
+              'new_password':'ChangedPassword123!',
+              'confirm_password':'ChangedPassword123!'
+          })
+          assert r.status_code == 200, r.text
+          csrf = client.get('/admin/api/me').json()['csrf']
+
+          # Generate a 7-day redeem code and redeem it into the account.
+          r = client.post('/admin/api/licenses/generate', headers={'X-CSRF-Token':csrf}, json={
+              'days':7, 'quantity':1, 'label':'v1-test'
+          })
+          assert r.status_code == 200, r.text
+          code = r.json()['keys'][0]
+          redeem = client.post('/api/v1/redeem', headers=headers, json={'code':code})
+          assert redeem.status_code == 200, redeem.text
+          assert redeem.json()['days'] == 7
+          duplicate = client.post('/api/v1/redeem', headers=headers, json={'code':code})
+          assert duplicate.status_code == 409
+
+          me2 = client.get('/api/v1/me', headers=headers).json()['user']
+          assert me2['membership']['kind'] == 'vip'
+
+          users = client.get('/admin/api/users?page_size=30')
+          assert users.status_code == 200 and users.json()['total'] == 1
+          uid = users.json()['items'][0]['id']
+          ext = client.post(f'/admin/api/users/{uid}/extend', headers={'X-CSRF-Token':csrf}, json={'days':30})
+          assert ext.status_code == 200
+
+          code_rows = client.get('/admin/api/licenses?reveal=1&page_size=30').json()['items']
+          row = next(x for x in code_rows if x['label']=='v1-test')
+          assert row['redeemed'] is True and row['duration_days'] == 7
+          reen = client.post(f"/admin/api/licenses/{row['id']}/toggle", headers={'X-CSRF-Token':csrf}, json={'enabled':True})
+          assert reen.status_code == 409
+
+          print('RYLUX V1 backend smoke passed')
+          PY
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Install Android SDK 35
+        shell: bash
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n 1)"
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Build RYLUX debug APK
+        run: gradle assembleDebug --stacktrace
