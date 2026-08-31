@@ -13,6 +13,8 @@ RYLUX V1 后端继续运行在现有 `verify.lovenom.eu.org`，使用 FastAPI + 
 - `modules`：游戏模块；
 - `module_access_logs`：模块启动授权日志。
 
+`registration_guard_v1.py` 会给 `app_users` 增量增加 `registration_ip_hash`，并使用真实客户端 IP 的 SHA-256 摘要执行“同一 IP 48 小时最多成功注册一个账号”的限制。明文注册 IP 不新增持久化字段；原有最后登录 IP 字段继续按既有逻辑使用。
+
 现有 `licenses` 表继续保留，并增量加入：
 
 - `duration_days`
@@ -34,7 +36,9 @@ GET  /api/v1/modules
 POST /api/v1/modules/sg_localization/authorize
 ```
 
-注册默认赠送 24 小时体验。登录会返回 Bearer Token；服务端数据库只保存 Token 的 SHA-256 摘要。
+注册默认赠送 24 小时体验。同一公网 IP 在成功注册后的 48 小时内再次注册返回 HTTP 429。登录会返回 Bearer Token；服务端数据库只保存 Token 的 SHA-256 摘要。
+
+首个模块的用户可见名称为“封神榜汉化”；内部模块代码仍保持 `sg_localization`，避免破坏已有客户端接口。
 
 旧接口仍保留：
 
@@ -84,6 +88,7 @@ cp /tmp/RYLUX-v1/backend/admin_v2.py /opt/pakredirect-license/
 cp /tmp/RYLUX-v1/backend/admin_key_access.py /opt/pakredirect-license/
 cp /tmp/RYLUX-v1/backend/admin_code_v1.py /opt/pakredirect-license/
 cp /tmp/RYLUX-v1/backend/user_v1.py /opt/pakredirect-license/
+cp /tmp/RYLUX-v1/backend/registration_guard_v1.py /opt/pakredirect-license/
 cp /tmp/RYLUX-v1/backend/manage.py /opt/pakredirect-license/
 cp /tmp/RYLUX-v1/backend/requirements.txt /opt/pakredirect-license/
 cp /tmp/RYLUX-v1/backend/pakredirect-license.service /etc/systemd/system/pakredirect-license.service
@@ -129,6 +134,12 @@ curl -sS \
 curl -sS \
   -H 'Authorization: Bearer 这里填写Token' \
   https://verify.lovenom.eu.org/api/v1/me
+```
+
+同一公网 IP 立即再次使用不同用户名注册，预期返回 HTTP 429 和：
+
+```text
+当前网络 48 小时内已注册过账号，请稍后再试
 ```
 
 ## V1 支付边界
