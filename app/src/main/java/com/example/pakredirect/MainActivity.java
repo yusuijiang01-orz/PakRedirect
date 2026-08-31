@@ -26,8 +26,6 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import java.net.HttpURLConnection;
-import java.net.URL;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -61,6 +59,10 @@ public class MainActivity extends Activity {
     private Button authButton;
     private TextView switchModeLink;
     private ProgressBar authProgress;
+
+    private ProgressBar moduleProgress;
+    private TextView moduleProgressText;
+    private volatile String launchWaitError = "";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -96,6 +98,8 @@ public class MainActivity extends Activity {
         currentMembershipActive = false;
         confirmPasswordEdit = null;
         rememberCheck = null;
+        moduleProgress = null;
+        moduleProgressText = null;
 
         LinearLayout root = baseContent();
         root.setPadding(dp(22), dp(52), dp(22), dp(30));
@@ -302,14 +306,7 @@ public class MainActivity extends Activity {
         memberCard.addView(refresh, refreshLp);
         root.addView(memberCard, blockParams());
 
-        LinearLayout planCard = card();
-        planCard.addView(text("会员套餐", 17, TEXT, true));
-        TextView plans = text("7 天   ·   30 天   ·   90 天   ·   180 天   ·   365 天", 14, TEXT, true);
-        plans.setPadding(0, dp(10), 0, dp(6));
-        planCard.addView(plans);
-        planCard.addView(text("当前可使用兑换码为账号充值使用时间。", 12, MUTED, false));
-        root.addView(planCard, blockParams());
-
+        // 套餐卡片仅为静态说明且不可交互，移除以减少首页冗余。
         LinearLayout redeemCard = card();
         redeemCard.addView(text("兑换码充值", 17, TEXT, true));
         EditText code = input("输入兑换码", false);
@@ -373,6 +370,24 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams startLp = new LinearLayout.LayoutParams(-1, dp(52));
         startLp.topMargin = dp(14);
         card.addView(start, startLp);
+
+        moduleProgressText = text("", 12, MUTED, false);
+        moduleProgressText.setVisibility(View.GONE);
+        moduleProgressText.setGravity(Gravity.CENTER_HORIZONTAL);
+        moduleProgressText.setPadding(0, dp(10), 0, dp(5));
+        card.addView(moduleProgressText, new LinearLayout.LayoutParams(-1, -2));
+
+        moduleProgress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        moduleProgress.setMax(100);
+        moduleProgress.setProgress(0);
+        moduleProgress.setProgressTintList(ColorStateList.valueOf(PRIMARY));
+        moduleProgress.setIndeterminateTintList(ColorStateList.valueOf(PRIMARY));
+        moduleProgress.setProgressBackgroundTintList(ColorStateList.valueOf(CARD_SOFT));
+        moduleProgress.setVisibility(View.GONE);
+        LinearLayout.LayoutParams progressLp = new LinearLayout.LayoutParams(-1, dp(6));
+        progressLp.topMargin = dp(2);
+        card.addView(moduleProgress, progressLp);
+
         return card;
     }
 
@@ -400,21 +415,22 @@ public class MainActivity extends Activity {
     }
 
     private void activateModule(Button button) {
-        if (!currentMembershipActive) {
-            return;
-        }
+        if (!currentMembershipActive) return;
         if (currentToken == null || currentToken.trim().isEmpty()) {
             showAuthUi(false);
             return;
         }
+
         button.setEnabled(false);
         button.setText("正在验证账号…");
+        showLaunchProgress("正在验证账号…", -1);
         final String token = currentToken;
 
         new Thread(() -> {
             AuthClient.ActionResult result = AuthClient.authorize(token, MODULE_CODE);
             if (!result.requestOk || !result.success) {
                 runOnUiThread(() -> {
+                    hideLaunchProgress();
                     button.setEnabled(true);
                     button.setText("启动游戏");
                     toast(result.message);
@@ -424,36 +440,111 @@ public class MainActivity extends Activity {
             }
 
             if (getPackageManager().getLaunchIntentForPackage(TARGET_PACKAGE) == null) {
-                runOnUiThread(() -> {
-                    button.setEnabled(true);
-                    button.setText("启动游戏");
-                    toast("未检测到封神榜游戏");
-                });
+                resetStartButton(button, "未检测到封神榜游戏");
                 return;
             }
 
-            runOnUiThread(() -> button.setText("正在启动…"));
+            LaunchProgress.begin("正在检查封神榜资源更新…");
+            runOnUiThread(() -> {
+                button.setText("正在准备资源…");
+                showLaunchProgress("正在检查封神榜资源更新…", -1);
+            });
+
             try {
                 Intent service = new Intent(this, InterceptService.class)
                         .setAction(InterceptService.ACTION_START);
                 if (Build.VERSION.SDK_INT >= 26) startForegroundService(service);
                 else startService(service);
             } catch (Throwable t) {
-                resetStartButton(button, "启动失败：" + safeMessage(t));
+                LaunchProgress.fail("启动失败：" + safeMessage(t));
+                resetStartButton(button, LaunchProgress.error());
                 return;
             }
 
-            if (!waitForLocalServer()) {
-                resetStartButton(button, "服务启动失败，请重试");
+            if (!waitForModuleReady()) {
+                String message = launchWaitError;
+                if (message == null || message.trim().isEmpty()) message = "资源准备失败，请重试";
+                resetStartButton(button, message);
                 return;
             }
 
             runOnUiThread(() -> {
+                hideLaunchProgress();
                 button.setEnabled(true);
                 button.setText("启动游戏");
                 if (!launchGame()) toast("服务已启动，但未找到封神榜游戏启动入口");
             });
         }, "RYLUX-Module-Authorize").start();
+    }
+
+    private boolean waitForModuleReady() {
+        launchWaitError = "";
+        long deadline = System.currentTimeMillis() + 5L * 60L * 1000L;
+        String lastMessage = null;
+        int lastProgress = Integer.MIN_VALUE;
+
+        while (System.currentTimeMillis() < deadline) {
+            if (LaunchProgress.isRunning()) return true;
+
+            String message = LaunchProgress.message();
+            int progress = LaunchProgress.progress();
+            if ((lastMessage == null && message != null)
+                    || (lastMessage != null && !lastMessage.equals(message))
+                    || progress != lastProgress) {
+                final String uiMessage = message == null || message.trim().isEmpty()
+                        ? "正在准备资源…"
+                        : message;
+                final int uiProgress = progress;
+                runOnUiThread(() -> showLaunchProgress(uiMessage, uiProgress));
+                lastMessage = message;
+                lastProgress = progress;
+            }
+
+            String error = LaunchProgress.error();
+            if (!LaunchProgress.isStarting()
+                    && !LaunchProgress.isRunning()
+                    && error != null
+                    && !error.trim().isEmpty()) {
+                launchWaitError = error;
+                return false;
+            }
+
+            try {
+                Thread.sleep(150L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                launchWaitError = "资源准备已中断";
+                return false;
+            }
+        }
+
+        launchWaitError = "资源准备超时，请检查网络后重试";
+        return false;
+    }
+
+    private void showLaunchProgress(String message, int progress) {
+        if (moduleProgressText != null) {
+            moduleProgressText.setText(message == null ? "正在准备资源…" : message);
+            moduleProgressText.setVisibility(View.VISIBLE);
+        }
+        if (moduleProgress != null) {
+            moduleProgress.setVisibility(View.VISIBLE);
+            if (progress < 0) {
+                moduleProgress.setIndeterminate(true);
+            } else {
+                moduleProgress.setIndeterminate(false);
+                moduleProgress.setProgress(Math.max(0, Math.min(100, progress)));
+            }
+        }
+    }
+
+    private void hideLaunchProgress() {
+        if (moduleProgressText != null) moduleProgressText.setVisibility(View.GONE);
+        if (moduleProgress != null) {
+            moduleProgress.setIndeterminate(false);
+            moduleProgress.setProgress(0);
+            moduleProgress.setVisibility(View.GONE);
+        }
     }
 
     private void performLogout() {
@@ -466,30 +557,6 @@ public class MainActivity extends Activity {
         if (token != null && !token.trim().isEmpty()) {
             new Thread(() -> AuthClient.logout(token), "RYLUX-Logout").start();
         }
-    }
-
-    private boolean waitForLocalServer() {
-        for (int i = 0; i < 30; i++) {
-            HttpURLConnection connection = null;
-            try {
-                URL url = new URL("http://127.0.0.1:" + InterceptService.LOCAL_HTTP_PORT + "/health");
-                connection = (HttpURLConnection) url.openConnection();
-                connection.setConnectTimeout(500);
-                connection.setReadTimeout(500);
-                connection.setUseCaches(false);
-                if (connection.getResponseCode() == 200) return true;
-            } catch (Throwable ignored) {
-            } finally {
-                if (connection != null) connection.disconnect();
-            }
-            try {
-                Thread.sleep(200);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return false;
-            }
-        }
-        return false;
     }
 
     private boolean launchGame() {
@@ -523,6 +590,7 @@ public class MainActivity extends Activity {
 
     private void resetStartButton(Button button, String message) {
         runOnUiThread(() -> {
+            hideLaunchProgress();
             button.setEnabled(true);
             button.setText("启动游戏");
             toast(message);
