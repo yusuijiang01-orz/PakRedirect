@@ -18,6 +18,7 @@ public class InterceptService extends Service implements BundledPakServer.Listen
     public static final String EXTRA_MESSAGE = "message";
     public static final String EXTRA_HITS = "hits";
     public static final String EXTRA_RUNNING = "running";
+    public static final String EXTRA_PROGRESS = "progress";
     public static final int LOCAL_HTTP_PORT = BundledPakServer.PORT;
 
     private static volatile boolean currentRunning;
@@ -51,17 +52,22 @@ public class InterceptService extends Service implements BundledPakServer.Listen
             }
         } catch (Throwable t) {
             Log.e("RYLUX", "startForeground failed", t);
-            broadcast("启动失败: " + safeMessage(t), 0, false);
+            String message = "启动失败: " + safeMessage(t);
+            LaunchProgress.fail(message);
+            broadcast(message, 0, false, -1);
             stopSelf();
             return START_NOT_STICKY;
         }
 
         if (starting) {
-            broadcast("本地模块正在启动…", -1, currentRunning);
+            String message = LaunchProgress.message();
+            if (message == null || message.trim().isEmpty()) message = "本地模块正在启动…";
+            broadcast(message, -1, currentRunning, LaunchProgress.progress());
             return START_STICKY;
         }
 
         starting = true;
+        LaunchProgress.begin("正在检查封神榜资源更新…");
         new Thread(() -> {
             synchronized (lifecycleLock) {
                 try { startServerLocked(); }
@@ -75,28 +81,43 @@ public class InterceptService extends Service implements BundledPakServer.Listen
         BundledPakServer next = null;
         try {
             stopServerLocked(null);
-            updateNotification("正在检查封神榜资源更新…");
-            ContentUpdateManager.UpdateResult update = ContentUpdateManager.checkAndApply(this);
+            updateLaunchStatus("正在检查封神榜资源更新…", -1);
+            ContentUpdateManager.UpdateResult update = ContentUpdateManager.checkAndApply(
+                    this,
+                    (message, percent, indeterminate) ->
+                            updateLaunchStatus(message, indeterminate ? -1 : percent)
+            );
             if (update.updated) {
-                broadcast("封神榜资源已更新 " + update.changedFiles + " 个文件", -1, false);
+                updateLaunchStatus("封神榜资源已更新 " + update.changedFiles + " 个文件", 100);
             }
 
+            updateLaunchStatus("正在启动本地 PAK 服务…", 100);
             next = new BundledPakServer(this, this);
             next.prepare();
             next.start();
             server = next;
             currentHits = 0;
             currentRunning = true;
+            String ready = "本地游戏模块已启动";
+            LaunchProgress.ready(ready);
             updateNotification("本地游戏模块运行中 · 127.0.0.1:" + LOCAL_HTTP_PORT);
-            broadcast("本地游戏模块已启动", 0, true);
+            broadcast(ready, 0, true, 100);
         } catch (Throwable t) {
             Log.e("RYLUX", "local server start failed", t);
             if (next != null) try { next.stop(); } catch (Throwable ignored) {}
             server = null;
             currentRunning = false;
-            broadcast("启动失败: " + safeMessage(t), 0, false);
+            String message = "启动失败: " + safeMessage(t);
+            LaunchProgress.fail(message);
+            broadcast(message, 0, false, -1);
             stopSelf();
         }
+    }
+
+    private void updateLaunchStatus(String message, int progress) {
+        LaunchProgress.update(message, progress);
+        updateNotification(message);
+        broadcast(message, -1, currentRunning, progress);
     }
 
     private void stopServerLocked(String message) {
@@ -104,7 +125,10 @@ public class InterceptService extends Service implements BundledPakServer.Listen
         BundledPakServer old = server;
         server = null;
         if (old != null) try { old.stop(); } catch (Throwable ignored) {}
-        if (message != null) broadcast(message, 0, false);
+        if (message != null) {
+            LaunchProgress.stopped(message);
+            broadcast(message, 0, false, -1);
+        }
     }
 
     @Override public void onDestroy() {
@@ -115,24 +139,25 @@ public class InterceptService extends Service implements BundledPakServer.Listen
     @Override public IBinder onBind(Intent intent) { return null; }
 
     @Override public void onLog(String line) {
-        broadcast(line, -1, currentRunning);
+        broadcast(line, -1, currentRunning, LaunchProgress.progress());
         updateNotification(line.length() > 70 ? line.substring(0, 70) : line);
     }
 
     @Override public void onHit(int count) {
         currentHits = count;
-        broadcast("命中本地 PAK", count, true);
+        broadcast("命中本地 PAK", count, true, 100);
     }
 
     public static boolean isRunning() { return currentRunning; }
     public static int hitCount() { return currentHits; }
 
-    private void broadcast(String message, int hits, boolean running) {
+    private void broadcast(String message, int hits, boolean running, int progress) {
         Intent intent = new Intent(ACTION_STATUS);
         intent.setPackage(getPackageName());
         intent.putExtra(EXTRA_MESSAGE, message);
         intent.putExtra(EXTRA_HITS, hits);
         intent.putExtra(EXTRA_RUNNING, running);
+        intent.putExtra(EXTRA_PROGRESS, progress);
         sendBroadcast(intent);
     }
 
