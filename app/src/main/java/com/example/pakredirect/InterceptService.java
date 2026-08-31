@@ -36,28 +36,28 @@ public class InterceptService extends Service implements BundledPakServer.Listen
         String action = intent == null ? null : intent.getAction();
         if (ACTION_STOP.equals(action)) {
             new Thread(() -> {
-                synchronized (lifecycleLock) { stopServerLocked("已停止本地 PAK 服务"); }
+                synchronized (lifecycleLock) { stopServerLocked("已停止本地模块服务"); }
                 stopSelf();
-            }, "PakRedirect-Stop").start();
+            }, "RYLUX-Stop").start();
             return START_NOT_STICKY;
         }
         if (!ACTION_START.equals(action)) return START_STICKY;
 
         try {
             if (Build.VERSION.SDK_INT >= 29) {
-                startForeground(7, notification("正在准备本地 PAK 服务…"), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
+                startForeground(7, notification("正在准备本地游戏模块…"), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
             } else {
-                startForeground(7, notification("正在准备本地 PAK 服务…"));
+                startForeground(7, notification("正在准备本地游戏模块…"));
             }
         } catch (Throwable t) {
-            Log.e("PakRedirect", "startForeground failed", t);
+            Log.e("RYLUX", "startForeground failed", t);
             broadcast("启动失败: " + safeMessage(t), 0, false);
             stopSelf();
             return START_NOT_STICKY;
         }
 
         if (starting) {
-            broadcast("本地 PAK 服务正在启动…", -1, currentRunning);
+            broadcast("本地模块正在启动…", -1, currentRunning);
             return START_STICKY;
         }
 
@@ -67,7 +67,7 @@ public class InterceptService extends Service implements BundledPakServer.Listen
                 try { startServerLocked(); }
                 finally { starting = false; }
             }
-        }, "PakRedirect-Start").start();
+        }, "RYLUX-Local-Module").start();
         return START_STICKY;
     }
 
@@ -81,10 +81,10 @@ public class InterceptService extends Service implements BundledPakServer.Listen
             server = next;
             currentHits = 0;
             currentRunning = true;
-            updateNotification("汉化本地服务运行中 · 127.0.0.1:" + LOCAL_HTTP_PORT);
-            broadcast("本地汉化服务已启动", 0, true);
+            updateNotification("本地游戏模块运行中 · 127.0.0.1:" + LOCAL_HTTP_PORT);
+            broadcast("本地游戏模块已启动", 0, true);
         } catch (Throwable t) {
-            Log.e("PakRedirect", "local server start failed", t);
+            Log.e("RYLUX", "local server start failed", t);
             if (next != null) try { next.stop(); } catch (Throwable ignored) {}
             server = null;
             currentRunning = false;
@@ -132,18 +132,27 @@ public class InterceptService extends Service implements BundledPakServer.Listen
 
     private void createChannel() {
         if (Build.VERSION.SDK_INT >= 26) {
-            NotificationChannel channel = new NotificationChannel("pakredirect", "PakRedirect", NotificationManager.IMPORTANCE_LOW);
+            NotificationChannel channel = new NotificationChannel(
+                    "rylux_local_module",
+                    "RYLUX 本地游戏模块",
+                    NotificationManager.IMPORTANCE_LOW
+            );
             getSystemService(NotificationManager.class).createNotificationChannel(channel);
         }
     }
 
     private Notification notification(String text) {
         Intent open = new Intent(this, MainActivity.class);
-        PendingIntent pi = PendingIntent.getActivity(this, 1, open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        PendingIntent pi = PendingIntent.getActivity(
+                this,
+                1,
+                open,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+        );
         Notification.Builder b = Build.VERSION.SDK_INT >= 26
-                ? new Notification.Builder(this, "pakredirect")
+                ? new Notification.Builder(this, "rylux_local_module")
                 : new Notification.Builder(this);
-        return b.setContentTitle("PakRedirect")
+        return b.setContentTitle("RYLUX")
                 .setContentText(text)
                 .setSmallIcon(android.R.drawable.stat_sys_download_done)
                 .setOngoing(true)
