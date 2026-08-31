@@ -8,13 +8,15 @@ RYLUX 是从原 PakRedirect 演进而来的账号 / VIP 驱动游戏模块启动
 
 - 用户注册 / 账号密码登录；
 - 新注册用户自动获得 24 小时体验时间；
+- 同一公网 IP 48 小时内最多成功注册 1 个账号，降低重复领取体验时长的风险；
+- 登录页支持密码显示 / 隐藏、确认输入、加密记住密码；
 - 账号使用时间统一由 `vip_expires_at` 管理；
 - 套餐模型：7 / 30 / 90 / 180 / 365 天；
 - V1 暂不接在线支付，使用兑换码给账号充值时间；
 - 管理后台可查看用户、VIP 到期时间、最后登录时间与 IP；
 - 管理员可禁用 / 启用用户并直接续期；
 - 兑换码支持批量生成、隐藏 / 显示、复制、CSV / TXT 导出；
-- 首个游戏模块为“三国汉化”；
+- 首个游戏模块为“封神榜汉化”；
 - 点击启动前由服务端检查账号与 VIP 权限；
 - 授权通过后启动本机 `127.0.0.1:18480` PAK 服务并自动启动目标游戏；
 - 旧 `/api/v1/license/verify` 继续保留，方便旧 APK 过渡。
@@ -32,7 +34,7 @@ GET  /api/v1/modules
 POST /api/v1/modules/sg_localization/authorize
 ```
 
-用户密码使用 PBKDF2-SHA256 保存。登录 Token 只把 SHA-256 摘要写入数据库；Android 端 Token 使用 Android Keystore + AES-GCM 保存。
+用户密码使用 PBKDF2-SHA256 保存。登录 Token 只把 SHA-256 摘要写入数据库；Android 端 Token 与“记住密码”内容使用 Android Keystore + AES-GCM 保存。
 
 ## 24 小时体验
 
@@ -43,6 +45,8 @@ trial_started_at = 注册时间
 trial_expires_at = 注册时间 + 24小时
 vip_expires_at = trial_expires_at
 ```
+
+同一公网 IP 在成功注册后的 48 小时内再次注册会返回 HTTP 429。该限制只针对成功创建账号，不会因为用户名重复等失败请求消耗注册名额。
 
 兑换或管理员续期时：
 
