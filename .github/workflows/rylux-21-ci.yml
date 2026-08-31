@@ -1,0 +1,50 @@
+name: RYLUX 2.1 update system test
+
+on:
+  push:
+    branches:
+      - feature/rylux-2.1-updates
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Validate update sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'RYLUX_KEYSTORE_B64' .github/workflows/build-apk.yml
+          grep -q 'assembleRelease' .github/workflows/build-apk.yml
+          grep -q 'sha256' app/src/main/java/com/example/pakredirect/ContentUpdateManager.java
+          grep -q 'raw.githubusercontent.com' app/src/main/java/com/example/pakredirect/ContentUpdateManager.java
+          grep -q 'releases/latest' app/src/main/java/com/example/pakredirect/AppUpdateChecker.java
+          grep -q 'ContentUpdateManager.checkAndApply' app/src/main/java/com/example/pakredirect/InterceptService.java
+          grep -q 'PakSource.file' app/src/main/java/com/example/pakredirect/BundledPakServer.java
+          python -m json.tool pak/manifest.json >/dev/null
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Install Android SDK 35
+        shell: bash
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n 1)"
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Build debug APK
+        run: gradle assembleDebug --stacktrace
+
+      - name: Check release configuration without secrets
+        run: gradle :app:tasks --all >/dev/null
