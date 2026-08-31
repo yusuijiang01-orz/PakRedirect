@@ -14,6 +14,8 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 
 public final class ContentUpdateManager {
@@ -28,72 +30,113 @@ public final class ContentUpdateManager {
         return new File(context.getFilesDir(), "rylux-content/" + MODULE_CODE);
     }
 
-    public static UpdateResult checkAndApply(Context context) {
+    /**
+     * Checks GitHub for the current content manifest and applies changed files as
+     * one verified transaction. Failure to reach the manifest is a soft failure
+     * so an already verified local copy can still be used. Once a newer manifest
+     * has been received, any download, checksum or write failure is thrown so the
+     * launcher does not silently start the game with a partial/stale PAK set.
+     */
+    public static UpdateResult checkAndApply(Context context) throws Exception {
+        String jsonText;
         HttpURLConnection connection = null;
         try {
-            connection = open(MANIFEST_URL);
+            connection = open(cacheBust(MANIFEST_URL, String.valueOf(System.currentTimeMillis())));
             int code = connection.getResponseCode();
-            if (code != 200) return UpdateResult.softFailure("资源更新检查失败 HTTP " + code);
-            String jsonText = readUtf8(connection.getInputStream(), 512 * 1024);
-            JSONObject manifest = new JSONObject(jsonText);
-            if (manifest.optInt("schema", 0) != 1) return UpdateResult.softFailure("资源清单版本不支持");
-            if (!MODULE_CODE.equals(manifest.optString("module", ""))) {
-                return UpdateResult.softFailure("资源清单模块不匹配");
+            if (code != 200) {
+                return UpdateResult.softFailure("资源更新检查失败 HTTP " + code);
             }
-
-            JSONArray files = manifest.optJSONArray("files");
-            if (files == null || files.length() == 0) return UpdateResult.noUpdate();
-            File dir = moduleDir(context);
-            if (!dir.exists() && !dir.mkdirs()) return UpdateResult.softFailure("无法创建资源目录");
-
-            int changed = 0;
-            for (int i = 0; i < files.length(); i++) {
-                JSONObject item = files.optJSONObject(i);
-                if (item == null) continue;
-                String name = safeName(item.optString("name", ""));
-                String url = item.optString("url", "").trim();
-                String expectedSha = item.optString("sha256", "").trim().toLowerCase(Locale.US);
-                long expectedSize = item.optLong("size", -1L);
-                if (name == null || url.isEmpty() || expectedSha.length() != 64 || expectedSize < 0) continue;
-
-                File target = new File(dir, name);
-                if (target.isFile() && target.length() == expectedSize && expectedSha.equals(sha256(target))) {
-                    continue;
-                }
-
-                File temp = new File(dir, name + ".download");
-                if (temp.exists()) temp.delete();
-                download(url, temp, expectedSize);
-                String actualSha = sha256(temp);
-                if (temp.length() != expectedSize || !expectedSha.equals(actualSha)) {
-                    temp.delete();
-                    return UpdateResult.softFailure("资源校验失败：" + name);
-                }
-
-                File old = new File(dir, name + ".old");
-                if (old.exists()) old.delete();
-                if (target.exists() && !target.renameTo(old)) {
-                    temp.delete();
-                    return UpdateResult.softFailure("无法备份旧资源：" + name);
-                }
-                if (!temp.renameTo(target)) {
-                    if (old.exists()) old.renameTo(target);
-                    temp.delete();
-                    return UpdateResult.softFailure("无法替换资源：" + name);
-                }
-                if (old.exists()) old.delete();
-                changed++;
-            }
-
-            String version = manifest.optString("version", "").trim();
-            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                    .edit().putString("version", version).apply();
-            return changed > 0 ? UpdateResult.updated(changed, version) : UpdateResult.noUpdate(version);
+            jsonText = readUtf8(connection.getInputStream(), 512 * 1024);
         } catch (Throwable t) {
             return UpdateResult.softFailure("资源更新检查暂不可用");
         } finally {
             if (connection != null) connection.disconnect();
         }
+
+        final JSONObject manifest;
+        try {
+            manifest = new JSONObject(jsonText);
+        } catch (Throwable t) {
+            throw new IllegalStateException("资源清单解析失败", t);
+        }
+        if (manifest.optInt("schema", 0) != 1) {
+            throw new IllegalStateException("资源清单版本不支持");
+        }
+        if (!MODULE_CODE.equals(manifest.optString("module", ""))) {
+            throw new IllegalStateException("资源清单模块不匹配");
+        }
+
+        JSONArray files = manifest.optJSONArray("files");
+        if (files == null || files.length() == 0) {
+            throw new IllegalStateException("资源清单为空");
+        }
+
+        String version = manifest.optString("version", "").trim();
+        if (version.isEmpty()) throw new IllegalStateException("资源清单缺少版本号");
+
+        File dir = moduleDir(context);
+        if (!dir.exists() && !dir.mkdirs()) {
+            throw new IllegalStateException("无法创建资源目录");
+        }
+
+        List<ContentItem> all = new ArrayList<>();
+        for (int i = 0; i < files.length(); i++) {
+            JSONObject item = files.optJSONObject(i);
+            if (item == null) throw new IllegalStateException("资源清单项目异常");
+
+            String name = safeName(item.optString("name", ""));
+            String url = item.optString("url", "").trim();
+            String expectedSha = item.optString("sha256", "").trim().toLowerCase(Locale.US);
+            long expectedSize = item.optLong("size", -1L);
+            long revision = item.optLong("revision", 0L);
+            if (name == null || url.isEmpty() || expectedSha.length() != 64 || expectedSize < 0) {
+                throw new IllegalStateException("资源清单项目无效");
+            }
+            if (name.toLowerCase(Locale.US).endsWith(".pak") && revision <= 0) {
+                throw new IllegalStateException("PAK 缺少内容版本号：" + name);
+            }
+            all.add(new ContentItem(dir, name, url, expectedSha, expectedSize, revision));
+        }
+
+        for (ContentItem item : all) recoverStaleFiles(item);
+
+        List<ContentItem> changed = new ArrayList<>();
+        try {
+            // Stage and verify every changed resource before touching a live file.
+            for (ContentItem item : all) {
+                if (matches(item.target, item.expectedSize, item.expectedSha)) continue;
+                deleteIfExists(item.stage);
+                String token = version + "-" + item.revision;
+                download(cacheBust(item.url, token), item.stage, item.expectedSize);
+                if (!matches(item.stage, item.expectedSize, item.expectedSha)) {
+                    deleteIfExists(item.stage);
+                    throw new IllegalStateException("资源校验失败：" + item.name);
+                }
+                changed.add(item);
+            }
+
+            commitAtomically(changed);
+
+            // Final verification is against the manifest after all renames.
+            for (ContentItem item : all) {
+                if (!matches(item.target, item.expectedSize, item.expectedSha)) {
+                    throw new IllegalStateException("资源写入后校验失败：" + item.name);
+                }
+            }
+
+            for (ContentItem item : changed) deleteIfExists(item.backup);
+        } catch (Throwable t) {
+            rollback(changed);
+            for (ContentItem item : changed) deleteIfExists(item.stage);
+            if (t instanceof Exception) throw (Exception) t;
+            throw new IllegalStateException("资源更新失败", t);
+        }
+
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit().putString("version", version).apply();
+        return changed.isEmpty()
+                ? UpdateResult.noUpdate(version)
+                : UpdateResult.updated(changed.size(), version);
     }
 
     public static String installedVersion(Context context) {
@@ -101,15 +144,79 @@ public final class ContentUpdateManager {
         return prefs.getString("version", "内置版本");
     }
 
+    private static void recoverStaleFiles(ContentItem item) throws Exception {
+        deleteIfExists(item.stage);
+        if (!item.backup.exists()) return;
+        if (!item.target.exists()) {
+            if (!item.backup.renameTo(item.target)) {
+                throw new IllegalStateException("无法恢复资源备份：" + item.name);
+            }
+        } else {
+            deleteIfExists(item.backup);
+        }
+    }
+
+    private static void commitAtomically(List<ContentItem> changed) throws Exception {
+        List<ContentItem> committed = new ArrayList<>();
+        try {
+            for (ContentItem item : changed) {
+                deleteIfExists(item.backup);
+                item.hadTarget = item.target.exists();
+                if (item.hadTarget && !item.target.renameTo(item.backup)) {
+                    throw new IllegalStateException("无法备份旧资源：" + item.name);
+                }
+                if (!item.stage.renameTo(item.target)) {
+                    if (item.hadTarget && item.backup.exists()) item.backup.renameTo(item.target);
+                    throw new IllegalStateException("无法替换资源：" + item.name);
+                }
+                committed.add(item);
+            }
+        } catch (Throwable t) {
+            rollback(committed);
+            if (t instanceof Exception) throw (Exception) t;
+            throw new IllegalStateException("资源提交失败", t);
+        }
+    }
+
+    private static void rollback(List<ContentItem> items) {
+        for (int i = items.size() - 1; i >= 0; i--) {
+            ContentItem item = items.get(i);
+            try {
+                if (item.target.exists()) item.target.delete();
+                if (item.hadTarget && item.backup.exists()) item.backup.renameTo(item.target);
+                if (!item.hadTarget && item.backup.exists()) item.backup.delete();
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
+    private static boolean matches(File file, long expectedSize, String expectedSha) throws Exception {
+        return file.isFile()
+                && file.length() == expectedSize
+                && expectedSha.equals(sha256(file));
+    }
+
+    private static void deleteIfExists(File file) throws Exception {
+        if (file.exists() && !file.delete()) {
+            throw new IllegalStateException("无法清理临时资源：" + file.getName());
+        }
+    }
+
     private static HttpURLConnection open(String url) throws Exception {
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
         c.setConnectTimeout(8000);
-        c.setReadTimeout(20000);
+        c.setReadTimeout(30000);
         c.setUseCaches(false);
         c.setRequestProperty("Accept", "application/json,application/octet-stream,*/*");
-        c.setRequestProperty("Cache-Control", "no-cache");
-        c.setRequestProperty("User-Agent", "RYLUX/2.1");
+        c.setRequestProperty("Cache-Control", "no-cache, no-store");
+        c.setRequestProperty("Pragma", "no-cache");
+        c.setRequestProperty("User-Agent", "RYLUX/2.1.2");
         return c;
+    }
+
+    private static String cacheBust(String url, String token) {
+        String separator = url.contains("?") ? "&" : "?";
+        return url + separator + "rylux_rev=" + token.replaceAll("[^A-Za-z0-9._-]", "");
     }
 
     private static void download(String url, File target, long expectedSize) throws Exception {
@@ -170,6 +277,29 @@ public final class ContentUpdateManager {
         String lower = name.toLowerCase(Locale.US);
         if (!(lower.endsWith(".pak") || "linkspak.txt".equals(lower))) return null;
         return name;
+    }
+
+    private static final class ContentItem {
+        final String name;
+        final String url;
+        final String expectedSha;
+        final long expectedSize;
+        final long revision;
+        final File target;
+        final File stage;
+        final File backup;
+        boolean hadTarget;
+
+        ContentItem(File dir, String name, String url, String expectedSha, long expectedSize, long revision) {
+            this.name = name;
+            this.url = url;
+            this.expectedSha = expectedSha;
+            this.expectedSize = expectedSize;
+            this.revision = revision;
+            this.target = new File(dir, name);
+            this.stage = new File(dir, name + ".stage");
+            this.backup = new File(dir, name + ".rollback");
+        }
     }
 
     public static final class UpdateResult {
