@@ -10,6 +10,7 @@
     </queries>
 
     <application
+        android:name=".RyluxApplication"
         android:allowBackup="false"
         android:label="RYLUX"
         android:supportsRtl="true"

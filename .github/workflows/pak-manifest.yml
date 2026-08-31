@@ -1,0 +1,79 @@
+name: Publish RYLUX content manifest
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'pak/*.pak'
+      - 'pak/linkspak.txt'
+      - 'pak/manifest.json'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  manifest:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Generate SHA-256 content manifest
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib, json, pathlib, os
+
+          root = pathlib.Path('pak')
+          repo = os.environ['GITHUB_REPOSITORY']
+          files = []
+          fingerprint = hashlib.sha256()
+          for path in sorted(root.iterdir()):
+              if not path.is_file():
+                  continue
+              if path.name != 'linkspak.txt' and path.suffix.lower() != '.pak':
+                  continue
+              data_hash = hashlib.sha256()
+              with path.open('rb') as f:
+                  for chunk in iter(lambda: f.read(1024 * 1024), b''):
+                      data_hash.update(chunk)
+              sha = data_hash.hexdigest()
+              size = path.stat().st_size
+              fingerprint.update(path.name.encode('utf-8'))
+              fingerprint.update(str(size).encode('ascii'))
+              fingerprint.update(sha.encode('ascii'))
+              files.append({
+                  'name': path.name,
+                  'size': size,
+                  'sha256': sha,
+                  'url': f'https://raw.githubusercontent.com/{repo}/main/pak/{path.name}',
+              })
+
+          manifest = {
+              'schema': 1,
+              'module': 'sg_localization',
+              'version': fingerprint.hexdigest()[:12],
+              'files': files,
+          }
+          (root / 'manifest.json').write_text(
+              json.dumps(manifest, ensure_ascii=False, indent=2) + '\n',
+              encoding='utf-8'
+          )
+          PY
+
+      - name: Commit manifest if changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- pak/manifest.json; then
+            echo 'Manifest unchanged'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add pak/manifest.json
+          git commit -m 'Update RYLUX content manifest'
+          git push

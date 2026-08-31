@@ -7,29 +7,40 @@ android {
     compileSdk 35
 
     defaultConfig {
-        // Keep the existing package id for upgrade compatibility in V1.
         applicationId 'com.example.pakredirect'
         minSdk 26
         targetSdk 35
-        versionCode 6
-        versionName '2.0.1'
+        versionCode = (project.findProperty('ryluxVersionCode') ?: '7').toInteger()
+        versionName = (project.findProperty('ryluxVersionName') ?: '2.1.0').toString()
     }
 
     sourceSets {
         main {
-            // Bundle linkspak.txt and the localization PAK payload directly into the APK.
+            // Bundled content remains the offline fallback. Verified hot-updated
+            // content in the app-private directory takes precedence at runtime.
             assets.srcDirs = ['../pak']
         }
     }
 
-    // Keep PAK assets stored without ZIP compression so their exact lengths are
-    // available through AssetFileDescriptor and Range responses can be served efficiently.
     androidResources {
         noCompress += ['pak']
     }
 
+    signingConfigs {
+        release {
+            def storePath = System.getenv('RYLUX_KEYSTORE_PATH')
+            if (storePath) {
+                storeFile file(storePath)
+                storePassword System.getenv('RYLUX_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('RYLUX_KEY_ALIAS')
+                keyPassword System.getenv('RYLUX_KEY_PASSWORD')
+            }
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig signingConfigs.release
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'

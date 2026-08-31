@@ -1,25 +1,107 @@
-# RYLUX V1
+# RYLUX 2.1
 
-RYLUX 是从原 PakRedirect 演进而来的账号 / VIP 驱动游戏模块启动器。V1 保留已经验证过的本机 PAK 直供能力，同时把产品入口从“卡密直接登录”升级为“用户账号 + 使用时间 + 游戏模块”。
+RYLUX 是账号 / VIP 驱动的游戏模块启动器。当前首个模块为“封神榜汉化”，保留 `127.0.0.1:18480` + `linkspak.txt` + PAK Range 的本机直供链路。
 
-> V1 为保持 Android 升级兼容，应用包名暂时仍是 `com.example.pakredirect`；用户可见名称已经改为 `RYLUX`。
+> 为保持覆盖升级兼容，Android 包名暂时仍是 `com.example.pakredirect`。
 
-## V1 功能
+## 账号与使用时间
 
 - 用户注册 / 账号密码登录；
-- 新注册用户自动获得 24 小时体验时间；
-- 同一公网 IP 48 小时内最多成功注册 1 个账号，降低重复领取体验时长的风险；
-- 登录页支持密码显示 / 隐藏、确认输入、加密记住密码；
-- 账号使用时间统一由 `vip_expires_at` 管理；
+- 新注册用户自动获得 24 小时体验；
+- 同一公网 IP 48 小时内最多成功注册 1 个账号；
+- Token、记住密码均使用 Android Keystore + AES-GCM 保存；
 - 套餐模型：7 / 30 / 90 / 180 / 365 天；
-- V1 暂不接在线支付，使用兑换码给账号充值时间；
-- 管理后台可查看用户、VIP 到期时间、最后登录时间与 IP；
-- 管理员可禁用 / 启用用户并直接续期；
-- 兑换码支持批量生成、隐藏 / 显示、复制、CSV / TXT 导出；
-- 首个游戏模块为“封神榜汉化”；
-- 点击启动前由服务端检查账号与 VIP 权限；
-- 授权通过后启动本机 `127.0.0.1:18480` PAK 服务并自动启动目标游戏；
-- 旧 `/api/v1/license/verify` 继续保留，方便旧 APK 过渡。
+- 当前通过兑换码为账号增加 VIP 使用时间；
+- 管理后台支持用户、VIP、兑换码、日志和管理员设置。
+
+## 封神榜模块
+
+启动链路：
+
+```text
+RYLUX 登录
+  -> 服务端检查账号 / VIP
+  -> 授权 sg_localization
+  -> 检查 GitHub 内容清单
+  -> 下载有变化的 PAK / linkspak.txt
+  -> SHA-256 + 文件大小校验
+  -> 校验成功后原子替换本地资源
+  -> 启动 127.0.0.1:18480
+  -> 游戏读取 linkspak.txt + PAK
+  -> 启动 com.tepaylink.tamgioiphantranhmobile
+```
+
+如果网络不可用或更新检查失败，RYLUX 会继续使用最近一次校验成功的资源；本机没有热更新资源时回退到 APK 内置 PAK。
+
+## PAK 热更新
+
+资源清单：
+
+```text
+pak/manifest.json
+```
+
+当 `main` 分支中的以下文件发生变化：
+
+```text
+pak/*.pak
+pak/linkspak.txt
+```
+
+GitHub Actions `Publish RYLUX content manifest` 会自动重新计算：
+
+- 文件大小；
+- SHA-256；
+- 下载地址；
+- 内容指纹版本。
+
+APP 启动封神榜模块前读取：
+
+```text
+https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/pak/manifest.json
+```
+
+只有通过 SHA-256 和大小校验的新文件才会替换旧资源。
+
+## APP 更新
+
+RYLUX 启动时会检查 GitHub 最新 Release：
+
+```text
+https://github.com/yusuijiang01-orz/PakRedirect/releases/latest
+```
+
+发现更高版本后提示用户下载 APK。Android 原生代码仍通过正常 APK 覆盖升级，不使用动态 DEX 热修复。
+
+## 固定正式签名
+
+正式 Release 不再使用 GitHub Runner 临时生成的 debug keystore。`.github/workflows/build-apk.yml` 使用同一套持久化 Release Keystore。
+
+在仓库 GitHub Actions Secrets 中配置：
+
+```text
+RYLUX_KEYSTORE_B64
+RYLUX_KEYSTORE_PASSWORD
+RYLUX_KEY_ALIAS
+RYLUX_KEY_PASSWORD
+```
+
+其中 `RYLUX_KEYSTORE_B64` 是正式 `.jks` 文件的 Base64 内容。不要把 `.jks` 或密码提交进公开仓库。
+
+第一次从历史 Debug 签名切换到正式 Release 签名时，Android 仍需要卸载旧 Debug 版一次。安装第一个正式签名版之后，只要 `applicationId` 不变、签名证书不变且 `versionCode` 递增，后续版本即可直接覆盖更新。
+
+Build and Release workflow 需要输入：
+
+```text
+version_name，例如 2.1.0
+version_code，例如 7
+```
+
+生成：
+
+```text
+RYLUX-v2.1.0.apk
+```
 
 ## 用户 API
 
@@ -34,42 +116,7 @@ GET  /api/v1/modules
 POST /api/v1/modules/sg_localization/authorize
 ```
 
-用户密码使用 PBKDF2-SHA256 保存。登录 Token 只把 SHA-256 摘要写入数据库；Android 端 Token 与“记住密码”内容使用 Android Keystore + AES-GCM 保存。
-
-## 24 小时体验
-
-注册成功时：
-
-```text
-trial_started_at = 注册时间
-trial_expires_at = 注册时间 + 24小时
-vip_expires_at = trial_expires_at
-```
-
-同一公网 IP 在成功注册后的 48 小时内再次注册会返回 HTTP 429。该限制只针对成功创建账号，不会因为用户名重复等失败请求消耗注册名额。
-
-兑换或管理员续期时：
-
-```text
-当前仍有效 -> 从原到期时间继续累加
-已经过期   -> 从当前时间重新计算
-```
-
-## 兑换码
-
-原“卡密系统”在 RYLUX V1 中继续保留，但主要用途改为账号充值码。
-
-新生成兑换码记录充值天数 `duration_days`，用户兑换成功后：
-
-1. 对账号 `vip_expires_at` 增加对应天数；
-2. 记录兑换用户与兑换时间；
-3. 立即停用该兑换码，防止重复使用。
-
-旧版直接卡密登录接口仍保留用于兼容过渡。
-
-## 本地游戏模块
-
-RYLUX 通过本机回环地址监听：
+## 本地 HTTP 服务
 
 ```text
 http://127.0.0.1:18480
@@ -82,18 +129,7 @@ http://127.0.0.1:18480
 - `GET` / `HEAD /pak/<文件名>`
 - PAK Range / HTTP 200 / 206
 
-目标游戏仍由自己的 UID 下载并写入自己的私有目录，所以这个推荐模式不依赖 Root。
-
-启动链路：
-
-```text
-RYLUX 登录
-  -> 服务端检查账号 / VIP
-  -> 授权 sg_localization
-  -> 启动 127.0.0.1:18480
-  -> 提供 linkspak.txt + PAK
-  -> 启动 com.tepaylink.tamgioiphantranhmobile
-```
+目标游戏使用自身 UID 下载并写入自己的私有目录，因此推荐模式不依赖 Root。
 
 ## 管理后台
 
@@ -101,17 +137,7 @@ RYLUX 登录
 https://verify.lovenom.eu.org/admin
 ```
 
-页面包括：
-
-- 数据概览
-- 用户 / VIP
-- 兑换码
-- 操作日志
-- 系统设置
-
-后台仍复用现有 HTTPS 域名、SQLite 数据库和管理员登录体系。
-
-## 编译
+## 开发构建
 
 Android SDK 35 + JDK 17：
 
@@ -119,16 +145,6 @@ Android SDK 35 + JDK 17：
 gradle :app:assembleDebug
 ```
 
-输出：
+正式发布统一使用 GitHub Actions 的 `Build and Release RYLUX APK`。
 
-```text
-app/build/outputs/apk/debug/app-debug.apk
-```
-
-## 服务端
-
-部署与升级说明见：
-
-```text
-backend/README.md
-```
+后端部署说明见 `backend/README.md`。
