@@ -1,35 +1,35 @@
 {
-    "schema":  1,
-    "module":  "sg_localization",
-    "version":  "a6ed336ea64a",
-    "files":  [
-                  {
-                      "name":  "linkspak.txt",
-                      "size":  1061,
-                      "sha256":  "9f7af88e5af27742bc07f29321de539100025a39f0a4626414ddf9f78f240c5e",
-                      "revision":  2026083106,
-                      "url":  "https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/pak/linkspak.txt"
-                  },
-                  {
-                      "name":  "settings.pak",
-                      "size":  2257342,
-                      "sha256":  "43a87ac3dd4a417d767d8403f289033db375693a7cfd1ba52719ff88a9761907",
-                      "revision":  2026083100,
-                      "url":  "https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/pak/settings.pak"
-                  },
-                  {
-                      "name":  "ui.pak",
-                      "size":  415111,
-                      "sha256":  "9a44092eed062926b7bf81bad57f4caf3ac656bd5225a217283076bbb41dc2f1",
-                      "revision":  2026083101,
-                      "url":  "https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/pak/ui.pak"
-                  },
-                  {
-                      "name":  "updatefs.pak",
-                      "size":  37944270,
-                      "sha256":  "7906db53601d46c519c604f3b39af4388cb0d2a9cd2bc0dc2c719843bf216dbc",
-                      "revision":  2026083105,
-                      "url":  "https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/pak/updatefs.pak"
-                  }
-              ]
+  "schema": 1,
+  "module": "sg_localization",
+  "version": "33cba6806f0a",
+  "files": [
+    {
+      "name": "linkspak.txt",
+      "size": 1049,
+      "sha256": "2ed3f76706dae6e64d96c63fc288aae99864e5d3af9f5d1e42dd583086a2d4ad",
+      "revision": 2026083107,
+      "url": "https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/pak/linkspak.txt"
+    },
+    {
+      "name": "settings.pak",
+      "size": 2257342,
+      "sha256": "43a87ac3dd4a417d767d8403f289033db375693a7cfd1ba52719ff88a9761907",
+      "revision": 2026083100,
+      "url": "https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/pak/settings.pak"
+    },
+    {
+      "name": "ui.pak",
+      "size": 415111,
+      "sha256": "9a44092eed062926b7bf81bad57f4caf3ac656bd5225a217283076bbb41dc2f1",
+      "revision": 2026083101,
+      "url": "https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/pak/ui.pak"
+    },
+    {
+      "name": "updatefs.pak",
+      "size": 37944270,
+      "sha256": "7906db53601d46c519c604f3b39af4388cb0d2a9cd2bc0dc2c719843bf216dbc",
+      "revision": 2026083105,
+      "url": "https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/pak/updatefs.pak"
+    }
+  ]
 }
