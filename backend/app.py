@@ -9,19 +9,21 @@ from pydantic import BaseModel, Field
 
 from admin_key_access import init_full_key_support, router as admin_key_router
 from admin_v2 import init_admin, router as admin_router
+from user_v1 import init_user_v1, router as user_router
 
 DB_PATH = Path(os.environ.get("PAKREDIRECT_LICENSE_DB", "./data/licenses.db")).resolve()
 
 app = FastAPI(
-    title="PakRedirect License API",
+    title="RYLUX API",
     docs_url=None,
     redoc_url=None,
     openapi_url=None,
 )
 # Full-key routes intentionally register before admin_v2 so their matching
 # license list/generate/export endpoints take precedence while all other
-# License Console v2 routes continue to come from admin_v2.
+# License Console routes continue to come from admin_v2.
 app.include_router(admin_key_router)
+app.include_router(user_router)
 app.include_router(admin_router)
 
 
@@ -73,6 +75,7 @@ def init_db() -> None:
         db.commit()
     init_admin()
     init_full_key_support()
+    init_user_v1()
 
 
 @app.on_event("startup")
@@ -82,9 +85,11 @@ def on_startup() -> None:
 
 @app.get("/healthz")
 def healthz():
-    return {"ok": True}
+    return {"ok": True, "product": "RYLUX", "api": "v1"}
 
 
+# Legacy direct-card verification remains available during the V1 migration.
+# New RYLUX clients use account + VIP APIs in user_v1.py.
 @app.post("/api/v1/license/verify")
 def verify_license(payload: VerifyRequest, request: Request):
     normalized = normalize_key(payload.license_key)
