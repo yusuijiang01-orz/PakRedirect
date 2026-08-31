@@ -29,8 +29,8 @@ jobs:
 
           root = pathlib.Path('pak')
           repo = os.environ['GITHUB_REPOSITORY']
-          version = os.environ['GITHUB_SHA'][:12]
           files = []
+          fingerprint = hashlib.sha256()
           for path in sorted(root.iterdir()):
               if not path.is_file():
                   continue
@@ -40,17 +40,22 @@ jobs:
               with path.open('rb') as f:
                   for chunk in iter(lambda: f.read(1024 * 1024), b''):
                       data_hash.update(chunk)
+              sha = data_hash.hexdigest()
+              size = path.stat().st_size
+              fingerprint.update(path.name.encode('utf-8'))
+              fingerprint.update(str(size).encode('ascii'))
+              fingerprint.update(sha.encode('ascii'))
               files.append({
                   'name': path.name,
-                  'size': path.stat().st_size,
-                  'sha256': data_hash.hexdigest(),
+                  'size': size,
+                  'sha256': sha,
                   'url': f'https://raw.githubusercontent.com/{repo}/main/pak/{path.name}',
               })
 
           manifest = {
               'schema': 1,
               'module': 'sg_localization',
-              'version': version,
+              'version': fingerprint.hexdigest()[:12],
               'files': files,
           }
           (root / 'manifest.json').write_text(
