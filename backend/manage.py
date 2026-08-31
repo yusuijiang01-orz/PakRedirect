@@ -53,6 +53,16 @@ def open_db() -> sqlite3.Connection:
         )
         """
     )
+    columns = {row["name"] for row in db.execute("PRAGMA table_info(licenses)").fetchall()}
+    if "key_value" not in columns:
+        db.execute("ALTER TABLE licenses ADD COLUMN key_value TEXT")
+    if "duration_days" not in columns:
+        db.execute("ALTER TABLE licenses ADD COLUMN duration_days INTEGER")
+    if "redeemed_by_user_id" not in columns:
+        db.execute("ALTER TABLE licenses ADD COLUMN redeemed_by_user_id INTEGER")
+    if "redeemed_at" not in columns:
+        db.execute("ALTER TABLE licenses ADD COLUMN redeemed_at TEXT")
+    db.commit()
     return db
 
 
@@ -84,54 +94,64 @@ def create_license(days: int, label: str, requested_key: str | None) -> None:
         raise SystemExit("--days 必须大于 0")
 
     value = normalize_key(requested_key) if requested_key else generate_key()
-    expires = utc_now() + timedelta(days=days)
+    now = utc_now()
+    expires = now + timedelta(days=days)
 
     with open_db() as db:
         try:
             db.execute(
                 """
                 INSERT INTO licenses
-                    (key_hash, key_hint, label, expires_at, enabled, created_at)
-                VALUES (?, ?, ?, ?, 1, ?)
+                    (key_hash,key_hint,key_value,label,expires_at,enabled,created_at,duration_days)
+                VALUES(?,?,?,?,?,1,?,?)
                 """,
                 (
                     key_hash(value),
                     key_hint(value),
+                    value,
                     label or "",
                     iso(expires),
-                    iso(utc_now()),
+                    iso(now),
+                    days,
                 ),
             )
             db.commit()
         except sqlite3.IntegrityError:
-            raise SystemExit("该卡密已存在")
+            raise SystemExit("该兑换码已存在")
 
-    print("卡密:", value)
-    print("到期:", iso(expires))
-    print("提示: 服务端只保存 SHA-256 哈希，完整卡密只在这里显示一次。")
+    print("兑换码:", value)
+    print("充值时长:", f"{days} 天")
+    print("兑换码自身到期:", iso(expires))
+    print("提示: 新版会保存完整兑换码，管理员可在网页后台隐藏、显示和复制。")
 
 
 def revoke_license(value: str) -> None:
     with open_db() as db:
         cur = db.execute(
-            "UPDATE licenses SET enabled = 0 WHERE key_hash = ?",
+            "UPDATE licenses SET enabled=0 WHERE key_hash=?",
             (key_hash(value),),
         )
         db.commit()
     if cur.rowcount != 1:
-        raise SystemExit("未找到卡密")
+        raise SystemExit("未找到兑换码")
     print("已停用")
 
 
 def enable_license(value: str) -> None:
     with open_db() as db:
-        cur = db.execute(
-            "UPDATE licenses SET enabled = 1 WHERE key_hash = ?",
+        row = db.execute(
+            "SELECT redeemed_at FROM licenses WHERE key_hash=?",
+            (key_hash(value),),
+        ).fetchone()
+        if row is None:
+            raise SystemExit("未找到兑换码")
+        if row["redeemed_at"]:
+            raise SystemExit("已兑换的兑换码不能重新启用")
+        db.execute(
+            "UPDATE licenses SET enabled=1 WHERE key_hash=?",
             (key_hash(value),),
         )
         db.commit()
-    if cur.rowcount != 1:
-        raise SystemExit("未找到卡密")
     print("已启用")
 
 
@@ -142,67 +162,68 @@ def extend_license(value: str, days: int) -> None:
     digest = key_hash(value)
     with open_db() as db:
         row = db.execute(
-            "SELECT expires_at FROM licenses WHERE key_hash = ?",
+            "SELECT expires_at FROM licenses WHERE key_hash=?",
             (digest,),
         ).fetchone()
         if row is None:
-            raise SystemExit("未找到卡密")
+            raise SystemExit("未找到兑换码")
 
         current = datetime.fromisoformat(row["expires_at"].replace("Z", "+00:00"))
         base = max(current, utc_now())
         new_expiry = base + timedelta(days=days)
         db.execute(
-            "UPDATE licenses SET expires_at = ? WHERE key_hash = ?",
+            "UPDATE licenses SET expires_at=? WHERE key_hash=?",
             (iso(new_expiry), digest),
         )
         db.commit()
-    print("新到期时间:", iso(new_expiry))
+    print("兑换码新有效期:", iso(new_expiry))
 
 
 def list_licenses() -> None:
     with open_db() as db:
         rows = db.execute(
             """
-            SELECT id, key_hint, label, expires_at, enabled, created_at,
-                   last_seen_at, last_seen_ip
+            SELECT id,key_hint,key_value,label,expires_at,enabled,created_at,
+                   last_seen_at,last_seen_ip,duration_days,redeemed_at
             FROM licenses
             ORDER BY id DESC
             """
         ).fetchall()
 
     if not rows:
-        print("暂无卡密")
+        print("暂无兑换码")
         return
 
     for row in rows:
-        status = "启用" if int(row["enabled"]) == 1 else "停用"
+        status = "已兑换" if row["redeemed_at"] else ("启用" if int(row["enabled"]) == 1 else "停用")
+        shown = row["key_value"] or f"***{row['key_hint']}"
         print(
-            f"#{row['id']}  ***{row['key_hint']}  {status}  "
-            f"到期={row['expires_at']}  标签={row['label'] or '-'}  "
+            f"#{row['id']}  {shown}  {status}  套餐={row['duration_days'] or '-'}天  "
+            f"码到期={row['expires_at']}  标签={row['label'] or '-'}  "
             f"最后验证={row['last_seen_at'] or '-'}  IP={row['last_seen_ip'] or '-'}"
         )
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="PakRedirect 卡密管理")
+    parser = argparse.ArgumentParser(description="RYLUX 兑换码管理")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    create = sub.add_parser("create", help="创建卡密")
+    create = sub.add_parser("create", help="创建兑换码")
     create.add_argument("--days", type=int, default=30)
     create.add_argument("--label", default="")
-    create.add_argument("--key", default=None, help="可选：自定义卡密")
+    create.add_argument("--key", default=None, help="可选：自定义兑换码")
 
-    revoke = sub.add_parser("revoke", help="停用卡密")
+    revoke = sub.add_parser("revoke", help="停用兑换码")
     revoke.add_argument("key")
 
-    enable = sub.add_parser("enable", help="重新启用卡密")
+    enable = sub.add_parser("enable", help="重新启用兑换码")
     enable.add_argument("key")
 
-    extend = sub.add_parser("extend", help="续期卡密")
+    extend = sub.add_parser("extend", help="延长兑换码自身有效期")
     extend.add_argument("key")
     extend.add_argument("--days", type=int, required=True)
 
-    sub.add_parser("list", help="列出卡密")
+    sub.add_parser("list", help="列出兑换码")
 
     admin_hash = sub.add_parser("admin-hash", help="生成网页后台管理员密码哈希")
     admin_hash.add_argument("--password", default=None, help="可选；不建议留在 shell history")

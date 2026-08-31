@@ -9,7 +9,6 @@ from fastapi.responses import Response
 from admin_v2 import (
     GeneratePayload,
     MAX_BATCH,
-    PRESETS,
     generate_key,
     iso,
     key_hash,
@@ -25,18 +24,25 @@ from admin_v2 import (
 )
 
 router = APIRouter()
+CODE_PRESETS = (1, 7, 30, 90, 180, 365)
 
 
 def init_full_key_support() -> None:
-    """Add reversible key storage for newly generated licenses.
+    """Add reversible key storage for newly generated codes.
 
-    Existing rows created by the old hash-only backend remain NULL because
-    their original plaintext cannot be reconstructed from SHA-256.
+    Existing hash-only rows remain NULL because their original plaintext
+    cannot be reconstructed from SHA-256.
     """
     with open_db() as db:
         columns = {row["name"] for row in db.execute("PRAGMA table_info(licenses)").fetchall()}
         if "key_value" not in columns:
             db.execute("ALTER TABLE licenses ADD COLUMN key_value TEXT")
+        if "duration_days" not in columns:
+            db.execute("ALTER TABLE licenses ADD COLUMN duration_days INTEGER")
+        if "redeemed_by_user_id" not in columns:
+            db.execute("ALTER TABLE licenses ADD COLUMN redeemed_by_user_id INTEGER")
+        if "redeemed_at" not in columns:
+            db.execute("ALTER TABLE licenses ADD COLUMN redeemed_at TEXT")
         db.execute("CREATE INDEX IF NOT EXISTS idx_licenses_key_value ON licenses(key_value)")
         db.commit()
 
@@ -48,6 +54,9 @@ def serialize_license(row, reveal: bool = False):
         "key_hint": row["key_hint"],
         "key_value": key_value if reveal else None,
         "key_available": bool(key_value),
+        "duration_days": int(row["duration_days"] or 0) if "duration_days" in row.keys() else 0,
+        "redeemed": bool(row["redeemed_at"]) if "redeemed_at" in row.keys() else False,
+        "redeemed_at": row["redeemed_at"] if "redeemed_at" in row.keys() else None,
         "label": row["label"] or "",
         "expires_at": row["expires_at"],
         "enabled": bool(row["enabled"]),
@@ -96,7 +105,8 @@ def list_licenses(query: str, state: str, page: int, page_size: int, reveal: boo
         total = db.execute("SELECT COUNT(*) AS c FROM licenses" + where, tuple(params)).fetchone()["c"]
         rows = db.execute(
             """
-            SELECT id,key_hash,key_hint,key_value,label,expires_at,enabled,created_at,last_seen_at,last_seen_ip
+            SELECT id,key_hash,key_hint,key_value,label,expires_at,enabled,created_at,last_seen_at,last_seen_ip,
+                   duration_days,redeemed_by_user_id,redeemed_at
             FROM licenses
             """
             + where
@@ -107,7 +117,7 @@ def list_licenses(query: str, state: str, page: int, page_size: int, reveal: boo
 
 
 def create_licenses(days: int, quantity: int, label: str):
-    if days not in PRESETS:
+    if days not in CODE_PRESETS:
         raise ValueError("有效期不在允许范围")
     if not 1 <= quantity <= MAX_BATCH:
         raise ValueError(f"生成数量必须在 1 到 {MAX_BATCH} 之间")
@@ -123,8 +133,8 @@ def create_licenses(days: int, quantity: int, label: str):
                     db.execute(
                         """
                         INSERT INTO licenses
-                            (key_hash,key_hint,key_value,label,expires_at,enabled,created_at)
-                        VALUES(?,?,?,?,?,1,?)
+                            (key_hash,key_hint,key_value,label,expires_at,enabled,created_at,duration_days)
+                        VALUES(?,?,?,?,?,1,?,?)
                         """,
                         (
                             key_hash(value),
@@ -133,6 +143,7 @@ def create_licenses(days: int, quantity: int, label: str):
                             label.strip()[:80],
                             iso(expires),
                             iso(now),
+                            days,
                         ),
                     )
                     made.append(value)
@@ -141,7 +152,7 @@ def create_licenses(days: int, quantity: int, label: str):
                     continue
             else:
                 db.rollback()
-                raise RuntimeError("生成唯一卡密失败")
+                raise RuntimeError("生成唯一兑换码失败")
         db.commit()
     return made, iso(expires)
 
@@ -181,12 +192,12 @@ def admin_generate(payload: GeneratePayload, request: Request):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     log_action(
-        "licenses_generated",
+        "redeem_codes_generated",
         f"{payload.quantity} 张",
         f"{payload.days}天; 标签={payload.label[:80]}; full-key=stored",
         request_ip(request),
     )
-    return {"ok": True, "keys": keys, "expires_at": expires_at}
+    return {"ok": True, "keys": keys, "expires_at": expires_at, "duration_days": payload.days}
 
 
 @router.get("/admin/api/licenses/export.csv")
@@ -198,7 +209,8 @@ def admin_export_csv(request: Request, q: str = "", status: str = ""):
     with open_db() as db:
         rows = db.execute(
             """
-            SELECT id,key_hint,key_value,label,expires_at,enabled,created_at,last_seen_at,last_seen_ip
+            SELECT id,key_hint,key_value,label,expires_at,enabled,created_at,last_seen_at,last_seen_ip,
+                   duration_days,redeemed_at
             FROM licenses
             """ + where + " ORDER BY id DESC",
             tuple(params),
@@ -206,14 +218,16 @@ def admin_export_csv(request: Request, q: str = "", status: str = ""):
 
     stream = io.StringIO()
     writer = csv.writer(stream)
-    writer.writerow(["ID", "完整卡密", "卡密后6位", "标签", "状态", "到期时间", "最后验证", "最后IP"])
+    writer.writerow(["ID", "完整兑换码", "后6位", "套餐天数", "标签", "状态", "兑换时间", "到期时间", "最后验证", "最后IP"])
     for row in rows:
         writer.writerow([
             row["id"],
             row["key_value"] or "",
             row["key_hint"],
+            row["duration_days"] or "",
             row["label"] or "",
             license_status(row),
+            row["redeemed_at"] or "",
             row["expires_at"],
             row["last_seen_at"] or "",
             row["last_seen_ip"] or "",
@@ -222,7 +236,7 @@ def admin_export_csv(request: Request, q: str = "", status: str = ""):
         "\ufeff" + stream.getvalue(),
         media_type="text/csv; charset=utf-8",
         headers={
-            "Content-Disposition": 'attachment; filename="pakredirect-licenses.csv"',
+            "Content-Disposition": 'attachment; filename="rylux-redeem-codes.csv"',
             "Cache-Control": "no-store",
         },
     )
@@ -234,11 +248,11 @@ def admin_export_txt(request: Request, q: str = "", status: str = ""):
     if status not in ("", "active", "disabled", "expired"):
         status = ""
     where, params = build_filter(q[:128], status)
+    if where:
+        query = "SELECT key_value FROM licenses" + where + " AND key_value IS NOT NULL ORDER BY id DESC"
+    else:
+        query = "SELECT key_value FROM licenses WHERE key_value IS NOT NULL ORDER BY id DESC"
     with open_db() as db:
-        rows = db.execute(
-            "SELECT key_value FROM licenses" + where + " AND key_value IS NOT NULL" if where else
-            "SELECT key_value FROM licenses WHERE key_value IS NOT NULL",
-            tuple(params),
-        ).fetchall()
+        rows = db.execute(query, tuple(params)).fetchall()
     text = "\n".join(row["key_value"] for row in rows if row["key_value"])
     return Response(text, media_type="text/plain; charset=utf-8", headers={"Cache-Control": "no-store"})

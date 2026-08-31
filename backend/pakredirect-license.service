@@ -1,5 +1,5 @@
 [Unit]
-Description=PakRedirect License API
+Description=RYLUX Account and VIP API
 After=network-online.target
 Wants=network-online.target
 
