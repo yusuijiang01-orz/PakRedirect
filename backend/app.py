@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from admin_code_v1 import router as admin_code_router
 from admin_key_access import init_full_key_support, router as admin_key_router
 from admin_v2 import init_admin, router as admin_router
+from registration_guard_v1 import init_registration_guard_v1, router as registration_guard_router
 from user_v1 import init_user_v1, router as user_router
 
 DB_PATH = Path(os.environ.get("PAKREDIRECT_LICENSE_DB", "./data/licenses.db")).resolve()
@@ -20,10 +21,11 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
-# V1 override routes register before the older admin router so the user/VIP
-# and redeem-code behavior can coexist with the existing console safely.
+# Override routes register before the older routers so guarded registration and
+# redeem-code behavior take precedence without breaking the rest of V1.
 app.include_router(admin_key_router)
 app.include_router(admin_code_router)
+app.include_router(registration_guard_router)
 app.include_router(user_router)
 app.include_router(admin_router)
 
@@ -77,6 +79,7 @@ def init_db() -> None:
     init_admin()
     init_full_key_support()
     init_user_v1()
+    init_registration_guard_v1()
 
 
 @app.on_event("startup")
