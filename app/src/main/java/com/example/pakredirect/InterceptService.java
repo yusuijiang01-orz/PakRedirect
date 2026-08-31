@@ -75,6 +75,12 @@ public class InterceptService extends Service implements BundledPakServer.Listen
         BundledPakServer next = null;
         try {
             stopServerLocked(null);
+            updateNotification("正在检查封神榜资源更新…");
+            ContentUpdateManager.UpdateResult update = ContentUpdateManager.checkAndApply(this);
+            if (update.updated) {
+                broadcast("封神榜资源已更新 " + update.changedFiles + " 个文件", -1, false);
+            }
+
             next = new BundledPakServer(this, this);
             next.prepare();
             next.start();
