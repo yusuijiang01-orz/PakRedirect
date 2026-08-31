@@ -17,6 +17,20 @@ class ExtendPayload(BaseModel):
     days: int
 
 
+# This route intentionally registers before user_v1's compatibility route.
+@router.get("/api/v1/plans")
+def public_plans():
+    with open_db() as db:
+        rows = db.execute(
+            "SELECT code,name,days FROM plans WHERE enabled=1 ORDER BY sort_order,code"
+        ).fetchall()
+    return {
+        "purchase_enabled": False,
+        "message": "V1 暂未开放在线支付，可使用兑换码充值",
+        "plans": [dict(row) for row in rows],
+    }
+
+
 @router.post("/admin/api/licenses/{license_id}/toggle")
 def toggle_code(license_id: int, payload: TogglePayload, request: Request):
     token = require_ready(request)
