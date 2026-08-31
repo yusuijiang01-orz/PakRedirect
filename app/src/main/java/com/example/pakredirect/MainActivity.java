@@ -2,18 +2,23 @@ package com.example.pakredirect;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
+import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
-import android.widget.CheckBox;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -25,201 +30,383 @@ import java.time.format.DateTimeFormatter;
 
 public class MainActivity extends Activity {
     private static final String TARGET_PACKAGE = "com.tepaylink.tamgioiphantranhmobile";
+    private static final String MODULE_CODE = "sg_localization";
 
-    private static final int BG = Color.rgb(246, 247, 249);
-    private static final int CARD = Color.WHITE;
-    private static final int TEXT = Color.rgb(30, 35, 43);
-    private static final int MUTED = Color.rgb(105, 113, 126);
-    private static final int PRIMARY = Color.rgb(47, 111, 237);
+    private static final int BG = Color.rgb(17, 19, 24);
+    private static final int CARD = Color.rgb(28, 32, 40);
+    private static final int CARD_SOFT = Color.rgb(34, 39, 48);
+    private static final int TEXT = Color.rgb(245, 247, 250);
+    private static final int MUTED = Color.rgb(154, 163, 176);
+    private static final int PRIMARY = Color.rgb(72, 113, 255);
+    private static final int GREEN = Color.rgb(52, 199, 89);
+    private static final int ORANGE = Color.rgb(255, 159, 10);
+    private static final int RED = Color.rgb(255, 69, 58);
 
-    private LicenseStorage licenseStorage;
-    private String currentLicenseKey;
+    private AuthStorage authStorage;
+    private String currentToken;
+    private String currentUsername;
+    private boolean currentMembershipActive;
+    private boolean registerMode;
 
-    private EditText keyEdit;
-    private CheckBox rememberCheck;
-    private Button loginButton;
-    private ProgressBar progress;
+    private EditText usernameEdit;
+    private EditText passwordEdit;
+    private Button authButton;
+    private Button switchModeButton;
+    private ProgressBar authProgress;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        licenseStorage = new LicenseStorage(this);
-        showLoginUi();
+        authStorage = new AuthStorage(this);
+        currentToken = authStorage.loadToken();
+        currentUsername = authStorage.loadUsername();
 
-        String remembered = licenseStorage.loadKey();
-        if (remembered != null && !remembered.trim().isEmpty()) {
-            keyEdit.setText(remembered);
-            rememberCheck.setChecked(true);
-            verifyLicense(remembered, true);
+        if (currentToken == null || currentToken.trim().isEmpty()) {
+            showAuthUi(false);
+        } else {
+            showSessionLoading();
+            refreshProfile(true);
         }
     }
 
-    private void showLoginUi() {
-        currentLicenseKey = null;
+    private void showSessionLoading() {
+        LinearLayout root = baseContent();
+        root.setGravity(Gravity.CENTER_HORIZONTAL);
+        TextView brand = title("RYLUX");
+        brand.setGravity(Gravity.CENTER);
+        root.addView(brand);
+        root.addView(text("正在恢复登录状态…", 14, MUTED, false));
+        ProgressBar p = new ProgressBar(this);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(40), dp(40));
+        lp.topMargin = dp(22);
+        root.addView(p, lp);
+        setScrollableContent(root);
+    }
 
-        LinearLayout root = baseRoot();
-        root.addView(title("PakRedirect"));
-        TextView subtitle = text("卡密登录", 14, MUTED, false);
-        subtitle.setPadding(0, dp(2), 0, dp(18));
+    private void showAuthUi(boolean asRegister) {
+        registerMode = asRegister;
+        currentMembershipActive = false;
+
+        LinearLayout root = baseContent();
+        root.setPadding(dp(22), dp(42), dp(22), dp(30));
+
+        TextView brand = title("RYLUX");
+        brand.setTextSize(34);
+        root.addView(brand);
+        TextView subtitle = text("游戏工具与模块启动平台", 14, MUTED, false);
+        subtitle.setPadding(0, 0, 0, dp(24));
         root.addView(subtitle);
 
         LinearLayout card = card();
-        card.addView(text("请输入卡密", 14, TEXT, true));
+        card.addView(text(asRegister ? "创建 RYLUX 账号" : "登录 RYLUX", 20, TEXT, true));
+        TextView tip = text(
+                asRegister ? "新用户注册后自动获得 24 小时体验时间。" : "使用账号登录后进入游戏与模块中心。",
+                13,
+                MUTED,
+                false
+        );
+        tip.setPadding(0, dp(6), 0, dp(14));
+        card.addView(tip);
 
-        keyEdit = new EditText(this);
-        keyEdit.setSingleLine(true);
-        keyEdit.setTextSize(15);
-        keyEdit.setTextColor(TEXT);
-        keyEdit.setHintTextColor(MUTED);
-        keyEdit.setHint("PR-XXXX-XXXX-XXXX-XXXX");
-        keyEdit.setPadding(dp(12), 0, dp(12), 0);
-        keyEdit.setBackground(round(Color.rgb(242, 244, 247), 10));
-        LinearLayout.LayoutParams keyLp = new LinearLayout.LayoutParams(-1, dp(50));
-        keyLp.topMargin = dp(12);
-        card.addView(keyEdit, keyLp);
+        usernameEdit = input("用户名", false);
+        usernameEdit.setText(currentUsername == null ? "" : currentUsername);
+        card.addView(usernameEdit, inputParams());
 
-        rememberCheck = new CheckBox(this);
-        rememberCheck.setText("记住卡密");
-        rememberCheck.setTextSize(14);
-        rememberCheck.setTextColor(TEXT);
-        LinearLayout.LayoutParams rememberLp = new LinearLayout.LayoutParams(-1, -2);
-        rememberLp.topMargin = dp(8);
-        card.addView(rememberCheck, rememberLp);
+        passwordEdit = input("密码", true);
+        card.addView(passwordEdit, inputParams());
 
-        loginButton = button("登录", PRIMARY, Color.WHITE);
-        loginButton.setOnClickListener(v -> {
-            String key = keyEdit.getText().toString().trim();
-            if (key.isEmpty()) {
-                toast("请输入卡密");
-                return;
-            }
-            verifyLicense(key, false);
-        });
-        LinearLayout.LayoutParams loginLp = new LinearLayout.LayoutParams(-1, dp(50));
-        loginLp.topMargin = dp(12);
-        card.addView(loginButton, loginLp);
+        authButton = button(asRegister ? "注册并开始 24 小时体验" : "登录", PRIMARY, Color.WHITE);
+        authButton.setOnClickListener(v -> submitAuth());
+        LinearLayout.LayoutParams authLp = new LinearLayout.LayoutParams(-1, dp(52));
+        authLp.topMargin = dp(14);
+        card.addView(authButton, authLp);
 
-        progress = new ProgressBar(this);
-        progress.setVisibility(View.GONE);
-        LinearLayout.LayoutParams progressLp = new LinearLayout.LayoutParams(dp(34), dp(34));
-        progressLp.gravity = Gravity.CENTER_HORIZONTAL;
-        progressLp.topMargin = dp(12);
-        card.addView(progress, progressLp);
+        switchModeButton = button(
+                asRegister ? "已有账号？返回登录" : "没有账号？免费注册",
+                CARD_SOFT,
+                TEXT
+        );
+        switchModeButton.setOnClickListener(v -> showAuthUi(!registerMode));
+        LinearLayout.LayoutParams switchLp = new LinearLayout.LayoutParams(-1, dp(46));
+        switchLp.topMargin = dp(9);
+        card.addView(switchModeButton, switchLp);
+
+        authProgress = new ProgressBar(this);
+        authProgress.setVisibility(View.GONE);
+        LinearLayout.LayoutParams pLp = new LinearLayout.LayoutParams(dp(34), dp(34));
+        pLp.gravity = Gravity.CENTER_HORIZONTAL;
+        pLp.topMargin = dp(12);
+        card.addView(authProgress, pLp);
 
         root.addView(card, blockParams());
-        setContentView(root);
+        root.addView(text("V1 · 账号 + VIP 时长 · 兑换码充值 · 本地游戏模块", 12, MUTED, false));
+        setScrollableContent(root);
     }
 
-    private void verifyLicense(String key, boolean autoLogin) {
-        setLoginBusy(true);
-        new Thread(() -> {
-            LicenseClient.VerifyResult result = LicenseClient.verify(key);
-            runOnUiThread(() -> {
-                setLoginBusy(false);
-
-                if (!result.requestOk) {
-                    toast(autoLogin ? "网络验证失败，请检查网络后重试" : result.message);
-                    return;
-                }
-
-                if (!result.valid) {
-                    if (autoLogin) {
-                        licenseStorage.clear();
-                        rememberCheck.setChecked(false);
-                    }
-                    toast(result.message);
-                    return;
-                }
-
-                if (!autoLogin) {
-                    if (rememberCheck.isChecked()) {
-                        if (!licenseStorage.saveKey(key)) {
-                            toast("卡密验证成功，但记住卡密失败");
-                        }
-                    } else {
-                        licenseStorage.clear();
-                    }
-                }
-
-                currentLicenseKey = key;
-                showAuthorizedUi(result.expiresAt);
-            });
-        }, "PakRedirect-License-Login").start();
-    }
-
-    private void showAuthorizedUi(String expiresAt) {
-        LinearLayout root = baseRoot();
-        root.addView(title("PakRedirect"));
-
-        LinearLayout card = card();
-        card.addView(text("卡密到期时间", 13, MUTED, false));
-
-        TextView expiry = text(formatExpiry(expiresAt), 22, TEXT, true);
-        expiry.setPadding(0, dp(8), 0, dp(4));
-        card.addView(expiry);
-        root.addView(card, blockParams());
-
-        Button activate = button("开启汉化", PRIMARY, Color.WHITE);
-        activate.setOnClickListener(v -> activateLocalization(activate));
-        root.addView(activate, new LinearLayout.LayoutParams(-1, dp(54)));
-
-        setContentView(root);
-    }
-
-    private void activateLocalization(Button activateButton) {
-        if (currentLicenseKey == null || currentLicenseKey.trim().isEmpty()) {
-            showLoginUi();
+    private void submitAuth() {
+        String username = usernameEdit == null ? "" : usernameEdit.getText().toString().trim();
+        String password = passwordEdit == null ? "" : passwordEdit.getText().toString();
+        if (username.length() < 3) {
+            toast("用户名至少 3 个字符");
+            return;
+        }
+        if (password.length() < 6) {
+            toast("密码至少 6 个字符");
             return;
         }
 
-        activateButton.setEnabled(false);
-        activateButton.setText("正在验证…");
+        setAuthBusy(true);
+        final boolean registering = registerMode;
+        new Thread(() -> {
+            AuthClient.AuthResult result = registering
+                    ? AuthClient.register(username, password, deviceId())
+                    : AuthClient.login(username, password, deviceId());
+            runOnUiThread(() -> {
+                setAuthBusy(false);
+                if (!result.requestOk || !result.success) {
+                    toast(result.message);
+                    return;
+                }
+                currentToken = result.token;
+                currentUsername = result.username;
+                if (!authStorage.saveSession(currentToken, currentUsername)) {
+                    toast("登录成功，但本机登录状态保存失败");
+                }
+                toast(result.message);
+                showHome(new AuthClient.ProfileResult(
+                        true,
+                        true,
+                        result.username,
+                        result.membershipActive,
+                        result.membershipKind,
+                        result.expiresAt,
+                        ""
+                ));
+            });
+        }, registering ? "RYLUX-Register" : "RYLUX-Login").start();
+    }
+
+    private void refreshProfile(boolean fromStartup) {
+        final String token = currentToken;
+        if (token == null || token.trim().isEmpty()) {
+            showAuthUi(false);
+            return;
+        }
+        new Thread(() -> {
+            AuthClient.ProfileResult profile = AuthClient.me(token);
+            runOnUiThread(() -> {
+                if (!profile.requestOk) {
+                    if (fromStartup) {
+                        showAuthUi(false);
+                        toast("无法连接服务器，请检查网络后重新登录");
+                    } else {
+                        toast(profile.message);
+                    }
+                    return;
+                }
+                if (!profile.success) {
+                    authStorage.clear();
+                    currentToken = null;
+                    currentUsername = null;
+                    showAuthUi(false);
+                    toast(profile.message);
+                    return;
+                }
+                currentUsername = profile.username;
+                showHome(profile);
+            });
+        }, "RYLUX-Profile").start();
+    }
+
+    private void showHome(AuthClient.ProfileResult profile) {
+        currentMembershipActive = profile.membershipActive;
+        currentUsername = profile.username;
+
+        LinearLayout root = baseContent();
+        root.setPadding(dp(18), dp(18), dp(18), dp(30));
+
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        TextView brand = title("RYLUX");
+        LinearLayout.LayoutParams brandLp = new LinearLayout.LayoutParams(0, -2, 1f);
+        header.addView(brand, brandLp);
+        Button logout = button("退出", CARD_SOFT, TEXT);
+        logout.setOnClickListener(v -> performLogout());
+        header.addView(logout, new LinearLayout.LayoutParams(dp(72), dp(40)));
+        root.addView(header);
+
+        LinearLayout memberCard = card();
+        TextView account = text(profile.username, 18, TEXT, true);
+        memberCard.addView(account);
+        String kind = "trial".equals(profile.membershipKind)
+                ? "24 小时体验"
+                : (profile.membershipActive ? "VIP 会员" : "使用时间已到期");
+        TextView status = text(kind, 14, profile.membershipActive ? GREEN : RED, true);
+        status.setPadding(0, dp(6), 0, dp(4));
+        memberCard.addView(status);
+        memberCard.addView(text("到期时间：" + formatExpiry(profile.expiresAt), 13, MUTED, false));
+
+        Button refresh = button("刷新会员状态", CARD_SOFT, TEXT);
+        refresh.setOnClickListener(v -> refreshProfile(false));
+        LinearLayout.LayoutParams refreshLp = new LinearLayout.LayoutParams(-1, dp(42));
+        refreshLp.topMargin = dp(12);
+        memberCard.addView(refresh, refreshLp);
+        root.addView(memberCard, blockParams());
+
+        LinearLayout planCard = card();
+        planCard.addView(text("会员套餐", 17, TEXT, true));
+        TextView plans = text("7 天   ·   30 天   ·   90 天   ·   180 天   ·   365 天", 14, TEXT, true);
+        plans.setPadding(0, dp(10), 0, dp(6));
+        planCard.addView(plans);
+        planCard.addView(text("V1 暂未开放在线支付，可通过兑换码给账号增加使用时间。", 12, MUTED, false));
+        root.addView(planCard, blockParams());
+
+        LinearLayout redeemCard = card();
+        redeemCard.addView(text("兑换码充值", 17, TEXT, true));
+        EditText code = input("输入兑换码", false);
+        code.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
+        redeemCard.addView(code, inputParams());
+        Button redeem = button("兑换到当前账号", PRIMARY, Color.WHITE);
+        redeem.setOnClickListener(v -> redeemCode(code, redeem));
+        LinearLayout.LayoutParams redeemLp = new LinearLayout.LayoutParams(-1, dp(48));
+        redeemLp.topMargin = dp(10);
+        redeemCard.addView(redeem, redeemLp);
+        root.addView(redeemCard, blockParams());
+
+        root.addView(sectionTitle("游戏与模块"));
+        root.addView(gameModuleCard(profile), blockParams());
+
+        setScrollableContent(root);
+    }
+
+    private LinearLayout gameModuleCard(AuthClient.ProfileResult profile) {
+        LinearLayout card = card();
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+
+        ImageView icon = new ImageView(this);
+        icon.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        Drawable gameIcon = loadTargetIcon();
+        if (gameIcon != null) icon.setImageDrawable(gameIcon);
+        else icon.setImageDrawable(android.graphics.drawable.ColorDrawable.createFromStream(null, ""));
+        GradientDrawable iconBg = round(Color.rgb(44, 50, 61), 18);
+        icon.setBackground(iconBg);
+        LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(dp(84), dp(84));
+        iconLp.rightMargin = dp(14);
+        row.addView(icon, iconLp);
+
+        LinearLayout info = new LinearLayout(this);
+        info.setOrientation(LinearLayout.VERTICAL);
+        info.addView(text("三国汉化", 18, TEXT, true));
+        TextView desc = text("本地汉化模块 · 127.0.0.1 PAK 推送", 12, MUTED, false);
+        desc.setPadding(0, dp(5), 0, dp(5));
+        info.addView(desc);
+        info.addView(text(
+                profile.membershipActive ? "当前账号可启动" : "体验 / VIP 已到期",
+                12,
+                profile.membershipActive ? GREEN : ORANGE,
+                true
+        ));
+        row.addView(info, new LinearLayout.LayoutParams(0, -2, 1f));
+        card.addView(row);
+
+        Button start = button("启动游戏", PRIMARY, Color.WHITE);
+        start.setOnClickListener(v -> activateModule(start));
+        LinearLayout.LayoutParams startLp = new LinearLayout.LayoutParams(-1, dp(52));
+        startLp.topMargin = dp(14);
+        card.addView(start, startLp);
+        return card;
+    }
+
+    private void redeemCode(EditText codeEdit, Button button) {
+        String code = codeEdit.getText().toString().trim();
+        if (code.isEmpty()) {
+            toast("请输入兑换码");
+            return;
+        }
+        button.setEnabled(false);
+        button.setText("兑换中…");
+        final String token = currentToken;
+        new Thread(() -> {
+            AuthClient.ActionResult result = AuthClient.redeem(token, code);
+            runOnUiThread(() -> {
+                button.setEnabled(true);
+                button.setText("兑换到当前账号");
+                toast(result.message);
+                if (result.requestOk && result.success) {
+                    codeEdit.setText("");
+                    refreshProfile(false);
+                }
+            });
+        }, "RYLUX-Redeem").start();
+    }
+
+    private void activateModule(Button button) {
+        if (currentToken == null || currentToken.trim().isEmpty()) {
+            showAuthUi(false);
+            return;
+        }
+        button.setEnabled(false);
+        button.setText("正在验证账号…");
+        final String token = currentToken;
 
         new Thread(() -> {
-            LicenseClient.VerifyResult result = LicenseClient.verify(currentLicenseKey);
-
-            if (!result.requestOk) {
-                resetActivateButton(activateButton, "网络验证失败，未开启汉化");
-                return;
-            }
-
-            if (!result.valid) {
-                licenseStorage.clear();
+            AuthClient.ActionResult result = AuthClient.authorize(token, MODULE_CODE);
+            if (!result.requestOk || !result.success) {
                 runOnUiThread(() -> {
+                    button.setEnabled(true);
+                    button.setText("启动游戏");
                     toast(result.message);
-                    showLoginUi();
+                    if (result.requestOk) refreshProfile(false);
                 });
                 return;
             }
 
             if (getPackageManager().getLaunchIntentForPackage(TARGET_PACKAGE) == null) {
-                resetActivateButton(activateButton, "未检测到目标游戏");
+                runOnUiThread(() -> {
+                    button.setEnabled(true);
+                    button.setText("启动游戏");
+                    toast("未检测到目标游戏");
+                });
                 return;
             }
 
-            runOnUiThread(() -> activateButton.setText("正在启动本地汉化…"));
-
+            runOnUiThread(() -> button.setText("正在启动本地模块…"));
             try {
                 Intent service = new Intent(this, InterceptService.class)
                         .setAction(InterceptService.ACTION_START);
                 if (Build.VERSION.SDK_INT >= 26) startForegroundService(service);
                 else startService(service);
             } catch (Throwable t) {
-                resetActivateButton(activateButton, "本地汉化服务启动失败：" + safeMessage(t));
+                resetStartButton(button, "本地模块启动失败：" + safeMessage(t));
                 return;
             }
 
             if (!waitForLocalServer()) {
-                resetActivateButton(activateButton, "本地汉化服务启动失败");
+                resetStartButton(button, "本地模块服务启动失败");
                 return;
             }
 
             runOnUiThread(() -> {
-                activateButton.setEnabled(true);
-                activateButton.setText("开启汉化");
-                if (!launchGame()) toast("本地汉化已启动，但未找到游戏启动入口");
+                button.setEnabled(true);
+                button.setText("启动游戏");
+                if (!launchGame()) toast("本地模块已启动，但未找到游戏启动入口");
             });
-        }, "PakRedirect-Activate").start();
+        }, "RYLUX-Module-Authorize").start();
+    }
+
+    private void performLogout() {
+        final String token = currentToken;
+        currentToken = null;
+        currentUsername = null;
+        currentMembershipActive = false;
+        authStorage.clear();
+        showAuthUi(false);
+        if (token != null && !token.trim().isEmpty()) {
+            new Thread(() -> AuthClient.logout(token), "RYLUX-Logout").start();
+        }
     }
 
     private boolean waitForLocalServer() {
@@ -246,14 +433,6 @@ public class MainActivity extends Activity {
         return false;
     }
 
-    private void resetActivateButton(Button button, String message) {
-        runOnUiThread(() -> {
-            button.setEnabled(true);
-            button.setText("开启汉化");
-            toast(message);
-        });
-    }
-
     private boolean launchGame() {
         try {
             Intent launchIntent = getPackageManager().getLaunchIntentForPackage(TARGET_PACKAGE);
@@ -266,22 +445,49 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void setLoginBusy(boolean busy) {
-        if (loginButton != null) {
-            loginButton.setEnabled(!busy);
-            loginButton.setText(busy ? "验证中…" : "登录");
+    private Drawable loadTargetIcon() {
+        try {
+            return getPackageManager().getApplicationIcon(TARGET_PACKAGE);
+        } catch (PackageManager.NameNotFoundException ignored) {
+            return null;
         }
-        if (keyEdit != null) keyEdit.setEnabled(!busy);
-        if (rememberCheck != null) rememberCheck.setEnabled(!busy);
-        if (progress != null) progress.setVisibility(busy ? View.VISIBLE : View.GONE);
     }
 
-    private LinearLayout baseRoot() {
-        getWindow().setStatusBarColor(BG);
-        if (Build.VERSION.SDK_INT >= 23) {
-            getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+    private String deviceId() {
+        try {
+            String value = Settings.Secure.getString(getContentResolver(), Settings.Secure.ANDROID_ID);
+            return value == null ? "" : value;
+        } catch (Throwable ignored) {
+            return "";
         }
+    }
 
+    private void resetStartButton(Button button, String message) {
+        runOnUiThread(() -> {
+            button.setEnabled(true);
+            button.setText("启动游戏");
+            toast(message);
+        });
+    }
+
+    private void setAuthBusy(boolean busy) {
+        if (authButton != null) {
+            authButton.setEnabled(!busy);
+            authButton.setText(busy ? (registerMode ? "注册中…" : "登录中…")
+                    : (registerMode ? "注册并开始 24 小时体验" : "登录"));
+        }
+        if (switchModeButton != null) switchModeButton.setEnabled(!busy);
+        if (usernameEdit != null) usernameEdit.setEnabled(!busy);
+        if (passwordEdit != null) passwordEdit.setEnabled(!busy);
+        if (authProgress != null) authProgress.setVisibility(busy ? View.VISIBLE : View.GONE);
+    }
+
+    private LinearLayout baseContent() {
+        getWindow().setStatusBarColor(BG);
+        getWindow().setNavigationBarColor(BG);
+        if (Build.VERSION.SDK_INT >= 23) {
+            getWindow().getDecorView().setSystemUiVisibility(0);
+        }
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(18), dp(18), dp(18), dp(30));
@@ -289,19 +495,55 @@ public class MainActivity extends Activity {
         return root;
     }
 
-    private TextView title(String value) {
-        TextView title = text(value, 28, TEXT, true);
-        title.setPadding(0, 0, 0, dp(16));
-        return title;
+    private void setScrollableContent(LinearLayout content) {
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(BG);
+        scroll.addView(content, new ScrollView.LayoutParams(-1, -2));
+        setContentView(scroll);
     }
 
     private LinearLayout card() {
         LinearLayout v = new LinearLayout(this);
         v.setOrientation(LinearLayout.VERTICAL);
-        v.setPadding(dp(16), dp(15), dp(16), dp(15));
-        v.setBackground(round(CARD, 14));
-        v.setElevation(dp(1));
+        v.setPadding(dp(16), dp(16), dp(16), dp(16));
+        GradientDrawable bg = round(CARD, 16);
+        bg.setStroke(dp(1), Color.rgb(47, 53, 64));
+        v.setBackground(bg);
         return v;
+    }
+
+    private TextView title(String value) {
+        TextView v = text(value, 28, TEXT, true);
+        v.setPadding(0, 0, 0, dp(12));
+        return v;
+    }
+
+    private TextView sectionTitle(String value) {
+        TextView v = text(value, 16, TEXT, true);
+        v.setPadding(dp(2), dp(4), 0, dp(10));
+        return v;
+    }
+
+    private EditText input(String hint, boolean password) {
+        EditText edit = new EditText(this);
+        edit.setSingleLine(true);
+        edit.setTextSize(15);
+        edit.setTextColor(TEXT);
+        edit.setHintTextColor(MUTED);
+        edit.setHint(hint);
+        edit.setPadding(dp(13), 0, dp(13), 0);
+        edit.setBackground(round(CARD_SOFT, 10));
+        if (password) {
+            edit.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        }
+        return edit;
+    }
+
+    private LinearLayout.LayoutParams inputParams() {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(50));
+        lp.topMargin = dp(9);
+        return lp;
     }
 
     private LinearLayout.LayoutParams blockParams() {
@@ -310,9 +552,9 @@ public class MainActivity extends Activity {
         return lp;
     }
 
-    private TextView text(String s, int sp, int color, boolean bold) {
+    private TextView text(String value, int sp, int color, boolean bold) {
         TextView v = new TextView(this);
-        v.setText(s);
+        v.setText(value);
         v.setTextSize(sp);
         v.setTextColor(color);
         if (bold) v.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
