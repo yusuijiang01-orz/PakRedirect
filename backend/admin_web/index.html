@@ -3,23 +3,24 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>PakRedirect 卡密管理</title>
+  <title>RYLUX 管理后台</title>
   <link rel="stylesheet" href="/admin/assets/styles.css">
 </head>
 <body>
 <div class="app">
   <aside class="sidebar" id="sidebar">
     <div class="brand-row">
-      <div class="brand-mark">PR</div>
-      <div><div class="sidebar-title">PakRedirect</div><div class="sidebar-sub">License Console</div></div>
+      <div class="brand-mark">RX</div>
+      <div><div class="sidebar-title">RYLUX</div><div class="sidebar-sub">Account & VIP Console</div></div>
     </div>
     <nav class="nav">
       <button class="nav-btn active" data-view="overview">数据概览</button>
-      <button class="nav-btn" data-view="licenses">卡密管理</button>
+      <button class="nav-btn" data-view="users">用户 / VIP</button>
+      <button class="nav-btn" data-view="licenses">兑换码</button>
       <button class="nav-btn" data-view="logs">操作日志</button>
       <button class="nav-btn" data-view="settings">系统设置</button>
     </nav>
-    <div class="sidebar-footer">verify.lovenom.eu.org<br>FastAPI + SQLite</div>
+    <div class="sidebar-footer">verify.lovenom.eu.org<br>RYLUX V1 · FastAPI + SQLite</div>
   </aside>
 
   <section class="main">
@@ -38,49 +39,95 @@
       <div id="globalAlert" class="alert hidden"></div>
 
       <section id="view-overview">
-        <div class="grid-stats">
-          <div class="stat-card"><div class="stat-label">全部卡密</div><div class="stat-value" id="statTotal">-</div></div>
-          <div class="stat-card"><div class="stat-label">有效卡密</div><div class="stat-value" id="statActive">-</div></div>
-          <div class="stat-card"><div class="stat-label">已到期</div><div class="stat-value" id="statExpired">-</div></div>
-          <div class="stat-card"><div class="stat-label">已禁用</div><div class="stat-value" id="statDisabled">-</div></div>
-          <div class="stat-card"><div class="stat-label">今日验证</div><div class="stat-value" id="statToday">-</div></div>
-        </div>
         <div class="panel">
-          <div class="panel-head"><h3>最近验证</h3><button class="btn btn-secondary btn-sm" data-jump="licenses">查看全部</button></div>
+          <div class="panel-head"><h3>用户与 VIP</h3><button class="btn btn-secondary btn-sm" data-jump="users">查看用户</button></div>
+          <div class="panel-body">
+            <div class="grid-stats">
+              <div class="stat-card"><div class="stat-label">全部用户</div><div class="stat-value" id="userStatTotal">-</div></div>
+              <div class="stat-card"><div class="stat-label">有效体验 / VIP</div><div class="stat-value" id="userStatActive">-</div></div>
+              <div class="stat-card"><div class="stat-label">已到期</div><div class="stat-value" id="userStatExpired">-</div></div>
+              <div class="stat-card"><div class="stat-label">已禁用用户</div><div class="stat-value" id="userStatDisabled">-</div></div>
+              <div class="stat-card"><div class="stat-label">今日注册</div><div class="stat-value" id="userStatToday">-</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h3>兑换码状态</h3><button class="btn btn-secondary btn-sm" data-jump="licenses">管理兑换码</button></div>
+          <div class="panel-body">
+            <div class="grid-stats">
+              <div class="stat-card"><div class="stat-label">全部兑换码</div><div class="stat-value" id="statTotal">-</div></div>
+              <div class="stat-card"><div class="stat-label">可用</div><div class="stat-value" id="statActive">-</div></div>
+              <div class="stat-card"><div class="stat-label">已到期</div><div class="stat-value" id="statExpired">-</div></div>
+              <div class="stat-card"><div class="stat-label">禁用 / 已兑换</div><div class="stat-value" id="statDisabled">-</div></div>
+              <div class="stat-card"><div class="stat-label">今日验证</div><div class="stat-value" id="statToday">-</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h3>最近兑换码验证</h3></div>
           <div class="table-wrap"><table>
-            <thead><tr><th>ID</th><th>卡密</th><th>标签</th><th>状态</th><th>到期时间</th><th>最后验证</th><th>IP</th></tr></thead>
+            <thead><tr><th>ID</th><th>兑换码</th><th>标签</th><th>状态</th><th>到期时间</th><th>最后验证</th><th>IP</th></tr></thead>
             <tbody id="recentBody"></tbody>
           </table></div>
+        </div>
+      </section>
+
+      <section id="view-users" class="hidden">
+        <div class="panel">
+          <div class="panel-head">
+            <div><h3>用户 / VIP 管理</h3><div class="muted" style="margin-top:4px">新用户注册自动获得 24 小时体验。管理员可禁用账号或直接续期。</div></div>
+          </div>
+          <div class="panel-body">
+            <div class="toolbar">
+              <input id="userSearchInput" class="input" placeholder="搜索用户名 / 最后登录 IP">
+              <select id="userStatusFilter" class="select">
+                <option value="">全部状态</option>
+                <option value="active">体验 / VIP 有效</option>
+                <option value="expired">已到期</option>
+                <option value="disabled">已禁用</option>
+              </select>
+              <button class="btn btn-primary" id="userSearchBtn">搜索</button>
+              <button class="btn btn-ghost" id="userResetBtn">重置</button>
+            </div>
+          </div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>ID</th><th>用户名</th><th>会员状态</th><th>到期时间</th><th>注册时间</th><th>最后登录</th><th>IP</th><th>登录次数</th><th>操作</th></tr></thead>
+            <tbody id="userBody"></tbody>
+          </table></div>
+          <div class="pager">
+            <span class="muted" id="userPagerInfo"></span>
+            <button class="btn btn-ghost btn-sm" id="userPrevBtn">上一页</button>
+            <button class="btn btn-ghost btn-sm" id="userNextBtn">下一页</button>
+          </div>
         </div>
       </section>
 
       <section id="view-licenses" class="hidden">
         <div class="panel">
           <div class="panel-head">
-            <div>
-              <h3>卡密列表</h3>
-              <div class="muted" style="margin-top:4px">新版生成的卡密可隐藏、显示和复制。旧版仅保存 SHA-256 的历史卡密无法恢复完整原文。</div>
-            </div>
+            <div><h3>兑换码管理</h3><div class="muted" style="margin-top:4px">兑换码用于给 RYLUX 账号增加使用时间。新版兑换码支持管理员显示、复制和批量导出。</div></div>
             <div class="toolbar">
-              <button class="btn btn-secondary" id="toggleRevealBtn">显示完整卡密</button>
-              <button class="btn btn-secondary" id="copyAllBtn">复制全部卡密</button>
+              <button class="btn btn-ghost" id="toggleRevealBtn">显示完整兑换码</button>
+              <button class="btn btn-secondary" id="copyAllBtn">复制当前结果</button>
               <button class="btn btn-secondary" id="exportBtn">导出 CSV</button>
-              <button class="btn btn-primary" id="generateBtn">+ 生成卡密</button>
+              <button class="btn btn-primary" id="generateBtn">+ 生成兑换码</button>
             </div>
           </div>
           <div class="panel-body">
             <div class="toolbar">
-              <input id="searchInput" class="input" placeholder="搜索完整卡密 / 后6位 / 标签 / IP">
+              <input id="searchInput" class="input" placeholder="搜索完整兑换码 / 后6位 / 标签 / IP">
               <select id="statusFilter" class="select">
-                <option value="">全部状态</option><option value="active">有效</option>
-                <option value="expired">已到期</option><option value="disabled">已禁用</option>
+                <option value="">全部状态</option><option value="active">可用</option>
+                <option value="expired">已到期</option><option value="disabled">已禁用 / 已兑换</option>
               </select>
               <button class="btn btn-primary" id="searchBtn">搜索</button>
               <button class="btn btn-ghost" id="resetSearchBtn">重置</button>
             </div>
           </div>
           <div class="table-wrap"><table>
-            <thead><tr><th>ID</th><th>卡密</th><th>标签</th><th>状态</th><th>到期时间</th><th>最后验证</th><th>IP</th><th>操作</th></tr></thead>
+            <thead><tr><th>ID</th><th>兑换码</th><th>套餐</th><th>标签</th><th>状态</th><th>到期时间</th><th>最后验证</th><th>IP</th><th>操作</th></tr></thead>
             <tbody id="licenseBody"></tbody>
           </table></div>
           <div class="pager">
@@ -93,7 +140,7 @@
 
       <section id="view-logs" class="hidden">
         <div class="panel">
-          <div class="panel-head"><div><h3>操作日志</h3><div class="muted" style="margin-top:4px">管理员登录、生成、禁用、启用、续期与改密记录。</div></div></div>
+          <div class="panel-head"><div><h3>管理员操作日志</h3><div class="muted" style="margin-top:4px">登录、兑换码、用户状态、VIP 续期和管理员凭据变更记录。</div></div></div>
           <div class="table-wrap"><table>
             <thead><tr><th>ID</th><th>操作</th><th>目标</th><th>详情</th><th>IP</th><th>时间</th></tr></thead>
             <tbody id="logBody"></tbody>
@@ -111,7 +158,7 @@
           <div class="panel">
             <div class="panel-head"><h3>管理员账号</h3></div>
             <div class="panel-body">
-              <div id="passwordNotice" class="alert alert-warn hidden">当前仍是首次登录临时密码，请立即修改后再使用卡密管理功能。</div>
+              <div id="passwordNotice" class="alert alert-warn hidden">当前仍是首次登录临时密码，请立即修改后再使用管理功能。</div>
               <form id="credentialForm">
                 <div class="form-group"><label>当前密码</label><input class="input" type="password" name="current_password" required></div>
                 <div class="form-group"><label>管理员账号</label><input class="input" name="username" id="settingsUsername" minlength="3" maxlength="32" required></div>
@@ -122,13 +169,15 @@
             </div>
           </div>
           <div class="panel">
-            <div class="panel-head"><h3>系统信息</h3></div>
+            <div class="panel-head"><h3>RYLUX V1</h3></div>
             <div class="panel-body info-list">
-              <div class="info-row"><span class="muted">验证接口</span><span class="code">/api/v1/license/verify</span></div>
-              <div class="info-row"><span class="muted">管理后台</span><span class="code">/admin</span></div>
-              <div class="info-row"><span class="muted">数据库</span><span>SQLite / Hash 验证 + 管理员完整卡密</span></div>
-              <div class="info-row"><span class="muted">生成上限</span><span>1000 张 / 次</span></div>
-              <div class="info-row"><span class="muted">有效期预设</span><span>1 / 7 / 30 / 90 / 180 / 360 天</span></div>
+              <div class="info-row"><span class="muted">用户注册</span><span class="code">/api/v1/auth/register</span></div>
+              <div class="info-row"><span class="muted">用户登录</span><span class="code">/api/v1/auth/login</span></div>
+              <div class="info-row"><span class="muted">新用户体验</span><span>24 小时</span></div>
+              <div class="info-row"><span class="muted">套餐</span><span>7 / 30 / 90 / 180 / 365 天</span></div>
+              <div class="info-row"><span class="muted">在线支付</span><span>V1 暂未开放</span></div>
+              <div class="info-row"><span class="muted">首个模块</span><span>三国汉化 / localhost PAK</span></div>
+              <div class="info-row"><span class="muted">旧卡密 API</span><span>保留兼容</span></div>
             </div>
           </div>
         </div>
@@ -139,15 +188,16 @@
 
 <div class="modal-backdrop hidden" id="generateModal">
   <div class="modal">
-    <div class="modal-head"><h3>生成卡密</h3><button class="btn btn-ghost btn-sm" data-close="generateModal">关闭</button></div>
+    <div class="modal-head"><h3>生成兑换码</h3><button class="btn btn-ghost btn-sm" data-close="generateModal">关闭</button></div>
     <div class="modal-body">
       <div class="form-group"><label>标签</label><input class="input" id="genLabel" maxlength="80" placeholder="客户名 / 渠道 / 测试"></div>
       <div class="form-group"><label>生成数量</label><input class="input" id="genQty" type="number" min="1" max="1000" value="1"></div>
-      <div class="form-group"><label>有效期</label><div class="days-grid" id="dayGrid">
+      <div class="form-group"><label>充值时长</label><div class="days-grid" id="dayGrid">
         <button class="day-btn" data-days="1">1 天</button><button class="day-btn" data-days="7">7 天</button>
         <button class="day-btn active" data-days="30">30 天</button><button class="day-btn" data-days="90">90 天</button>
-        <button class="day-btn" data-days="180">180 天</button><button class="day-btn" data-days="360">360 天</button>
+        <button class="day-btn" data-days="180">180 天</button><button class="day-btn" data-days="365">365 天</button>
       </div></div>
+      <div class="alert alert-warn">兑换码目前也有自身有效期；用户兑换后会把对应天数累计到账户 VIP 到期时间。</div>
     </div>
     <div class="modal-foot"><button class="btn btn-ghost" data-close="generateModal">取消</button><button class="btn btn-primary" id="confirmGenerate">生成</button></div>
   </div>
@@ -157,7 +207,6 @@
   <div class="modal">
     <div class="modal-head"><h3>生成成功</h3><button class="btn btn-ghost btn-sm" data-close="resultModal">关闭</button></div>
     <div class="modal-body">
-      <div class="alert alert-warn">完整卡密已保存到管理员后台，可随时隐藏、显示、复制或导出。</div>
       <textarea class="keys" id="generatedKeys" readonly></textarea>
       <div class="muted" id="generatedExpiry" style="margin-top:8px"></div>
     </div>
