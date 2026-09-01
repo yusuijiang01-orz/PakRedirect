@@ -22,7 +22,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Serves verified hot-updated localization content and optional verified mirror
+ * Serves verified hot-updated localization content and optional mounted mirror
  * PAKs over localhost. The game downloads from 127.0.0.1 and writes files with
  * its own UID, so no root or cross-app sandbox write is required.
  */
@@ -83,12 +83,12 @@ public final class BundledPakServer {
         int mirrorCount = 0;
         Map<String, MirrorPackManager.MirrorEntry> mirrorEntries = MirrorPackManager.entries(context);
         for (MirrorPackManager.MirrorEntry entry : mirrorEntries.values()) {
-            if (entry == null || entry.file == null || !entry.file.isFile() || entry.size <= 0 || entry.revision <= 0) continue;
+            if (entry == null || entry.uri == null || entry.size <= 0 || entry.revision <= 0) continue;
             String key = entry.name.toLowerCase(Locale.US);
             // Mirror packs are restricted to official PAK names, but never let a
             // mirror override a localization PAK if the allow-list changes later.
             if ("settings.pak".equals(key) || "ui.pak".equals(key) || "updatefs.pak".equals(key)) continue;
-            pakAssets.put(key, PakSource.mirror(entry.name, entry.file, entry.revision));
+            pakAssets.put(key, PakSource.mirror(entry));
             mirrorCount++;
         }
 
@@ -243,8 +243,7 @@ public final class BundledPakServer {
         out.write(response.toString().getBytes(StandardCharsets.US_ASCII));
 
         if (!headOnly) {
-            try (InputStream assetIn = asset.open(context)) {
-                skipFully(assetIn, start);
+            try (InputStream assetIn = asset.open(context, start)) {
                 byte[] buffer = new byte[64 * 1024];
                 long remaining = length;
                 while (remaining > 0) {
@@ -385,33 +384,54 @@ public final class BundledPakServer {
         final String name;
         final long size;
         final File file;
+        final MirrorPackManager.MirrorEntry mirrorEntry;
         final boolean mirror;
         final long revision;
         final String label;
 
-        private PakSource(String name, long size, File file, boolean mirror, long revision, String label) {
+        private PakSource(
+                String name,
+                long size,
+                File file,
+                MirrorPackManager.MirrorEntry mirrorEntry,
+                boolean mirror,
+                long revision,
+                String label
+        ) {
             this.name = name;
             this.size = size;
             this.file = file;
+            this.mirrorEntry = mirrorEntry;
             this.mirror = mirror;
             this.revision = revision;
             this.label = label;
         }
 
         static PakSource asset(String name, long size) {
-            return new PakSource(name, size, null, false, 0L, "内置");
+            return new PakSource(name, size, null, null, false, 0L, "内置");
         }
 
         static PakSource hot(String name, File file) {
-            return new PakSource(name, file.length(), file, false, 0L, "汉化热更新");
+            return new PakSource(name, file.length(), file, null, false, 0L, "汉化热更新");
         }
 
-        static PakSource mirror(String name, File file, long revision) {
-            return new PakSource(name, file.length(), file, true, revision, "镜像");
+        static PakSource mirror(MirrorPackManager.MirrorEntry entry) {
+            return new PakSource(entry.name, entry.size, null, entry, true, entry.revision, "镜像");
         }
 
-        InputStream open(Context context) throws Exception {
-            return file == null ? context.getAssets().open(name) : new FileInputStream(file);
+        InputStream open(Context context, long start) throws Exception {
+            if (mirrorEntry != null) {
+                return MirrorPackManager.openEntry(context, mirrorEntry, start);
+            }
+            InputStream in = file == null ? context.getAssets().open(name) : new FileInputStream(file);
+            try {
+                skipFully(in, start);
+                return in;
+            } catch (Throwable t) {
+                try { in.close(); } catch (Throwable ignored) {}
+                if (t instanceof Exception) throw (Exception) t;
+                throw new IllegalStateException("PAK 定位失败: " + name, t);
+            }
         }
     }
 
