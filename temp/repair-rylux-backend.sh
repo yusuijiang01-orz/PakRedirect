@@ -7,18 +7,36 @@ VENV="$APP_DIR/.venv"
 SERVICE_FILE="/etc/systemd/system/$SERVICE.service"
 CONTENT_ENV="/etc/pakredirect-license/content.env"
 BASE_URL="https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/backend"
+LOCAL_BASE="http://127.0.0.1:18888"
 LOG_PREFIX="[RYLUX-REPAIR]"
 
 say() { printf '%s %s\n' "$LOG_PREFIX" "$*"; }
 fail() { printf '%s ERROR: %s\n' "$LOG_PREFIX" "$*" >&2; exit 1; }
 
+dump_service_state() {
+  say "===== service status ====="
+  systemctl --no-pager --full status "$SERVICE" || true
+  say "===== recent service logs ====="
+  journalctl -u "$SERVICE" -n 120 --no-pager || true
+  say "===== listener check ====="
+  ss -ltnp 2>/dev/null | grep ':18888' || true
+}
+
+on_error() {
+  local code=$?
+  say "Unexpected failure (exit=$code). Collecting diagnostics..."
+  dump_service_state
+  exit "$code"
+}
+trap on_error ERR
+
 if [ "$(id -u)" -ne 0 ]; then
-  fail "Please run as root: sudo bash temp/repair-rylux-backend.sh"
+  fail "Please run as root: sudo /tmp/repair-rylux-backend.sh"
 fi
 
-say "Starting one-click backend repair"
+say "Starting one-click backend repair v2"
 
-for cmd in curl systemctl install grep; do
+for cmd in curl systemctl install grep ss; do
   command -v "$cmd" >/dev/null 2>&1 || fail "Missing required command: $cmd"
 done
 
@@ -91,52 +109,72 @@ fi
 say "Reloading systemd and restarting service"
 systemctl daemon-reload
 systemctl stop "$SERVICE" || true
-sleep 1
+sleep 2
 systemctl reset-failed "$SERVICE" || true
 systemctl start "$SERVICE"
 
-say "Waiting for service to become active"
-ACTIVE=0
-for _ in $(seq 1 15); do
-  if systemctl is-active --quiet "$SERVICE"; then
-    ACTIVE=1
+say "Waiting for local health endpoint (up to 30 seconds)"
+HEALTH_OK=0
+for i in $(seq 1 30); do
+  if curl -fsS --max-time 2 "$LOCAL_BASE/healthz" >"$TMP_DIR/health.out" 2>/dev/null; then
+    HEALTH_OK=1
     break
+  fi
+
+  if ! systemctl is-active --quiet "$SERVICE"; then
+    state="$(systemctl is-active "$SERVICE" 2>/dev/null || true)"
+    say "Service is not active while waiting (state=${state:-unknown}, attempt=$i/30)"
   fi
   sleep 1
 done
 
-if [ "$ACTIVE" -ne 1 ]; then
-  say "Service failed to stay active. Recent logs:"
-  journalctl -u "$SERVICE" -n 80 --no-pager || true
-  fail "Backend repair failed; backup is at $BACKUP_DIR"
+if [ "$HEALTH_OK" -ne 1 ]; then
+  say "Local health endpoint did not become ready"
+  dump_service_state
+  fail "Local health check failed; backup is at $BACKUP_DIR"
 fi
 
 PID="$(systemctl show "$SERVICE" -p MainPID --value)"
-say "Service active. MainPID=$PID"
+if [ -z "$PID" ] || [ "$PID" = "0" ]; then
+  dump_service_state
+  fail "Service health responded but MainPID is invalid"
+fi
 
-say "Checking local health endpoint"
-curl -fsS http://127.0.0.1:18888/healthz >/dev/null \
-  || fail "Local health check failed"
-printf '%s Local health: OK\n' "$LOG_PREFIX"
+# Require the process to remain healthy for a short grace period. This catches
+# systemd restart loops that briefly report active before uvicorn exits.
+say "Health is up. Verifying service stability for 5 seconds"
+sleep 5
+if ! systemctl is-active --quiet "$SERVICE"; then
+  dump_service_state
+  fail "Service became unhealthy during stability check"
+fi
+curl -fsS --max-time 3 "$LOCAL_BASE/healthz" >/dev/null \
+  || { dump_service_state; fail "Health endpoint disappeared during stability check"; }
+
+say "Service stable. MainPID=$(systemctl show "$SERVICE" -p MainPID --value)"
+say "Local health: OK"
 
 say "Checking protected manifest route with GET (expected HTTP 405)"
-HTTP_CODE="$(curl -sS -o "$TMP_DIR/route.out" -w '%{http_code}' \
-  http://127.0.0.1:18888/api/v1/content/sg_localization/manifest || true)"
+HTTP_CODE="$(curl -sS --max-time 5 -o "$TMP_DIR/route.out" -w '%{http_code}' \
+  "$LOCAL_BASE/api/v1/content/sg_localization/manifest" || true)"
 
 if [ "$HTTP_CODE" != "405" ]; then
   say "Unexpected local protected-route HTTP code: $HTTP_CODE"
   cat "$TMP_DIR/route.out" 2>/dev/null || true
-  say "Recent service logs:"
-  journalctl -u "$SERVICE" -n 80 --no-pager || true
+  dump_service_state
   fail "Protected route is not healthy; expected 405"
 fi
-
 say "Protected route: OK (HTTP 405 on GET, POST route exists)"
 
 say "Checking public endpoint reachability"
-PUBLIC_CODE="$(curl -sS -o /dev/null -w '%{http_code}' \
+PUBLIC_CODE="$(curl -sS --max-time 10 -o "$TMP_DIR/public.out" -w '%{http_code}' \
   https://verify.lovenom.eu.org/api/v1/content/sg_localization/manifest || true)"
-printf '%s Public protected route HTTP=%s (expected 405)\n' "$LOG_PREFIX" "$PUBLIC_CODE"
+if [ "$PUBLIC_CODE" != "405" ]; then
+  say "WARNING: public protected route HTTP=$PUBLIC_CODE (expected 405)"
+  cat "$TMP_DIR/public.out" 2>/dev/null || true
+else
+  say "Public protected route: OK (HTTP 405)"
+fi
 
 say "Repair completed successfully"
 say "Backup retained at: $BACKUP_DIR"
