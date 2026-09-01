@@ -1,45 +1,49 @@
 package com.example.pakredirect;
 
 import android.content.Context;
-import android.database.Cursor;
+import android.content.Intent;
+import android.content.SharedPreferences;
 import android.net.Uri;
-import android.provider.OpenableColumns;
+import android.os.ParcelFileDescriptor;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.BufferedInputStream;
-import java.io.BufferedOutputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.FilterInputStream;
 import java.io.InputStream;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.channels.FileChannel;
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
 
 /**
- * Imports a user-selected RYLUX mirror pack into app-private storage.
- *
- * Mirror packs contain only unmodified official game PAKs. Modified localization
- * PAKs remain managed by ContentUpdateManager and can never be overridden by a
- * mirror pack. Every imported file is verified against mirror.json before the
- * staged directory is committed.
+ * Verifies and mounts a user-selected .ryluxmirror file through Android's
+ * Storage Access Framework. The large PAK payload stays where the user selected
+ * it; RYLUX stores only the persisted URI + metadata and serves byte ranges
+ * directly from the package over localhost. This avoids an extra multi-GB copy.
  */
 public final class MirrorPackManager {
     public static final String MODULE_CODE = "sg_localization";
-    private static final String META_NAME = "mirror.json";
-    private static final int MAX_META_BYTES = 512 * 1024;
+
+    private static final byte[] MAGIC = "RYLUXM01".getBytes(StandardCharsets.US_ASCII);
+    private static final int PREFIX_BYTES = 12;
+    private static final int MAX_HEADER_BYTES = 512 * 1024;
     private static final long MAX_TOTAL_BYTES = 8L * 1024L * 1024L * 1024L;
+    private static final String PREFS = "rylux_mirror_pack";
+    private static final String KEY_URI = "uri";
+    private static final String KEY_META = "meta";
 
     private static final Set<String> ALLOWED = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
             "resource.pak",
@@ -57,195 +61,231 @@ public final class MirrorPackManager {
         void onProgress(String message, int percent);
     }
 
-    public static File mirrorDir(Context context) {
-        return new File(context.getFilesDir(), "rylux-mirror/" + MODULE_CODE);
-    }
-
-    public static ImportResult importPack(Context context, Uri uri, ProgressListener listener) throws Exception {
+    public static ImportResult selectPack(Context context, Uri uri, ProgressListener listener) throws Exception {
         if (uri == null) throw new IllegalArgumentException("未选择镜像包");
 
-        File base = new File(context.getFilesDir(), "rylux-mirror");
-        if (!base.exists() && !base.mkdirs()) throw new IllegalStateException("无法创建镜像目录");
+        ParsedPack pack = parsePack(context, uri);
+        verifyPack(context, pack, listener);
 
-        File target = mirrorDir(context);
-        File stage = new File(base, MODULE_CODE + ".stage");
-        File backup = new File(base, MODULE_CODE + ".rollback");
-        deleteTree(stage);
-        if (!stage.mkdirs()) throw new IllegalStateException("无法创建镜像临时目录");
-
-        long archiveSize = querySize(context, uri);
-        byte[] metaBytes = null;
-        Set<String> extracted = new HashSet<>();
-        long extractedBytes = 0L;
-
-        try (InputStream raw = context.getContentResolver().openInputStream(uri)) {
-            if (raw == null) throw new IllegalStateException("无法读取镜像包");
-            CountingInputStream counted = new CountingInputStream(new BufferedInputStream(raw, 256 * 1024));
-            try (ZipInputStream zip = new ZipInputStream(counted)) {
-                ZipEntry entry;
-                byte[] buffer = new byte[256 * 1024];
-                while ((entry = zip.getNextEntry()) != null) {
-                    if (entry.isDirectory()) {
-                        zip.closeEntry();
-                        continue;
-                    }
-                    String safe = safeRootName(entry.getName());
-                    if (safe == null) {
-                        zip.closeEntry();
-                        continue;
-                    }
-                    String lower = safe.toLowerCase(Locale.US);
-                    if (META_NAME.equals(lower)) {
-                        if (metaBytes != null) throw new IllegalStateException("镜像包包含重复 mirror.json");
-                        metaBytes = readLimited(zip, MAX_META_BYTES);
-                    } else if (ALLOWED.contains(lower)) {
-                        if (!extracted.add(lower)) throw new IllegalStateException("镜像包包含重复文件：" + lower);
-                        File out = new File(stage, lower);
-                        long copied = 0L;
-                        try (FileOutputStream fos = new FileOutputStream(out);
-                             BufferedOutputStream bos = new BufferedOutputStream(fos, 256 * 1024)) {
-                            int n;
-                            while ((n = zip.read(buffer)) >= 0) {
-                                if (n == 0) continue;
-                                bos.write(buffer, 0, n);
-                                copied += n;
-                                extractedBytes += n;
-                                if (extractedBytes > MAX_TOTAL_BYTES) {
-                                    throw new IllegalStateException("镜像包体积超过安全上限");
-                                }
-                                emit(listener, "正在导入 " + lower + " · " + humanBytes(copied), percent(counted.count, archiveSize));
-                            }
-                            bos.flush();
-                            fos.getFD().sync();
-                        }
-                    }
-                    zip.closeEntry();
-                }
-            }
-        } catch (Throwable t) {
-            deleteTree(stage);
-            if (t instanceof Exception) throw (Exception) t;
-            throw new IllegalStateException("镜像包导入失败", t);
-        }
-
-        if (metaBytes == null || metaBytes.length == 0) {
-            deleteTree(stage);
-            throw new IllegalStateException("镜像包缺少 mirror.json");
-        }
-
-        emit(listener, "正在校验镜像包…", 96);
-        MirrorMeta meta = parseAndVerify(stage, metaBytes, extracted);
-        try (FileOutputStream out = new FileOutputStream(new File(stage, META_NAME))) {
-            out.write(metaBytes);
-            out.getFD().sync();
-        }
-
-        deleteTree(backup);
-        boolean hadTarget = target.exists();
         try {
-            if (hadTarget && !target.renameTo(backup)) {
-                throw new IllegalStateException("无法备份旧镜像包");
+            context.getContentResolver().takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+            );
+        } catch (SecurityException e) {
+            throw new IllegalStateException("无法长期访问该文件，请将镜像包放到本机下载目录后重新选择", e);
+        }
+
+        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        String oldUri = prefs.getString(KEY_URI, "");
+        prefs.edit()
+                .putString(KEY_URI, uri.toString())
+                .putString(KEY_META, pack.metaText)
+                .apply();
+
+        if (oldUri != null && !oldUri.isEmpty() && !oldUri.equals(uri.toString())) {
+            try {
+                context.getContentResolver().releasePersistableUriPermission(
+                        Uri.parse(oldUri),
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                );
+            } catch (Throwable ignored) {
             }
-            if (!stage.renameTo(target)) {
-                if (hadTarget && backup.exists()) backup.renameTo(target);
-                throw new IllegalStateException("无法安装镜像包");
-            }
-            deleteTree(backup);
-        } catch (Throwable t) {
-            deleteTree(stage);
-            if (!target.exists() && hadTarget && backup.exists()) backup.renameTo(target);
-            if (t instanceof Exception) throw (Exception) t;
-            throw new IllegalStateException("镜像包安装失败", t);
         }
 
         emit(listener, "镜像包已就绪", 100);
-        return new ImportResult(true, meta.packName, meta.files.size(), meta.totalBytes);
+        return new ImportResult(true, pack.name, pack.entries.size(), pack.totalBytes);
     }
 
     public static MirrorStatus status(Context context) {
         try {
-            File metaFile = new File(mirrorDir(context), META_NAME);
-            if (!metaFile.isFile()) return MirrorStatus.none();
-            MirrorMeta meta = parseInstalledMeta(context, readFileLimited(metaFile, MAX_META_BYTES));
-            int validCount = 0;
-            long total = 0L;
-            for (MirrorEntry entry : meta.files.values()) {
-                if (entry.file.isFile() && entry.file.length() == entry.size) {
-                    validCount++;
-                    total += entry.size;
-                }
+            InstalledPack pack = installed(context);
+            if (pack == null || pack.entries.isEmpty()) return MirrorStatus.none();
+            try (ParcelFileDescriptor ignored = context.getContentResolver().openFileDescriptor(pack.uri, "r")) {
+                if (ignored == null) return MirrorStatus.none();
             }
-            if (validCount == 0) return MirrorStatus.none();
-            return new MirrorStatus(true, meta.packName, validCount, total);
+            return new MirrorStatus(true, pack.name, pack.entries.size(), pack.totalBytes);
         } catch (Throwable ignored) {
             return MirrorStatus.none();
         }
     }
 
-    /** Returns only entries that still match their recorded size. */
     public static Map<String, MirrorEntry> entries(Context context) {
         try {
-            File metaFile = new File(mirrorDir(context), META_NAME);
-            if (!metaFile.isFile()) return Collections.emptyMap();
-            MirrorMeta meta = parseInstalledMeta(context, readFileLimited(metaFile, MAX_META_BYTES));
-            Map<String, MirrorEntry> out = new HashMap<>();
-            for (MirrorEntry entry : meta.files.values()) {
-                if (entry.file.isFile() && entry.file.length() == entry.size) {
-                    out.put(entry.name, entry);
-                }
-            }
-            return out;
+            InstalledPack pack = installed(context);
+            if (pack == null) return Collections.emptyMap();
+            return new HashMap<>(pack.entries);
         } catch (Throwable ignored) {
             return Collections.emptyMap();
         }
     }
 
+    public static InputStream openEntry(Context context, MirrorEntry entry, long relativeStart) throws Exception {
+        if (entry == null || entry.uri == null) throw new IllegalArgumentException("镜像条目无效");
+        if (relativeStart < 0 || relativeStart >= entry.size) throw new IllegalArgumentException("镜像读取范围无效");
+
+        ParcelFileDescriptor pfd = context.getContentResolver().openFileDescriptor(entry.uri, "r");
+        if (pfd == null) throw new IllegalStateException("镜像包已不可访问");
+        FileInputStream input = new FileInputStream(pfd.getFileDescriptor());
+        try {
+            input.getChannel().position(entry.absoluteOffset + relativeStart);
+        } catch (Throwable t) {
+            try { input.close(); } catch (Throwable ignored) {}
+            try { pfd.close(); } catch (Throwable ignored) {}
+            throw new IllegalStateException("镜像包不支持随机读取，请将文件保存到本机下载目录", t);
+        }
+        return new PfdInputStream(input, pfd);
+    }
+
     public static void clear(Context context) {
-        deleteTree(mirrorDir(context));
+        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        String uriText = prefs.getString(KEY_URI, "");
+        prefs.edit().clear().apply();
+        if (uriText != null && !uriText.isEmpty()) {
+            try {
+                context.getContentResolver().releasePersistableUriPermission(
+                        Uri.parse(uriText),
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                );
+            } catch (Throwable ignored) {
+            }
+        }
     }
 
-    private static MirrorMeta parseAndVerify(File stage, byte[] metaBytes, Set<String> extracted) throws Exception {
-        JSONObject root = new JSONObject(new String(metaBytes, "UTF-8"));
-        validateRoot(root);
-        JSONArray files = root.optJSONArray("files");
-        if (files == null || files.length() == 0) throw new IllegalStateException("镜像包没有 PAK 文件");
+    private static ParsedPack parsePack(Context context, Uri uri) throws Exception {
+        try (ParcelFileDescriptor pfd = context.getContentResolver().openFileDescriptor(uri, "r")) {
+            if (pfd == null) throw new IllegalStateException("无法读取镜像包");
+            try (FileInputStream input = new FileInputStream(pfd.getFileDescriptor())) {
+                FileChannel channel = input.getChannel();
+                long fileSize = channel.size();
+                if (fileSize < PREFIX_BYTES) throw new IllegalStateException("镜像包文件过小");
 
-        String packName = packName(root);
-        Map<String, MirrorEntry> parsed = new HashMap<>();
-        long totalBytes = 0L;
-        for (int i = 0; i < files.length(); i++) {
-            JSONObject item = files.optJSONObject(i);
-            if (item == null) throw new IllegalStateException("镜像包清单项目异常");
-            String name = item.optString("name", "").trim().toLowerCase(Locale.US);
-            long size = item.optLong("size", -1L);
-            long revision = item.optLong("revision", 0L);
-            String sha = item.optString("sha256", "").trim().toLowerCase(Locale.US);
-            validateItem(name, size, revision, sha);
-            if (parsed.containsKey(name)) throw new IllegalStateException("镜像包清单重复文件：" + name);
-            File file = new File(stage, name);
-            if (!file.isFile()) throw new IllegalStateException("镜像包缺少文件：" + name);
-            if (file.length() != size) throw new IllegalStateException("镜像包文件大小不匹配：" + name);
-            if (!sha.equals(sha256(file))) throw new IllegalStateException("镜像包校验失败：" + name);
-            parsed.put(name, new MirrorEntry(name, file, size, revision));
-            totalBytes += size;
-            if (totalBytes > MAX_TOTAL_BYTES) throw new IllegalStateException("镜像包体积超过安全上限");
-        }
+                ByteBuffer prefix = ByteBuffer.allocate(PREFIX_BYTES).order(ByteOrder.BIG_ENDIAN);
+                readFully(channel, prefix);
+                prefix.flip();
+                byte[] magic = new byte[MAGIC.length];
+                prefix.get(magic);
+                if (!Arrays.equals(MAGIC, magic)) throw new IllegalStateException("不是有效的 RYLUX 镜像包");
+                int headerLength = prefix.getInt();
+                if (headerLength <= 0 || headerLength > MAX_HEADER_BYTES) {
+                    throw new IllegalStateException("镜像包头部长度无效");
+                }
+                if ((long) PREFIX_BYTES + headerLength >= fileSize) {
+                    throw new IllegalStateException("镜像包头部损坏");
+                }
 
-        if (extracted.size() != parsed.size()) throw new IllegalStateException("镜像包文件与 mirror.json 不一致");
-        for (String name : extracted) {
-            if (!parsed.containsKey(name)) throw new IllegalStateException("mirror.json 未登记文件：" + name);
+                ByteBuffer header = ByteBuffer.allocate(headerLength);
+                readFully(channel, header);
+                header.flip();
+                byte[] bytes = new byte[headerLength];
+                header.get(bytes);
+                String metaText = new String(bytes, StandardCharsets.UTF_8);
+                JSONObject root = new JSONObject(metaText);
+                validateRoot(root);
+
+                JSONArray files = root.optJSONArray("files");
+                if (files == null || files.length() == 0) throw new IllegalStateException("镜像包没有 PAK 文件");
+                long payloadStart = PREFIX_BYTES + (long) headerLength;
+                List<MirrorEntry> entries = new ArrayList<>();
+                Set<String> names = new HashSet<>();
+                long total = 0L;
+
+                for (int i = 0; i < files.length(); i++) {
+                    JSONObject item = files.optJSONObject(i);
+                    if (item == null) throw new IllegalStateException("镜像包清单项目异常");
+                    String name = item.optString("name", "").trim().toLowerCase(Locale.US);
+                    long size = item.optLong("size", -1L);
+                    long revision = item.optLong("revision", 0L);
+                    long offset = item.optLong("offset", -1L);
+                    String sha = item.optString("sha256", "").trim().toLowerCase(Locale.US);
+                    validateItem(name, size, revision, offset, sha);
+                    if (!names.add(name)) throw new IllegalStateException("镜像包重复文件：" + name);
+                    long absolute = payloadStart + offset;
+                    if (absolute < payloadStart || absolute + size < absolute || absolute + size > fileSize) {
+                        throw new IllegalStateException("镜像包文件范围无效：" + name);
+                    }
+                    entries.add(new MirrorEntry(name, uri, absolute, size, revision, sha));
+                    total += size;
+                    if (total > MAX_TOTAL_BYTES) throw new IllegalStateException("镜像包体积超过安全上限");
+                }
+
+                List<MirrorEntry> ordered = new ArrayList<>(entries);
+                ordered.sort(Comparator.comparingLong(a -> a.absoluteOffset));
+                long end = payloadStart;
+                for (MirrorEntry entry : ordered) {
+                    if (entry.absoluteOffset < end) throw new IllegalStateException("镜像包文件区间重叠");
+                    end = entry.absoluteOffset + entry.size;
+                }
+
+                // Test that the provider actually exposes a seekable descriptor.
+                channel.position(payloadStart);
+                return new ParsedPack(packName(root), metaText, entries, total);
+            }
         }
-        return new MirrorMeta(packName, parsed, totalBytes);
     }
 
-    private static MirrorMeta parseInstalledMeta(Context context, byte[] metaBytes) throws Exception {
-        JSONObject root = new JSONObject(new String(metaBytes, "UTF-8"));
+    private static void verifyPack(Context context, ParsedPack pack, ProgressListener listener) throws Exception {
+        long verified = 0L;
+        ByteBuffer buffer = ByteBuffer.allocate(1024 * 1024);
+        try (ParcelFileDescriptor pfd = context.getContentResolver().openFileDescriptor(pack.entries.get(0).uri, "r")) {
+            if (pfd == null) throw new IllegalStateException("无法校验镜像包");
+            try (FileInputStream input = new FileInputStream(pfd.getFileDescriptor())) {
+                FileChannel channel = input.getChannel();
+                for (MirrorEntry entry : pack.entries) {
+                    emit(nullSafe(listener), "正在校验 " + entry.name + "…", percent(verified, pack.totalBytes));
+                    MessageDigest digest = MessageDigest.getInstance("SHA-256");
+                    channel.position(entry.absoluteOffset);
+                    long remaining = entry.size;
+                    while (remaining > 0) {
+                        buffer.clear();
+                        buffer.limit((int) Math.min(buffer.capacity(), remaining));
+                        int n = channel.read(buffer);
+                        if (n < 0) throw new IllegalStateException("镜像包读取长度不足：" + entry.name);
+                        if (n == 0) continue;
+                        digest.update(buffer.array(), 0, n);
+                        remaining -= n;
+                        verified += n;
+                        emit(listener, "正在校验 " + entry.name + " · " + humanBytes(entry.size - remaining), percent(verified, pack.totalBytes));
+                    }
+                    String actual = hex(digest.digest());
+                    if (!entry.sha256.equals(actual)) throw new IllegalStateException("镜像包校验失败：" + entry.name);
+                }
+            }
+        }
+    }
+
+    private static InstalledPack installed(Context context) throws Exception {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        String uriText = prefs.getString(KEY_URI, "");
+        String metaText = prefs.getString(KEY_META, "");
+        if (uriText == null || uriText.isEmpty() || metaText == null || metaText.isEmpty()) return null;
+
+        Uri uri = Uri.parse(uriText);
+        JSONObject root = new JSONObject(metaText);
         validateRoot(root);
         JSONArray files = root.optJSONArray("files");
-        if (files == null || files.length() == 0) throw new IllegalStateException("镜像包元数据为空");
+        if (files == null || files.length() == 0) return null;
 
-        File dir = mirrorDir(context);
-        Map<String, MirrorEntry> parsed = new HashMap<>();
+        // Re-open just the fixed header to recover payloadStart. The stored JSON
+        // contains relative offsets, so moving the file does not change metadata.
+        int headerLength;
+        try (ParcelFileDescriptor pfd = context.getContentResolver().openFileDescriptor(uri, "r")) {
+            if (pfd == null) return null;
+            try (FileInputStream input = new FileInputStream(pfd.getFileDescriptor())) {
+                FileChannel channel = input.getChannel();
+                ByteBuffer prefix = ByteBuffer.allocate(PREFIX_BYTES).order(ByteOrder.BIG_ENDIAN);
+                readFully(channel, prefix);
+                prefix.flip();
+                byte[] magic = new byte[MAGIC.length];
+                prefix.get(magic);
+                if (!Arrays.equals(MAGIC, magic)) return null;
+                headerLength = prefix.getInt();
+                if (headerLength <= 0 || headerLength > MAX_HEADER_BYTES) return null;
+            }
+        }
+
+        long payloadStart = PREFIX_BYTES + (long) headerLength;
+        Map<String, MirrorEntry> result = new HashMap<>();
         long total = 0L;
         for (int i = 0; i < files.length(); i++) {
             JSONObject item = files.optJSONObject(i);
@@ -253,12 +293,14 @@ public final class MirrorPackManager {
             String name = item.optString("name", "").trim().toLowerCase(Locale.US);
             long size = item.optLong("size", -1L);
             long revision = item.optLong("revision", 0L);
+            long offset = item.optLong("offset", -1L);
             String sha = item.optString("sha256", "").trim().toLowerCase(Locale.US);
-            if (!ALLOWED.contains(name) || size <= 0 || revision <= 0 || sha.length() != 64) continue;
-            parsed.put(name, new MirrorEntry(name, new File(dir, name), size, revision));
+            if (!ALLOWED.contains(name) || size <= 0 || revision <= 0 || offset < 0 || sha.length() != 64) continue;
+            result.put(name, new MirrorEntry(name, uri, payloadStart + offset, size, revision, sha));
             total += size;
         }
-        return new MirrorMeta(packName(root), parsed, total);
+        if (result.isEmpty()) return null;
+        return new InstalledPack(uri, packName(root), result, total);
     }
 
     private static void validateRoot(JSONObject root) {
@@ -266,71 +308,37 @@ public final class MirrorPackManager {
         if (!MODULE_CODE.equals(root.optString("module", ""))) throw new IllegalStateException("镜像包模块不匹配");
     }
 
-    private static void validateItem(String name, long size, long revision, String sha) {
+    private static void validateItem(String name, long size, long revision, long offset, String sha) {
         if (!ALLOWED.contains(name)) throw new IllegalStateException("镜像包包含不允许的 PAK：" + name);
-        if (size <= 0 || revision <= 0 || sha.length() != 64) throw new IllegalStateException("镜像包清单无效：" + name);
+        if (size <= 0 || revision <= 0 || offset < 0 || sha.length() != 64) {
+            throw new IllegalStateException("镜像包清单无效：" + name);
+        }
     }
 
     private static String packName(JSONObject root) {
-        String value = root.optString("name", "RYLUX 镜像包").trim();
-        return value.isEmpty() ? "RYLUX 镜像包" : value;
+        String value = root.optString("name", "RYLUX 官方资源镜像").trim();
+        return value.isEmpty() ? "RYLUX 官方资源镜像" : value;
     }
 
-    private static long querySize(Context context, Uri uri) {
-        try (Cursor cursor = context.getContentResolver().query(uri, new String[]{OpenableColumns.SIZE}, null, null, null)) {
-            if (cursor != null && cursor.moveToFirst()) {
-                int index = cursor.getColumnIndex(OpenableColumns.SIZE);
-                if (index >= 0 && !cursor.isNull(index)) return cursor.getLong(index);
-            }
-        } catch (Throwable ignored) {
+    private static void readFully(FileChannel channel, ByteBuffer buffer) throws Exception {
+        while (buffer.hasRemaining()) {
+            int n = channel.read(buffer);
+            if (n < 0) throw new IllegalStateException("镜像包读取失败");
+            if (n == 0) Thread.yield();
         }
-        return -1L;
     }
 
-    private static int percent(long read, long total) {
+    private static int percent(long done, long total) {
         if (total <= 0) return -1;
-        return Math.max(0, Math.min(95, (int) ((read * 95L) / total)));
+        return Math.max(0, Math.min(99, (int) ((done * 100L) / total)));
+    }
+
+    private static ProgressListener nullSafe(ProgressListener listener) {
+        return listener;
     }
 
     private static void emit(ProgressListener listener, String message, int percent) {
         if (listener != null) listener.onProgress(message, percent);
-    }
-
-    private static String safeRootName(String value) {
-        if (value == null) return null;
-        String name = value.trim();
-        if (name.isEmpty() || name.contains("/") || name.contains("\\") || name.contains("..")) return null;
-        return name;
-    }
-
-    private static byte[] readLimited(InputStream in, int max) throws Exception {
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        byte[] buffer = new byte[8192];
-        int n;
-        while ((n = in.read(buffer)) >= 0) {
-            if (n == 0) continue;
-            if (out.size() + n > max) throw new IllegalStateException("mirror.json 过大");
-            out.write(buffer, 0, n);
-        }
-        return out.toByteArray();
-    }
-
-    private static byte[] readFileLimited(File file, int max) throws Exception {
-        try (InputStream in = new BufferedInputStream(new FileInputStream(file))) {
-            return readLimited(in, max);
-        }
-    }
-
-    private static String sha256(File file) throws Exception {
-        MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        try (InputStream in = new BufferedInputStream(new FileInputStream(file), 256 * 1024)) {
-            byte[] buffer = new byte[256 * 1024];
-            int n;
-            while ((n = in.read(buffer)) >= 0) if (n > 0) digest.update(buffer, 0, n);
-        }
-        StringBuilder out = new StringBuilder(64);
-        for (byte b : digest.digest()) out.append(String.format(Locale.US, "%02x", b & 0xff));
-        return out.toString();
     }
 
     private static String humanBytes(long bytes) {
@@ -342,51 +350,66 @@ public final class MirrorPackManager {
         return String.format(Locale.US, "%.2f GB", mb / 1024.0);
     }
 
-    private static void deleteTree(File file) {
-        if (file == null || !file.exists()) return;
-        if (file.isDirectory()) {
-            File[] children = file.listFiles();
-            if (children != null) for (File child : children) deleteTree(child);
-        }
-        try { file.delete(); } catch (Throwable ignored) {}
+    private static String hex(byte[] bytes) {
+        StringBuilder out = new StringBuilder(bytes.length * 2);
+        for (byte b : bytes) out.append(String.format(Locale.US, "%02x", b & 0xff));
+        return out.toString();
     }
 
-    private static final class CountingInputStream extends FilterInputStream {
-        long count;
-        CountingInputStream(InputStream in) { super(in); }
-        @Override public int read() throws java.io.IOException {
-            int value = super.read();
-            if (value >= 0) count++;
-            return value;
+    private static final class PfdInputStream extends FilterInputStream {
+        private final ParcelFileDescriptor pfd;
+        PfdInputStream(FileInputStream input, ParcelFileDescriptor pfd) {
+            super(input);
+            this.pfd = pfd;
         }
-        @Override public int read(byte[] b, int off, int len) throws java.io.IOException {
-            int n = super.read(b, off, len);
-            if (n > 0) count += n;
-            return n;
+        @Override public void close() throws java.io.IOException {
+            java.io.IOException first = null;
+            try { super.close(); } catch (java.io.IOException e) { first = e; }
+            try { pfd.close(); } catch (java.io.IOException e) { if (first == null) first = e; }
+            if (first != null) throw first;
         }
     }
 
-    private static final class MirrorMeta {
-        final String packName;
-        final Map<String, MirrorEntry> files;
+    private static final class ParsedPack {
+        final String name;
+        final String metaText;
+        final List<MirrorEntry> entries;
         final long totalBytes;
-        MirrorMeta(String packName, Map<String, MirrorEntry> files, long totalBytes) {
-            this.packName = packName;
-            this.files = files;
+        ParsedPack(String name, String metaText, List<MirrorEntry> entries, long totalBytes) {
+            this.name = name;
+            this.metaText = metaText;
+            this.entries = entries;
+            this.totalBytes = totalBytes;
+        }
+    }
+
+    private static final class InstalledPack {
+        final Uri uri;
+        final String name;
+        final Map<String, MirrorEntry> entries;
+        final long totalBytes;
+        InstalledPack(Uri uri, String name, Map<String, MirrorEntry> entries, long totalBytes) {
+            this.uri = uri;
+            this.name = name;
+            this.entries = entries;
             this.totalBytes = totalBytes;
         }
     }
 
     public static final class MirrorEntry {
         public final String name;
-        public final File file;
+        public final Uri uri;
+        public final long absoluteOffset;
         public final long size;
         public final long revision;
-        MirrorEntry(String name, File file, long size, long revision) {
+        public final String sha256;
+        MirrorEntry(String name, Uri uri, long absoluteOffset, long size, long revision, String sha256) {
             this.name = name;
-            this.file = file;
+            this.uri = uri;
+            this.absoluteOffset = absoluteOffset;
             this.size = size;
             this.revision = revision;
+            this.sha256 = sha256;
         }
     }
 
