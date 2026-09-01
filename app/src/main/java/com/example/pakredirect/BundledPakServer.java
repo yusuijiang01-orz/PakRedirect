@@ -22,9 +22,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Serves verified hot-updated localization content and optional mounted mirror
- * PAKs over localhost. The game downloads from 127.0.0.1 and writes files with
- * its own UID, so no root or cross-app sandbox write is required.
+ * Serves encrypted localization PAKs, optional official-resource mirrors and
+ * legacy fallback resources over localhost. The game writes the resulting PAK
+ * bytes with its own UID, so no root or cross-app sandbox write is required.
  */
 public final class BundledPakServer {
     public interface Listener {
@@ -57,18 +57,20 @@ public final class BundledPakServer {
         String[] names = context.getAssets().list("");
         if (names == null) throw new IllegalStateException("无法读取 APK 内置资源");
 
+        int bundledCount = 0;
         for (String name : names) {
             if (name == null || !name.toLowerCase(Locale.US).endsWith(".pak")) continue;
             try (AssetFileDescriptor afd = context.getAssets().openFd(name)) {
                 long length = afd.getLength();
                 if (length < 0) throw new IllegalStateException("无法读取 PAK 大小: " + name);
                 pakAssets.put(name.toLowerCase(Locale.US), PakSource.asset(name, length));
+                bundledCount++;
             }
         }
 
         File hotDir = ContentUpdateManager.moduleDir(context);
         File[] hotFiles = hotDir.listFiles();
-        int hotCount = 0;
+        int legacyHotCount = 0;
         if (hotFiles != null) {
             for (File file : hotFiles) {
                 if (!file.isFile()) continue;
@@ -76,8 +78,17 @@ public final class BundledPakServer {
                 if (!name.toLowerCase(Locale.US).endsWith(".pak")) continue;
                 if (file.length() <= 0) continue;
                 pakAssets.put(name.toLowerCase(Locale.US), PakSource.hot(name, file));
-                hotCount++;
+                legacyHotCount++;
             }
+        }
+
+        int protectedCount = 0;
+        Map<String, ProtectedContentManager.ProtectedEntry> protectedEntries =
+                ProtectedContentManager.entries(context);
+        for (ProtectedContentManager.ProtectedEntry entry : protectedEntries.values()) {
+            if (entry == null || entry.plainSize <= 0 || entry.revision <= 0) continue;
+            pakAssets.put(entry.name.toLowerCase(Locale.US), PakSource.protectedPak(entry));
+            protectedCount++;
         }
 
         int mirrorCount = 0;
@@ -85,8 +96,6 @@ public final class BundledPakServer {
         for (MirrorPackManager.MirrorEntry entry : mirrorEntries.values()) {
             if (entry == null || entry.uri == null || entry.size <= 0 || entry.revision <= 0) continue;
             String key = entry.name.toLowerCase(Locale.US);
-            // Mirror packs are restricted to official PAK names, but never let a
-            // mirror override a localization PAK if the allow-list changes later.
             if ("settings.pak".equals(key) || "ui.pak".equals(key) || "updatefs.pak".equals(key)) continue;
             pakAssets.put(key, PakSource.mirror(entry));
             mirrorCount++;
@@ -96,12 +105,11 @@ public final class BundledPakServer {
 
         String manifest = readManifestText(hotDir);
         PatchResult patched = patchManifest(manifest);
-        if (patched.changed == 0) {
-            throw new IllegalStateException("linkspak.txt 未匹配到任何 PAK");
-        }
+        if (patched.changed == 0) throw new IllegalStateException("linkspak.txt 未匹配到任何 PAK");
         manifestBytes = patched.text.getBytes(StandardCharsets.UTF_8);
-        log("已加载 PAK " + pakAssets.size() + " 个，其中汉化热更新 " + hotCount
-                + " 个、镜像 " + mirrorCount + " 个；清单已改写 " + patched.changed + " 项");
+        log("已加载 PAK " + pakAssets.size() + " 个：加密汉化 " + protectedCount
+                + "、镜像 " + mirrorCount + "、旧热更新 " + legacyHotCount
+                + "、内置 " + bundledCount + "；清单已改写 " + patched.changed + " 项");
     }
 
     public void start() throws Exception {
@@ -268,7 +276,7 @@ public final class BundledPakServer {
             if (fields.length >= 4) {
                 String pakName = fields[2].trim();
                 PakSource asset = pakAssets.get(pakName.toLowerCase(Locale.US));
-                if (asset != null && mirrorRevisionMatches(asset, fields)) {
+                if (asset != null && revisionMatches(asset, fields)) {
                     fields[0] = leadingSpaces(fields[0]) + "http://127.0.0.1:" + PORT + PAK_PREFIX + asset.name + trailingSpaces(fields[0]);
                     fields[3] = leadingSpaces(fields[3]) + asset.size + trailingSpaces(fields[3]);
                     StringBuilder rebuilt = new StringBuilder();
@@ -286,14 +294,14 @@ public final class BundledPakServer {
         return new PatchResult(out.toString(), changed);
     }
 
-    private boolean mirrorRevisionMatches(PakSource asset, String[] fields) {
-        if (!asset.mirror) return true;
+    private boolean revisionMatches(PakSource asset, String[] fields) {
+        if (!asset.requiresRevisionMatch) return true;
         if (fields.length < 6) return false;
         try {
             long manifestRevision = Long.parseLong(fields[5].trim());
             if (manifestRevision == asset.revision) return true;
-            log("镜像版本不匹配，保持官方源: " + asset.name
-                    + " (镜像 " + asset.revision + " / 清单 " + manifestRevision + ")");
+            log(asset.label + "版本不匹配，保持原下载源: " + asset.name
+                    + " (本地 " + asset.revision + " / 清单 " + manifestRevision + ")");
             return false;
         } catch (Throwable ignored) {
             return false;
@@ -301,6 +309,10 @@ public final class BundledPakServer {
     }
 
     private String readManifestText(File hotDir) throws Exception {
+        File protectedManifest = ProtectedContentManager.linkspakFile(context);
+        if (protectedManifest.isFile() && protectedManifest.length() > 0) {
+            try (InputStream in = new FileInputStream(protectedManifest)) { return readText(in); }
+        }
         File hot = new File(hotDir, "linkspak.txt");
         if (hot.isFile() && hot.length() > 0) {
             try (InputStream in = new FileInputStream(hot)) { return readText(in); }
@@ -385,7 +397,8 @@ public final class BundledPakServer {
         final long size;
         final File file;
         final MirrorPackManager.MirrorEntry mirrorEntry;
-        final boolean mirror;
+        final ProtectedContentManager.ProtectedEntry protectedEntry;
+        final boolean requiresRevisionMatch;
         final long revision;
         final String label;
 
@@ -394,7 +407,8 @@ public final class BundledPakServer {
                 long size,
                 File file,
                 MirrorPackManager.MirrorEntry mirrorEntry,
-                boolean mirror,
+                ProtectedContentManager.ProtectedEntry protectedEntry,
+                boolean requiresRevisionMatch,
                 long revision,
                 String label
         ) {
@@ -402,27 +416,31 @@ public final class BundledPakServer {
             this.size = size;
             this.file = file;
             this.mirrorEntry = mirrorEntry;
-            this.mirror = mirror;
+            this.protectedEntry = protectedEntry;
+            this.requiresRevisionMatch = requiresRevisionMatch;
             this.revision = revision;
             this.label = label;
         }
 
         static PakSource asset(String name, long size) {
-            return new PakSource(name, size, null, null, false, 0L, "内置");
+            return new PakSource(name, size, null, null, null, false, 0L, "内置");
         }
 
         static PakSource hot(String name, File file) {
-            return new PakSource(name, file.length(), file, null, false, 0L, "汉化热更新");
+            return new PakSource(name, file.length(), file, null, null, false, 0L, "旧热更新");
         }
 
         static PakSource mirror(MirrorPackManager.MirrorEntry entry) {
-            return new PakSource(entry.name, entry.size, null, entry, true, entry.revision, "镜像");
+            return new PakSource(entry.name, entry.size, null, entry, null, true, entry.revision, "镜像");
+        }
+
+        static PakSource protectedPak(ProtectedContentManager.ProtectedEntry entry) {
+            return new PakSource(entry.name, entry.plainSize, null, null, entry, true, entry.revision, "加密汉化");
         }
 
         InputStream open(Context context, long start) throws Exception {
-            if (mirrorEntry != null) {
-                return MirrorPackManager.openEntry(context, mirrorEntry, start);
-            }
+            if (protectedEntry != null) return ProtectedContentManager.openEntry(protectedEntry, start);
+            if (mirrorEntry != null) return MirrorPackManager.openEntry(context, mirrorEntry, start);
             InputStream in = file == null ? context.getAssets().open(name) : new FileInputStream(file);
             try {
                 skipFully(in, start);
@@ -438,6 +456,9 @@ public final class BundledPakServer {
     private static final class PatchResult {
         final String text;
         final int changed;
-        PatchResult(String text, int changed) { this.text = text; this.changed = changed; }
+        PatchResult(String text, int changed) {
+            this.text = text;
+            this.changed = changed;
+        }
     }
 }

@@ -67,7 +67,7 @@ public class InterceptService extends Service implements BundledPakServer.Listen
         }
 
         starting = true;
-        LaunchProgress.begin("正在检查封神榜资源更新…");
+        LaunchProgress.begin("正在验证加密汉化资源…");
         new Thread(() -> {
             synchronized (lifecycleLock) {
                 try { startServerLocked(); }
@@ -81,14 +81,20 @@ public class InterceptService extends Service implements BundledPakServer.Listen
         BundledPakServer next = null;
         try {
             stopServerLocked(null);
-            updateLaunchStatus("正在检查封神榜资源更新…", -1);
-            ContentUpdateManager.UpdateResult update = ContentUpdateManager.checkAndApply(
+            String token = new AuthStorage(this).loadToken();
+            if (token == null || token.trim().isEmpty()) {
+                throw new IllegalStateException("登录状态无效，请重新登录");
+            }
+
+            updateLaunchStatus("正在验证加密汉化资源…", -1);
+            ProtectedContentManager.UpdateResult update = ProtectedContentManager.checkAndApply(
                     this,
+                    token,
                     (message, percent, indeterminate) ->
                             updateLaunchStatus(message, indeterminate ? -1 : percent)
             );
             if (update.updated) {
-                updateLaunchStatus("封神榜资源已更新 " + update.changedFiles + " 个文件", 100);
+                updateLaunchStatus("加密汉化资源已更新 " + update.changedFiles + " 个文件", 100);
             }
 
             updateLaunchStatus("正在启动本地 PAK 服务…", 100);

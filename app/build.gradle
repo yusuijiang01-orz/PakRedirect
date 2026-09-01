@@ -10,20 +10,16 @@ android {
         applicationId 'com.example.pakredirect'
         minSdk 26
         targetSdk 35
-        versionCode = (project.findProperty('ryluxVersionCode') ?: '11').toInteger()
-        versionName = (project.findProperty('ryluxVersionName') ?: '2.2.0').toString()
+        versionCode = (project.findProperty('ryluxVersionCode') ?: '12').toInteger()
+        versionName = (project.findProperty('ryluxVersionName') ?: '2.3.0').toString()
     }
 
     sourceSets {
         main {
-            // Bundled content remains the offline fallback. Verified hot-updated
-            // content in the app-private directory takes precedence at runtime.
-            assets.srcDirs = ['../pak']
+            // Protected localization PAKs are never embedded in the APK.
+            // Only the non-secret linkspak fallback is packaged here.
+            assets.srcDirs = ['src/main/assets']
         }
-    }
-
-    androidResources {
-        noCompress += ['pak']
     }
 
     signingConfigs {

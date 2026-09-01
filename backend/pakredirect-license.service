@@ -9,6 +9,8 @@ User=paklicense
 Group=paklicense
 WorkingDirectory=/opt/pakredirect-license
 Environment=PAKREDIRECT_LICENSE_DB=/opt/pakredirect-license/data/licenses.db
+Environment=RYLUX_PROTECTED_CONTENT_DIR=/opt/pakredirect-license/protected-content
+EnvironmentFile=-/etc/pakredirect-license/content.env
 ExecStart=/opt/pakredirect-license/.venv/bin/uvicorn app:app --host 127.0.0.1 --port 18888 --workers 1
 Restart=on-failure
 RestartSec=3
@@ -18,6 +20,7 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/opt/pakredirect-license/data
+ReadOnlyPaths=-/opt/pakredirect-license/protected-content
 
 [Install]
 WantedBy=multi-user.target
