@@ -326,7 +326,6 @@ public final class RyluxUiPolish {
     }
 
     private static void stylePanelChildren(Activity activity, LinearLayout panel, boolean gamePanel) {
-        ImageView firstImage = null;
         for (int i = 0; i < panel.getChildCount(); i++) {
             View child = panel.getChildAt(i);
             if (child instanceof LinearLayout && looksLikeInfoRow((LinearLayout) child)) {
@@ -348,13 +347,11 @@ public final class RyluxUiPolish {
                 edit.setBackground(round(activity, Color.rgb(16, 22, 30), 16, Color.rgb(48, 58, 73), 1));
             } else if (view instanceof TextView) {
                 stylePanelText(activity, (TextView) view);
-            } else if (gamePanel && firstImage == null && view instanceof ImageView) {
-                firstImage = (ImageView) view;
             }
         }
 
         if (gamePanel) {
-            firstImage = findFirstImage(panel);
+            ImageView firstImage = findFirstImage(panel);
             if (firstImage != null) {
                 ViewGroup.LayoutParams p = firstImage.getLayoutParams();
                 p.width = dp(activity, 118);
@@ -420,7 +417,15 @@ public final class RyluxUiPolish {
 
     private static boolean looksLikeInfoRow(LinearLayout row) {
         if (row.getOrientation() != LinearLayout.HORIZONTAL || row.getChildCount() != 2) return false;
-        return row.getChildAt(0) instanceof TextView && row.getChildAt(1) instanceof TextView;
+        if (!(row.getChildAt(0) instanceof TextView) || !(row.getChildAt(1) instanceof TextView)) return false;
+        String left = ((TextView) row.getChildAt(0)).getText() == null
+                ? ""
+                : ((TextView) row.getChildAt(0)).getText().toString().trim();
+        String right = ((TextView) row.getChildAt(1)).getText() == null
+                ? ""
+                : ((TextView) row.getChildAt(1)).getText().toString().trim();
+        if ("×".equals(left)) return false;
+        return !"账号中心".equals(right) && !"游戏详情".equals(right);
     }
 
     private static void styleInfoRow(Activity activity, LinearLayout row) {
