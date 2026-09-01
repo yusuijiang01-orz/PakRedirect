@@ -97,6 +97,11 @@ public final class MirrorPackManager {
         return new ImportResult(true, pack.name, pack.entries.size(), pack.totalBytes);
     }
 
+    /** Compatibility name used by the first 2.2 UI implementation. No extraction occurs. */
+    public static ImportResult importPack(Context context, Uri uri, ProgressListener listener) throws Exception {
+        return selectPack(context, uri, listener);
+    }
+
     public static MirrorStatus status(Context context) {
         try {
             InstalledPack pack = installed(context);
@@ -160,32 +165,13 @@ public final class MirrorPackManager {
                 long fileSize = channel.size();
                 if (fileSize < PREFIX_BYTES) throw new IllegalStateException("镜像包文件过小");
 
-                ByteBuffer prefix = ByteBuffer.allocate(PREFIX_BYTES).order(ByteOrder.BIG_ENDIAN);
-                readFully(channel, prefix);
-                prefix.flip();
-                byte[] magic = new byte[MAGIC.length];
-                prefix.get(magic);
-                if (!Arrays.equals(MAGIC, magic)) throw new IllegalStateException("不是有效的 RYLUX 镜像包");
-                int headerLength = prefix.getInt();
-                if (headerLength <= 0 || headerLength > MAX_HEADER_BYTES) {
-                    throw new IllegalStateException("镜像包头部长度无效");
-                }
-                if ((long) PREFIX_BYTES + headerLength >= fileSize) {
-                    throw new IllegalStateException("镜像包头部损坏");
-                }
-
-                ByteBuffer header = ByteBuffer.allocate(headerLength);
-                readFully(channel, header);
-                header.flip();
-                byte[] bytes = new byte[headerLength];
-                header.get(bytes);
-                String metaText = new String(bytes, StandardCharsets.UTF_8);
-                JSONObject root = new JSONObject(metaText);
+                Header header = readHeader(channel);
+                JSONObject root = new JSONObject(header.text);
                 validateRoot(root);
 
                 JSONArray files = root.optJSONArray("files");
                 if (files == null || files.length() == 0) throw new IllegalStateException("镜像包没有 PAK 文件");
-                long payloadStart = PREFIX_BYTES + (long) headerLength;
+                long payloadStart = PREFIX_BYTES + (long) header.length;
                 List<MirrorEntry> entries = new ArrayList<>();
                 Set<String> names = new HashSet<>();
                 long total = 0L;
@@ -219,7 +205,7 @@ public final class MirrorPackManager {
 
                 // Test that the provider actually exposes a seekable descriptor.
                 channel.position(payloadStart);
-                return new ParsedPack(packName(root), metaText, entries, total);
+                return new ParsedPack(packName(root), header.text, entries, total);
             }
         }
     }
@@ -232,7 +218,7 @@ public final class MirrorPackManager {
             try (FileInputStream input = new FileInputStream(pfd.getFileDescriptor())) {
                 FileChannel channel = input.getChannel();
                 for (MirrorEntry entry : pack.entries) {
-                    emit(nullSafe(listener), "正在校验 " + entry.name + "…", percent(verified, pack.totalBytes));
+                    emit(listener, "正在校验 " + entry.name + "…", percent(verified, pack.totalBytes));
                     MessageDigest digest = MessageDigest.getInstance("SHA-256");
                     channel.position(entry.absoluteOffset);
                     long remaining = entry.size;
@@ -261,30 +247,24 @@ public final class MirrorPackManager {
         if (uriText == null || uriText.isEmpty() || metaText == null || metaText.isEmpty()) return null;
 
         Uri uri = Uri.parse(uriText);
+        Header actualHeader;
+        long fileSize;
+        try (ParcelFileDescriptor pfd = context.getContentResolver().openFileDescriptor(uri, "r")) {
+            if (pfd == null) return null;
+            try (FileInputStream input = new FileInputStream(pfd.getFileDescriptor())) {
+                FileChannel channel = input.getChannel();
+                fileSize = channel.size();
+                actualHeader = readHeader(channel);
+            }
+        }
+        if (!metaText.equals(actualHeader.text)) return null;
+
         JSONObject root = new JSONObject(metaText);
         validateRoot(root);
         JSONArray files = root.optJSONArray("files");
         if (files == null || files.length() == 0) return null;
 
-        // Re-open just the fixed header to recover payloadStart. The stored JSON
-        // contains relative offsets, so moving the file does not change metadata.
-        int headerLength;
-        try (ParcelFileDescriptor pfd = context.getContentResolver().openFileDescriptor(uri, "r")) {
-            if (pfd == null) return null;
-            try (FileInputStream input = new FileInputStream(pfd.getFileDescriptor())) {
-                FileChannel channel = input.getChannel();
-                ByteBuffer prefix = ByteBuffer.allocate(PREFIX_BYTES).order(ByteOrder.BIG_ENDIAN);
-                readFully(channel, prefix);
-                prefix.flip();
-                byte[] magic = new byte[MAGIC.length];
-                prefix.get(magic);
-                if (!Arrays.equals(MAGIC, magic)) return null;
-                headerLength = prefix.getInt();
-                if (headerLength <= 0 || headerLength > MAX_HEADER_BYTES) return null;
-            }
-        }
-
-        long payloadStart = PREFIX_BYTES + (long) headerLength;
+        long payloadStart = PREFIX_BYTES + (long) actualHeader.length;
         Map<String, MirrorEntry> result = new HashMap<>();
         long total = 0L;
         for (int i = 0; i < files.length(); i++) {
@@ -296,11 +276,33 @@ public final class MirrorPackManager {
             long offset = item.optLong("offset", -1L);
             String sha = item.optString("sha256", "").trim().toLowerCase(Locale.US);
             if (!ALLOWED.contains(name) || size <= 0 || revision <= 0 || offset < 0 || sha.length() != 64) continue;
-            result.put(name, new MirrorEntry(name, uri, payloadStart + offset, size, revision, sha));
+            long absolute = payloadStart + offset;
+            if (absolute < payloadStart || absolute + size < absolute || absolute + size > fileSize) return null;
+            result.put(name, new MirrorEntry(name, uri, absolute, size, revision, sha));
             total += size;
         }
         if (result.isEmpty()) return null;
         return new InstalledPack(uri, packName(root), result, total);
+    }
+
+    private static Header readHeader(FileChannel channel) throws Exception {
+        channel.position(0L);
+        ByteBuffer prefix = ByteBuffer.allocate(PREFIX_BYTES).order(ByteOrder.BIG_ENDIAN);
+        readFully(channel, prefix);
+        prefix.flip();
+        byte[] magic = new byte[MAGIC.length];
+        prefix.get(magic);
+        if (!Arrays.equals(MAGIC, magic)) throw new IllegalStateException("不是有效的 RYLUX 镜像包");
+        int headerLength = prefix.getInt();
+        if (headerLength <= 0 || headerLength > MAX_HEADER_BYTES) {
+            throw new IllegalStateException("镜像包头部长度无效");
+        }
+        ByteBuffer header = ByteBuffer.allocate(headerLength);
+        readFully(channel, header);
+        header.flip();
+        byte[] bytes = new byte[headerLength];
+        header.get(bytes);
+        return new Header(headerLength, new String(bytes, StandardCharsets.UTF_8));
     }
 
     private static void validateRoot(JSONObject root) {
@@ -333,10 +335,6 @@ public final class MirrorPackManager {
         return Math.max(0, Math.min(99, (int) ((done * 100L) / total)));
     }
 
-    private static ProgressListener nullSafe(ProgressListener listener) {
-        return listener;
-    }
-
     private static void emit(ProgressListener listener, String message, int percent) {
         if (listener != null) listener.onProgress(message, percent);
     }
@@ -367,6 +365,15 @@ public final class MirrorPackManager {
             try { super.close(); } catch (java.io.IOException e) { first = e; }
             try { pfd.close(); } catch (java.io.IOException e) { if (first == null) first = e; }
             if (first != null) throw first;
+        }
+    }
+
+    private static final class Header {
+        final int length;
+        final String text;
+        Header(int length, String text) {
+            this.length = length;
+            this.text = text;
         }
     }
 
