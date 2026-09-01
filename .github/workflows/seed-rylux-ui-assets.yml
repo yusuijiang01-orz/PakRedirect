@@ -1,0 +1,41 @@
+name: Seed RYLUX UI assets
+
+on:
+  push:
+    branches:
+      - ui/rylux-template-integration
+    paths:
+      - '.github/workflows/seed-rylux-ui-assets.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  seed:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ui/rylux-template-integration
+      - name: Download prepared PNG assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p app/src/main/res/drawable-nodpi
+          curl -fL 'https://d2ol7oe51mr4n9.cloudfront.net/user_3I7td6qoOPx6ixfR0PQ52ySFY07/44b4affd-d3d6-4e1b-8726-9091e0d7ff47.png' -o app/src/main/res/drawable-nodpi/fengshenbang_hero.png
+          curl -fL 'https://d2ol7oe51mr4n9.cloudfront.net/user_3I7td6qoOPx6ixfR0PQ52ySFY07/02da0b84-cf08-4287-8ca1-1ae3f9f48743.png' -o app/src/main/res/drawable-nodpi/fengshenbang_thumb.png
+          curl -fL 'https://d2ol7oe51mr4n9.cloudfront.net/user_3I7td6qoOPx6ixfR0PQ52ySFY07/e130b4b1-319a-4904-baf2-f486f5743908.png' -o app/src/main/res/drawable-nodpi/default_avatar.png
+          file app/src/main/res/drawable-nodpi/*.png
+      - name: Commit UI assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/res/drawable-nodpi
+          if git diff --cached --quiet; then
+            echo 'Assets already present'
+            exit 0
+          fi
+          git commit -m 'Add prepared RYLUX UI artwork'
+          git push origin HEAD:ui/rylux-template-integration
