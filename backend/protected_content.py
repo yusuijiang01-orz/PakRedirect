@@ -3,12 +3,14 @@ import hashlib
 import hmac
 import json
 import os
-from pathlib import Path
+import urllib.error
+import urllib.parse
+import urllib.request
 
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from fastapi import APIRouter, Header, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from admin_v2 import request_ip
@@ -17,21 +19,32 @@ from user_v1 import iso, membership, open_db, require_user, utc_now
 router = APIRouter()
 
 MODULE_CODE = "sg_localization"
-CONTENT_ROOT = Path(
-    os.environ.get("RYLUX_PROTECTED_CONTENT_DIR", "./protected-content")
-).resolve()
 KEY_ENV = "RYLUX_SG_LOCALIZATION_KEY_B64"
-MANIFEST_NAME = "manifest.json"
+MANIFEST_URL = os.environ.get(
+    "RYLUX_PROTECTED_MANIFEST_URL",
+    "https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/pak/manifest.json",
+).strip()
+DOWNLOAD_BASE_URL = os.environ.get(
+    "RYLUX_PROTECTED_DOWNLOAD_BASE_URL",
+    "https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/pak/",
+).strip()
+MAX_MANIFEST_BYTES = 1024 * 1024
+ALLOWED_CONTENT_HOSTS = {"raw.githubusercontent.com"}
+PUBLIC_FILES = {
+    "linkspak.txt",
+    "settings.pak.rpe",
+    "ui.pak.rpe",
+    "updatefs.pak.rpe",
+}
 
 
 class ContentManifestRequest(BaseModel):
     device_public_key: str = Field(min_length=64, max_length=8192)
 
 
-def _module_dir(module_code: str) -> Path:
+def _module_guard(module_code: str) -> None:
     if module_code != MODULE_CODE:
         raise HTTPException(status_code=404, detail="模块不存在")
-    return CONTENT_ROOT / module_code
 
 
 def _decode_b64(value: str) -> bytes:
@@ -51,22 +64,75 @@ def _content_key() -> bytes:
     return key
 
 
-def _load_manifest(module_code: str) -> tuple[dict, dict, bytes]:
-    path = _module_dir(module_code) / MANIFEST_NAME
-    if not path.is_file():
-        raise HTTPException(status_code=503, detail="内容清单尚未部署")
+def _validated_https_url(value: str, *, require_trailing_slash: bool = False) -> str:
     try:
-        outer = json.loads(path.read_text(encoding="utf-8"))
+        parsed = urllib.parse.urlparse(value)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="内容地址配置无效") from exc
+    if (
+        parsed.scheme.lower() != "https"
+        or not parsed.hostname
+        or parsed.hostname.lower() not in ALLOWED_CONTENT_HOSTS
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.fragment
+    ):
+        raise HTTPException(status_code=503, detail="内容地址配置无效")
+    if require_trailing_slash and not value.endswith("/"):
+        raise HTTPException(status_code=503, detail="内容下载地址必须以 / 结尾")
+    return value
+
+
+def _fetch_manifest_bytes() -> bytes:
+    url = _validated_https_url(MANIFEST_URL)
+    request = urllib.request.Request(
+        url,
+        method="GET",
+        headers={
+            "Accept": "application/json",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+            "User-Agent": "RYLUX-License/2.3",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=12) as response:
+            final_url = response.geturl()
+            _validated_https_url(final_url)
+            length = response.headers.get("Content-Length")
+            if length:
+                try:
+                    if int(length) > MAX_MANIFEST_BYTES:
+                        raise HTTPException(status_code=503, detail="内容清单过大")
+                except ValueError:
+                    pass
+            data = response.read(MAX_MANIFEST_BYTES + 1)
+    except HTTPException:
+        raise
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise HTTPException(status_code=503, detail="无法从 GitHub 获取内容清单") from exc
+    if not data or len(data) > MAX_MANIFEST_BYTES:
+        raise HTTPException(status_code=503, detail="内容清单长度无效")
+    return data
+
+
+def _load_manifest(module_code: str) -> tuple[dict, dict, bytes]:
+    _module_guard(module_code)
+    raw = _fetch_manifest_bytes()
+    try:
+        outer = json.loads(raw.decode("utf-8"))
         if int(outer.get("schema", 0)) != 1:
             raise ValueError("schema")
         if outer.get("module") != module_code:
             raise ValueError("module")
-        payload_bytes = base64.b64decode(outer["payload_b64"].encode("ascii"), validate=True)
-        if len(payload_bytes) > 1024 * 1024:
-            raise ValueError("payload too large")
+        payload_bytes = base64.b64decode(
+            str(outer["payload_b64"]).encode("ascii"), validate=True
+        )
+        if not payload_bytes or len(payload_bytes) > MAX_MANIFEST_BYTES:
+            raise ValueError("payload size")
         payload = json.loads(payload_bytes.decode("utf-8"))
     except Exception as exc:
-        raise HTTPException(status_code=503, detail="内容清单无效") from exc
+        raise HTTPException(status_code=503, detail="GitHub 内容清单无效") from exc
     if int(payload.get("schema", 0)) != 1 or payload.get("module") != module_code:
         raise HTTPException(status_code=503, detail="内容清单模块无效")
     return outer, payload, payload_bytes
@@ -74,7 +140,7 @@ def _load_manifest(module_code: str) -> tuple[dict, dict, bytes]:
 
 def _validate_manifest_key(outer: dict, payload_bytes: bytes, key: bytes) -> None:
     expected_key_id = hashlib.sha256(key).hexdigest()[:16]
-    if outer.get("key_id") != expected_key_id:
+    if str(outer.get("key_id", "")).strip().lower() != expected_key_id:
         raise HTTPException(status_code=503, detail="内容密钥与清单不匹配")
     expected_hmac = hmac.new(key, payload_bytes, hashlib.sha256).hexdigest()
     actual_hmac = str(outer.get("manifest_hmac", "")).strip().lower()
@@ -88,6 +154,7 @@ def _require_module_access(
     authorization: str | None,
     log_access: bool,
 ):
+    _module_guard(module_code)
     auth, _ = require_user(authorization)
     m = membership(auth)
     with open_db() as db:
@@ -142,7 +209,7 @@ def _wrap_key(public_key, key: bytes) -> str:
 
 
 def _allowed_downloads(payload: dict) -> set[str]:
-    allowed = set()
+    allowed: set[str] = set()
     linkspak = payload.get("linkspak")
     if isinstance(linkspak, dict):
         name = str(linkspak.get("stored_name", "linkspak.txt"))
@@ -152,9 +219,14 @@ def _allowed_downloads(payload: dict) -> set[str]:
         if not isinstance(item, dict):
             continue
         name = str(item.get("encrypted_name", "")).strip()
-        if name and "/" not in name and "\\" not in name and ".." not in name:
+        if name in PUBLIC_FILES:
             allowed.add(name)
     return allowed
+
+
+def _public_download_url(file_name: str) -> str:
+    base = _validated_https_url(DOWNLOAD_BASE_URL, require_trailing_slash=True)
+    return base + urllib.parse.quote(file_name, safe="")
 
 
 @router.post("/api/v1/content/{module_code}/manifest")
@@ -168,6 +240,11 @@ def protected_manifest(
     key = _content_key()
     outer, manifest_payload, payload_bytes = _load_manifest(module_code)
     _validate_manifest_key(outer, payload_bytes, key)
+
+    allowed = _allowed_downloads(manifest_payload)
+    if allowed != PUBLIC_FILES:
+        raise HTTPException(status_code=503, detail="内容清单文件集合无效")
+
     public_key = _load_public_key(payload.device_public_key)
     wrapped_key = _wrap_key(public_key, key)
 
@@ -179,39 +256,25 @@ def protected_manifest(
         "manifest_hmac": outer["manifest_hmac"],
         "wrapped_key": wrapped_key,
         "version": manifest_payload.get("version", ""),
+        "download_base_url": _validated_https_url(
+            DOWNLOAD_BASE_URL, require_trailing_slash=True
+        ),
     }
 
 
 @router.get("/api/v1/content/{module_code}/files/{file_name}")
-def protected_file(
-    module_code: str,
-    file_name: str,
-    request: Request,
-    authorization: str | None = Header(default=None),
-):
-    _require_module_access(module_code, request, authorization, False)
-    key = _content_key()
-    outer, payload, payload_bytes = _load_manifest(module_code)
-    _validate_manifest_key(outer, payload_bytes, key)
+def protected_file(module_code: str, file_name: str):
+    """Compatibility redirect for RYLUX 2.3 clients.
 
-    if (
-        not file_name
-        or "/" in file_name
-        or "\\" in file_name
-        or ".." in file_name
-        or file_name not in _allowed_downloads(payload)
-    ):
+    The encrypted file is public ciphertext, so this endpoint intentionally does
+    not gate the bytes with membership. Membership gates only the wrapped AES key
+    returned by protected_manifest(). The response body itself comes directly
+    from GitHub after Android follows this redirect, avoiding VPS content traffic.
+    """
+    _module_guard(module_code)
+    if file_name not in PUBLIC_FILES:
         raise HTTPException(status_code=404, detail="资源不存在")
-
-    path = _module_dir(module_code) / file_name
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail="资源尚未部署")
-
-    response = FileResponse(
-        path,
-        media_type="application/octet-stream",
-        filename=file_name,
-    )
-    response.headers["Cache-Control"] = "private, no-store, max-age=0"
+    response = RedirectResponse(_public_download_url(file_name), status_code=302)
+    response.headers["Cache-Control"] = "no-store, max-age=0"
     response.headers["X-Content-Type-Options"] = "nosniff"
     return response
