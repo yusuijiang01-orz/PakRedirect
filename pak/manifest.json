@@ -1,7 +1,35 @@
 {
   "schema": 1,
   "module": "sg_localization",
-  "key_id": "89a26de70f9d8188",
-  "payload_b64": "eyJmaWxlcyI6W3siZW5jcnlwdGVkX25hbWUiOiJzZXR0aW5ncy5wYWsucnBlIiwiZW5jcnlwdGVkX3NoYTI1NiI6IjVhMmJjZjkwNTRhODdmNTgzMzFlYTA3ZjZjYTVkMzY5OTkzOTAwNjg4N2E3Nzg4ZmEzMTM4ZDBmMjUwNDAyNGMiLCJlbmNyeXB0ZWRfc2l6ZSI6MjI1NzY2NywiZm9ybWF0IjoiUllMVVhFMDEiLCJuYW1lIjoic2V0dGluZ3MucGFrIiwicGxhaW5fc2hhMjU2IjoiNDNhODdhYzNkZDRhNDE3ZDc2N2Q4NDAzZjI4OTAzM2RiMzc1NjkzYTdjZmQxYmE1MjcxOWZmODhhOTc2MTkwNyIsInBsYWluX3NpemUiOjIyNTczNDIsInJldmlzaW9uIjoyMDI2MDkwMTE0fSx7ImVuY3J5cHRlZF9uYW1lIjoidWkucGFrLnJwZSIsImVuY3J5cHRlZF9zaGEyNTYiOiJhZWY0YWU1OTRmNzAwYWRiZTdhNDg0NmIyMmRhZTNjMWMxMmI0OWM2YjU3M2RlOTU3OTNhOGZjZjQwNmNlNDNjIiwiZW5jcnlwdGVkX3NpemUiOjQ2NDQ5MiwiZm9ybWF0IjoiUllMVVhFMDEiLCJuYW1lIjoidWkucGFrIiwicGxhaW5fc2hhMjU2IjoiNWEyYjhmZjQ5ZWI0ZGI3NzE5YjYxNzExZGZjOGM0MmJlODQ0MjkyYWU3Zjc3MmNmNTM5MTZmOWRiMGVjZWRjNSIsInBsYWluX3NpemUiOjQ2NDIwNiwicmV2aXNpb24iOjIwMjYwOTAxMTV9LHsiZW5jcnlwdGVkX25hbWUiOiJ1cGRhdGVmcy5wYWsucnBlIiwiZW5jcnlwdGVkX3NoYTI1NiI6ImQ5YTQ2MmU2ZjM1NWI4M2YzN2I3MjM2NWMwOGMyOWE0YzRmYzU2MmJlZDljZmIzNzFmMDliODJiYzcxZjBhNWUiLCJlbmNyeXB0ZWRfc2l6ZSI6Mzc5NDA3ODIsImZvcm1hdCI6IlJZTFVYRTAxIiwibmFtZSI6InVwZGF0ZWZzLnBhayIsInBsYWluX3NoYTI1NiI6ImI4YmI4Yjc2Y2MyZmRlZmM5YmUyNWY1NTBjNDg0ZDIxZjZkMGE2Mjk4MmJlMGEzYWU2Yzc0MWYzZTc0OWIxOGMiLCJwbGFpbl9zaXplIjozNzkzOTkxMiwicmV2aXNpb24iOjIwMjYwOTAxMTZ9XSwia2V5X2lkIjoiODlhMjZkZTcwZjlkODE4OCIsImxpbmtzcGFrIjp7InNoYTI1NiI6ImMwZDEzOTk4ODY5MWQ3YWNhNmIzNGZiYmI1ODU3ODQzMGJhNGFmYjNiMTUxZjIzMzllYzFmODIxYjQyNzRmN2UiLCJzaXplIjoxMDI0LCJzdG9yZWRfbmFtZSI6ImxpbmtzcGFrLnR4dCJ9LCJtb2R1bGUiOiJzZ19sb2NhbGl6YXRpb24iLCJzY2hlbWEiOjEsInZlcnNpb24iOiIzYmQ0M2RlNjQxNTgifQ==",
-  "manifest_hmac": "a3930c8a74ff007f8d2eeaf5874ee0ad3ac087251adc012207c9d984d59149f4"
+  "version": "a7aef6926235",
+  "files": [
+    {
+      "name": "linkspak.txt",
+      "size": 1024,
+      "sha256": "0ae9a8e5a058c1a9f37aed8befa9250e010d1c10793b778d86f8aa337a453ec1",
+      "revision": 2026090103,
+      "url": "https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/pak/linkspak.txt"
+    },
+    {
+      "name": "settings.pak",
+      "size": 2257342,
+      "sha256": "43a87ac3dd4a417d767d8403f289033db375693a7cfd1ba52719ff88a9761907",
+      "revision": 2026090100,
+      "url": "https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/pak/settings.pak"
+    },
+    {
+      "name": "ui.pak",
+      "size": 463353,
+      "sha256": "964292eb92034603969a84c82e714b0fda22279e1c6635bbfd4ddbfe2979d0c4",
+      "revision": 2026090101,
+      "url": "https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/pak/ui.pak"
+    },
+    {
+      "name": "updatefs.pak",
+      "size": 38040207,
+      "sha256": "524e7be443bea4f8c76a6898d50f0c9d3856256f306fdbfc4ac1419b8134edf8",
+      "revision": 2026090102,
+      "url": "https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/pak/updatefs.pak"
+    }
+  ]
 }
