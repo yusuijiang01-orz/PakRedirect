@@ -17,12 +17,10 @@ import java.io.FileOutputStream;
 import java.io.FilterInputStream;
 import java.io.InputStream;
 import java.security.MessageDigest;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -41,6 +39,7 @@ public final class MirrorPackManager {
     public static final String MODULE_CODE = "sg_localization";
     private static final String META_NAME = "mirror.json";
     private static final int MAX_META_BYTES = 512 * 1024;
+    private static final long MAX_TOTAL_BYTES = 8L * 1024L * 1024L * 1024L;
 
     private static final Set<String> ALLOWED = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
             "resource.pak",
@@ -76,7 +75,8 @@ public final class MirrorPackManager {
 
         long archiveSize = querySize(context, uri);
         byte[] metaBytes = null;
-        List<String> extracted = new ArrayList<>();
+        Set<String> extracted = new HashSet<>();
+        long extractedBytes = 0L;
 
         try (InputStream raw = context.getContentResolver().openInputStream(uri)) {
             if (raw == null) throw new IllegalStateException("无法读取镜像包");
@@ -96,10 +96,12 @@ public final class MirrorPackManager {
                     }
                     String lower = safe.toLowerCase(Locale.US);
                     if (META_NAME.equals(lower)) {
+                        if (metaBytes != null) throw new IllegalStateException("镜像包包含重复 mirror.json");
                         metaBytes = readLimited(zip, MAX_META_BYTES);
                     } else if (ALLOWED.contains(lower)) {
+                        if (!extracted.add(lower)) throw new IllegalStateException("镜像包包含重复文件：" + lower);
                         File out = new File(stage, lower);
-                        long copied = 0;
+                        long copied = 0L;
                         try (FileOutputStream fos = new FileOutputStream(out);
                              BufferedOutputStream bos = new BufferedOutputStream(fos, 256 * 1024)) {
                             int n;
@@ -107,12 +109,15 @@ public final class MirrorPackManager {
                                 if (n == 0) continue;
                                 bos.write(buffer, 0, n);
                                 copied += n;
+                                extractedBytes += n;
+                                if (extractedBytes > MAX_TOTAL_BYTES) {
+                                    throw new IllegalStateException("镜像包体积超过安全上限");
+                                }
                                 emit(listener, "正在导入 " + lower + " · " + humanBytes(copied), percent(counted.count, archiveSize));
                             }
                             bos.flush();
                             fos.getFD().sync();
                         }
-                        extracted.add(lower);
                     }
                     zip.closeEntry();
                 }
@@ -159,13 +164,11 @@ public final class MirrorPackManager {
 
     public static MirrorStatus status(Context context) {
         try {
-            File dir = mirrorDir(context);
-            File metaFile = new File(dir, META_NAME);
+            File metaFile = new File(mirrorDir(context), META_NAME);
             if (!metaFile.isFile()) return MirrorStatus.none();
-            byte[] bytes = readFileLimited(metaFile, MAX_META_BYTES);
-            MirrorMeta meta = parseMeta(bytes);
+            MirrorMeta meta = parseInstalledMeta(context, readFileLimited(metaFile, MAX_META_BYTES));
             int validCount = 0;
-            long total = 0;
+            long total = 0L;
             for (MirrorEntry entry : meta.files.values()) {
                 if (entry.file.isFile() && entry.file.length() == entry.size) {
                     validCount++;
@@ -182,10 +185,9 @@ public final class MirrorPackManager {
     /** Returns only entries that still match their recorded size. */
     public static Map<String, MirrorEntry> entries(Context context) {
         try {
-            File dir = mirrorDir(context);
-            File metaFile = new File(dir, META_NAME);
+            File metaFile = new File(mirrorDir(context), META_NAME);
             if (!metaFile.isFile()) return Collections.emptyMap();
-            MirrorMeta meta = parseMeta(readFileLimited(metaFile, MAX_META_BYTES));
+            MirrorMeta meta = parseInstalledMeta(context, readFileLimited(metaFile, MAX_META_BYTES));
             Map<String, MirrorEntry> out = new HashMap<>();
             for (MirrorEntry entry : meta.files.values()) {
                 if (entry.file.isFile() && entry.file.length() == entry.size) {
@@ -202,18 +204,15 @@ public final class MirrorPackManager {
         deleteTree(mirrorDir(context));
     }
 
-    private static MirrorMeta parseAndVerify(File stage, byte[] metaBytes, List<String> extracted) throws Exception {
+    private static MirrorMeta parseAndVerify(File stage, byte[] metaBytes, Set<String> extracted) throws Exception {
         JSONObject root = new JSONObject(new String(metaBytes, "UTF-8"));
-        if (root.optInt("schema", 0) != 1) throw new IllegalStateException("镜像包格式版本不支持");
-        if (!MODULE_CODE.equals(root.optString("module", ""))) throw new IllegalStateException("镜像包模块不匹配");
-
+        validateRoot(root);
         JSONArray files = root.optJSONArray("files");
         if (files == null || files.length() == 0) throw new IllegalStateException("镜像包没有 PAK 文件");
 
-        String packName = root.optString("name", "RYLUX 镜像包").trim();
-        if (packName.isEmpty()) packName = "RYLUX 镜像包";
+        String packName = packName(root);
         Map<String, MirrorEntry> parsed = new HashMap<>();
-        long totalBytes = 0;
+        long totalBytes = 0L;
         for (int i = 0; i < files.length(); i++) {
             JSONObject item = files.optJSONObject(i);
             if (item == null) throw new IllegalStateException("镜像包清单项目异常");
@@ -221,60 +220,60 @@ public final class MirrorPackManager {
             long size = item.optLong("size", -1L);
             long revision = item.optLong("revision", 0L);
             String sha = item.optString("sha256", "").trim().toLowerCase(Locale.US);
-            if (!ALLOWED.contains(name)) throw new IllegalStateException("镜像包包含不允许的 PAK：" + name);
-            if (size <= 0 || revision <= 0 || sha.length() != 64) throw new IllegalStateException("镜像包清单无效：" + name);
-            if (parsed.containsKey(name)) throw new IllegalStateException("镜像包重复文件：" + name);
+            validateItem(name, size, revision, sha);
+            if (parsed.containsKey(name)) throw new IllegalStateException("镜像包清单重复文件：" + name);
             File file = new File(stage, name);
             if (!file.isFile()) throw new IllegalStateException("镜像包缺少文件：" + name);
             if (file.length() != size) throw new IllegalStateException("镜像包文件大小不匹配：" + name);
             if (!sha.equals(sha256(file))) throw new IllegalStateException("镜像包校验失败：" + name);
             parsed.put(name, new MirrorEntry(name, file, size, revision));
             totalBytes += size;
+            if (totalBytes > MAX_TOTAL_BYTES) throw new IllegalStateException("镜像包体积超过安全上限");
         }
 
+        if (extracted.size() != parsed.size()) throw new IllegalStateException("镜像包文件与 mirror.json 不一致");
         for (String name : extracted) {
             if (!parsed.containsKey(name)) throw new IllegalStateException("mirror.json 未登记文件：" + name);
         }
         return new MirrorMeta(packName, parsed, totalBytes);
     }
 
-    private static MirrorMeta parseMeta(byte[] metaBytes) throws Exception {
+    private static MirrorMeta parseInstalledMeta(Context context, byte[] metaBytes) throws Exception {
         JSONObject root = new JSONObject(new String(metaBytes, "UTF-8"));
-        if (root.optInt("schema", 0) != 1 || !MODULE_CODE.equals(root.optString("module", ""))) {
-            throw new IllegalStateException("镜像包元数据无效");
-        }
-        String packName = root.optString("name", "RYLUX 镜像包").trim();
-        if (packName.isEmpty()) packName = "RYLUX 镜像包";
-        File dir = null;
+        validateRoot(root);
         JSONArray files = root.optJSONArray("files");
-        if (files == null) throw new IllegalStateException("镜像包元数据为空");
+        if (files == null || files.length() == 0) throw new IllegalStateException("镜像包元数据为空");
+
+        File dir = mirrorDir(context);
         Map<String, MirrorEntry> parsed = new HashMap<>();
-        long total = 0;
+        long total = 0L;
         for (int i = 0; i < files.length(); i++) {
             JSONObject item = files.optJSONObject(i);
             if (item == null) continue;
             String name = item.optString("name", "").trim().toLowerCase(Locale.US);
             long size = item.optLong("size", -1L);
             long revision = item.optLong("revision", 0L);
-            if (!ALLOWED.contains(name) || size <= 0 || revision <= 0) continue;
-            if (dir == null) {
-                // mirror.json always lives directly inside the mirror directory.
-                // The caller rewrites the placeholder File below to the current directory.
-            }
-            parsed.put(name, new MirrorEntry(name, null, size, revision));
+            String sha = item.optString("sha256", "").trim().toLowerCase(Locale.US);
+            if (!ALLOWED.contains(name) || size <= 0 || revision <= 0 || sha.length() != 64) continue;
+            parsed.put(name, new MirrorEntry(name, new File(dir, name), size, revision));
             total += size;
         }
-        return new MirrorMeta(packName, parsed, total);
+        return new MirrorMeta(packName(root), parsed, total);
     }
 
-    private static MirrorMeta parseMeta(Context context, byte[] metaBytes) throws Exception {
-        MirrorMeta raw = parseMeta(metaBytes);
-        File dir = mirrorDir(context);
-        Map<String, MirrorEntry> fixed = new HashMap<>();
-        for (MirrorEntry entry : raw.files.values()) {
-            fixed.put(entry.name, new MirrorEntry(entry.name, new File(dir, entry.name), entry.size, entry.revision));
-        }
-        return new MirrorMeta(raw.packName, fixed, raw.totalBytes);
+    private static void validateRoot(JSONObject root) {
+        if (root.optInt("schema", 0) != 1) throw new IllegalStateException("镜像包格式版本不支持");
+        if (!MODULE_CODE.equals(root.optString("module", ""))) throw new IllegalStateException("镜像包模块不匹配");
+    }
+
+    private static void validateItem(String name, long size, long revision, String sha) {
+        if (!ALLOWED.contains(name)) throw new IllegalStateException("镜像包包含不允许的 PAK：" + name);
+        if (size <= 0 || revision <= 0 || sha.length() != 64) throw new IllegalStateException("镜像包清单无效：" + name);
+    }
+
+    private static String packName(JSONObject root) {
+        String value = root.optString("name", "RYLUX 镜像包").trim();
+        return value.isEmpty() ? "RYLUX 镜像包" : value;
     }
 
     private static long querySize(Context context, Uri uri) {
