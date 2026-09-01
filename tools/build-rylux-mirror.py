@@ -2,7 +2,7 @@
 """Build a direct-mount RYLUX mirror package from official PAK files.
 
 Example (Windows):
-  py tools\build-rylux-mirror.py --source D:\RYLUX-Mirror-Source --output D:\RYLUX-Official-v1.ryluxmirror
+  py tools\build-rylux-mirror.py --source D:\RYLUX-Mirror-Source --output D:\RYLUX-Official-v1.rmp
 
 The source directory may contain any subset of the allowed official PAKs. The
 script validates file sizes/revisions against pak/linkspak.txt, calculates
@@ -85,7 +85,7 @@ def copy_file(source: Path, out, total: int, done_before: int) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build a RYLUX official-resource mirror package")
     parser.add_argument("--source", required=True, type=Path, help="Directory containing official PAK files")
-    parser.add_argument("--output", required=True, type=Path, help="Output .ryluxmirror path")
+    parser.add_argument("--output", required=True, type=Path, help="Output .rmp path")
     parser.add_argument("--name", default="RYLUX 官方资源镜像", help="Pack display name")
     parser.add_argument(
         "--linkspak",
@@ -102,6 +102,8 @@ def main() -> int:
         parser.error(f"source directory not found: {source}")
     if not linkspak.is_file():
         parser.error(f"linkspak.txt not found: {linkspak}")
+    if output.suffix.lower() != ".rmp":
+        parser.error("output file must use the .rmp extension")
 
     official = parse_linkspak(linkspak)
     files: list[dict[str, object]] = []
