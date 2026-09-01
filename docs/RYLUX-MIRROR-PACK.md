@@ -2,6 +2,8 @@
 
 RYLUX mirror packs are optional local acceleration packages for **unmodified official game PAKs**. They do not replace the localization PAK update pipeline.
 
+The official mirror-package extension is **`.rmp`**, short for **RYLUX Mirror Pack**.
+
 ## Allowed files
 
 A mirror pack may contain any subset of:
@@ -18,7 +20,7 @@ A mirror pack may contain any subset of:
 
 ## Direct-mount design
 
-The mirror is a single `.ryluxmirror` file designed for random access. RYLUX does **not** extract a second multi-GB copy into its private storage. After the user chooses the file with Android's document picker, RYLUX persists read access to that file, verifies all listed PAKs once, and later serves byte ranges directly from the selected mirror through `127.0.0.1:18480`.
+The mirror is a single `.rmp` file designed for random access. RYLUX does **not** extract a second multi-GB copy into its private storage. After the user chooses the file with Android's document picker, RYLUX persists read access to that file, verifies all listed PAKs once, and later serves byte ranges directly from the selected mirror through `127.0.0.1:18480`.
 
 The target game still writes the final PAK into its own sandbox with its own UID, so this requires no root and no cross-app private-directory write.
 
@@ -63,13 +65,13 @@ At game launch, a mirror PAK is redirected to `127.0.0.1:18480` only when its `r
 From the repository root:
 
 ```bash
-python tools/build-rylux-mirror.py --source /path/to/official-paks --output RYLUX-Official-v1.ryluxmirror
+python tools/build-rylux-mirror.py --source /path/to/official-paks --output RYLUX-Official-v1.rmp
 ```
 
 Windows example:
 
 ```bat
-py tools\build-rylux-mirror.py --source D:\RYLUX-Mirror-Source --output D:\RYLUX-Official-v1.ryluxmirror
+py tools\build-rylux-mirror.py --source D:\RYLUX-Mirror-Source --output D:\RYLUX-Official-v1.rmp
 ```
 
 The helper validates each downloaded official PAK against the current `pak/linkspak.txt`, calculates SHA-256, records the current revision and byte offset, and appends the PAK bytes verbatim with no compression.
