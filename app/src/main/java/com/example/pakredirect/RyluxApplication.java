@@ -12,9 +12,12 @@ public class RyluxApplication extends Application {
         super.onCreate();
         registerActivityLifecycleCallbacks(new ActivityLifecycleCallbacks() {
             @Override public void onActivityResumed(Activity activity) {
-                if (!updateChecked && activity instanceof MainActivity) {
-                    updateChecked = true;
-                    AppUpdateChecker.check(activity);
+                if (activity instanceof MainActivity) {
+                    RyluxUiPolish.attach(activity);
+                    if (!updateChecked) {
+                        updateChecked = true;
+                        AppUpdateChecker.check(activity);
+                    }
                 }
             }
             @Override public void onActivityCreated(Activity activity, Bundle state) {}
@@ -22,7 +25,9 @@ public class RyluxApplication extends Application {
             @Override public void onActivityPaused(Activity activity) {}
             @Override public void onActivityStopped(Activity activity) {}
             @Override public void onActivitySaveInstanceState(Activity activity, Bundle state) {}
-            @Override public void onActivityDestroyed(Activity activity) {}
+            @Override public void onActivityDestroyed(Activity activity) {
+                if (activity instanceof MainActivity) RyluxUiPolish.detach(activity);
+            }
         });
     }
 }
