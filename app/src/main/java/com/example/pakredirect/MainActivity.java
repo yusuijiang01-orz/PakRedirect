@@ -8,6 +8,7 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
@@ -16,23 +17,36 @@ import android.text.method.PasswordTransformationMethod;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
+import android.view.WindowManager;
+import android.view.animation.AccelerateDecelerateInterpolator;
+import android.view.animation.DecelerateInterpolator;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
+import android.widget.Space;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.Locale;
 
 public class MainActivity extends Activity {
     private static final String TARGET_PACKAGE = "com.tepaylink.tamgioiphantranhmobile";
     private static final String MODULE_CODE = "sg_localization";
+    private static final int REQUEST_MIRROR_PACK = 4107;
+
+    private static final String GAME_NAME = "封神榜(越南版)";
+    private static final String GAME_DESCRIPTION = "越南版封神榜，RYLUX 提供本地汉化、资源校验与本地 PAK 接管。";
+    private static final String GAME_LAST_UPDATED = "2026-09-01";
+    private static final String LOCALIZATION_PROGRESS = "持续更新中";
 
     private static final int BG = Color.rgb(17, 19, 24);
     private static final int CARD = Color.rgb(28, 32, 40);
@@ -43,13 +57,18 @@ public class MainActivity extends Activity {
     private static final int GREEN = Color.rgb(52, 199, 89);
     private static final int ORANGE = Color.rgb(255, 159, 10);
     private static final int RED = Color.rgb(255, 69, 58);
+    private static final int YELLOW = Color.rgb(245, 183, 0);
     private static final int BORDER = Color.rgb(47, 53, 64);
     private static final int DISABLED = Color.rgb(70, 75, 84);
+    private static final int BADGE_GRAY = Color.rgb(104, 111, 124);
 
     private AuthStorage authStorage;
     private String currentToken;
     private String currentUsername;
     private boolean currentMembershipActive;
+    private String currentMembershipKind = "expired";
+    private String currentExpiresAt;
+    private AuthClient.ProfileResult currentProfile;
     private boolean registerMode;
 
     private EditText usernameEdit;
@@ -60,8 +79,15 @@ public class MainActivity extends Activity {
     private TextView switchModeLink;
     private ProgressBar authProgress;
 
+    private FrameLayout overlayHost;
+    private FrameLayout activeOverlay;
+    private View activePanel;
+    private boolean activePanelFromBottom;
+
     private ProgressBar moduleProgress;
     private TextView moduleProgressText;
+    private TextView mirrorStatusView;
+    private Button mirrorSelectButton;
     private volatile String launchWaitError = "";
 
     @Override
@@ -77,6 +103,24 @@ public class MainActivity extends Activity {
             showSessionLoading();
             refreshProfile(true);
         }
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (activeOverlay != null) {
+            closeActiveOverlay();
+            return;
+        }
+        super.onBackPressed();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_MIRROR_PACK || resultCode != RESULT_OK || data == null) return;
+        Uri uri = data.getData();
+        if (uri == null) return;
+        importMirrorPack(uri);
     }
 
     private void showSessionLoading() {
@@ -96,10 +140,12 @@ public class MainActivity extends Activity {
     private void showAuthUi(boolean asRegister) {
         registerMode = asRegister;
         currentMembershipActive = false;
+        currentMembershipKind = "expired";
+        currentExpiresAt = null;
+        currentProfile = null;
         confirmPasswordEdit = null;
         rememberCheck = null;
-        moduleProgress = null;
-        moduleProgressText = null;
+        clearTransientViews();
 
         LinearLayout root = baseContent();
         root.setPadding(dp(22), dp(52), dp(22), dp(30));
@@ -271,90 +317,240 @@ public class MainActivity extends Activity {
     }
 
     private void showHome(AuthClient.ProfileResult profile) {
+        currentProfile = profile;
         currentMembershipActive = profile.membershipActive;
+        currentMembershipKind = profile.membershipKind == null ? "expired" : profile.membershipKind;
+        currentExpiresAt = profile.expiresAt;
         currentUsername = profile.username;
+        clearTransientViews();
 
         LinearLayout root = baseContent();
-        root.setPadding(dp(18), dp(18), dp(18), dp(30));
+        root.setPadding(dp(16), dp(12), dp(16), dp(30));
 
-        LinearLayout header = new LinearLayout(this);
-        header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.CENTER_VERTICAL);
-        TextView brand = title("RYLUX");
-        LinearLayout.LayoutParams brandLp = new LinearLayout.LayoutParams(0, -2, 1f);
-        header.addView(brand, brandLp);
-        Button logout = button("退出", CARD_SOFT, TEXT);
-        logout.setOnClickListener(v -> performLogout());
-        header.addView(logout, new LinearLayout.LayoutParams(dp(72), dp(40)));
-        root.addView(header);
+        FrameLayout avatar = buildAvatar(profile);
+        LinearLayout.LayoutParams avatarLp = new LinearLayout.LayoutParams(dp(72), dp(72));
+        root.addView(avatar, avatarLp);
 
-        LinearLayout memberCard = card();
-        TextView account = text(profile.username, 18, TEXT, true);
-        memberCard.addView(account);
-        String kind = "trial".equals(profile.membershipKind)
-                ? "24 小时体验"
-                : (profile.membershipActive ? "VIP 会员" : "使用时间已到期");
-        TextView status = text(kind, 14, profile.membershipActive ? GREEN : RED, true);
-        status.setPadding(0, dp(6), 0, dp(4));
-        memberCard.addView(status);
-        memberCard.addView(text("到期时间：" + formatExpiry(profile.expiresAt), 13, MUTED, false));
+        Space gap = new Space(this);
+        root.addView(gap, new LinearLayout.LayoutParams(1, dp(18)));
 
-        Button refresh = button("刷新会员状态", CARD_SOFT, TEXT);
-        refresh.setOnClickListener(v -> refreshProfile(false));
-        LinearLayout.LayoutParams refreshLp = new LinearLayout.LayoutParams(-1, dp(42));
-        refreshLp.topMargin = dp(12);
-        memberCard.addView(refresh, refreshLp);
-        root.addView(memberCard, blockParams());
-
-        // 套餐卡片仅为静态说明且不可交互，移除以减少首页冗余。
-        LinearLayout redeemCard = card();
-        redeemCard.addView(text("兑换码充值", 17, TEXT, true));
-        EditText code = input("输入兑换码", false);
-        code.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
-        redeemCard.addView(code, inputParams());
-        Button redeem = button("兑换到当前账号", PRIMARY, Color.WHITE);
-        redeem.setOnClickListener(v -> redeemCode(code, redeem));
-        LinearLayout.LayoutParams redeemLp = new LinearLayout.LayoutParams(-1, dp(48));
-        redeemLp.topMargin = dp(10);
-        redeemCard.addView(redeem, redeemLp);
-        root.addView(redeemCard, blockParams());
-
-        root.addView(sectionTitle("游戏与模块"));
-        root.addView(gameModuleCard(profile), blockParams());
+        GlowFrameLayout canvas = buildGameCanvas(profile);
+        LinearLayout.LayoutParams canvasLp = new LinearLayout.LayoutParams(-1, dp(272));
+        canvasLp.leftMargin = dp(2);
+        canvasLp.rightMargin = dp(2);
+        canvasLp.bottomMargin = dp(16);
+        root.addView(canvas, canvasLp);
 
         setScrollableContent(root);
     }
 
-    private LinearLayout gameModuleCard(AuthClient.ProfileResult profile) {
-        LinearLayout card = card();
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
+    private FrameLayout buildAvatar(AuthClient.ProfileResult profile) {
+        FrameLayout shell = new FrameLayout(this);
+        shell.setClickable(true);
+        shell.setFocusable(true);
+        shell.setOnClickListener(v -> showUserPanel(currentProfile));
+
+        TextView avatar = text(avatarLetter(profile.username), 22, Color.WHITE, true);
+        avatar.setGravity(Gravity.CENTER);
+        avatar.setBackground(round(Color.rgb(55, 67, 92), 28));
+        FrameLayout.LayoutParams avatarLp = new FrameLayout.LayoutParams(dp(56), dp(56));
+        avatarLp.gravity = Gravity.BOTTOM | Gravity.START;
+        shell.addView(avatar, avatarLp);
+
+        TextView badge = membershipBadge(profile);
+        FrameLayout.LayoutParams badgeLp = new FrameLayout.LayoutParams(-2, dp(22));
+        badgeLp.gravity = Gravity.TOP | Gravity.END;
+        badgeLp.topMargin = dp(2);
+        shell.addView(badge, badgeLp);
+        return shell;
+    }
+
+    private TextView membershipBadge(AuthClient.ProfileResult profile) {
+        boolean trial = profile.membershipActive && "trial".equals(profile.membershipKind);
+        boolean vip = profile.membershipActive && !trial;
+        String label = trial ? "体验" : "VIP";
+        int color = trial ? YELLOW : (vip ? RED : BADGE_GRAY);
+        TextView badge = text(label, 10, Color.WHITE, true);
+        badge.setGravity(Gravity.CENTER);
+        badge.setPadding(dp(7), 0, dp(7), 0);
+        badge.setBackground(round(color, 7));
+        badge.setElevation(dp(6));
+        return badge;
+    }
+
+    private GlowFrameLayout buildGameCanvas(AuthClient.ProfileResult profile) {
+        GlowFrameLayout canvas = new GlowFrameLayout(this);
+        canvas.setPadding(dp(28), dp(26), dp(28), dp(26));
+        canvas.setClickable(true);
+        canvas.setFocusable(true);
+        canvas.setOnClickListener(v -> showGamePanel(currentProfile));
+
+        TextView supported = pill("已支持汉化", GREEN, Color.WHITE);
+        FrameLayout.LayoutParams supportedLp = new FrameLayout.LayoutParams(-2, dp(28));
+        supportedLp.gravity = Gravity.TOP | Gravity.START;
+        supportedLp.leftMargin = dp(22);
+        supportedLp.topMargin = dp(22);
+        canvas.addView(supported, supportedLp);
+
+        MirrorPackManager.MirrorStatus mirror = MirrorPackManager.status(this);
+        if (mirror.ready) {
+            TextView mirrorBadge = pill("镜像已就绪", PRIMARY, Color.WHITE);
+            FrameLayout.LayoutParams mirrorLp = new FrameLayout.LayoutParams(-2, dp(28));
+            mirrorLp.gravity = Gravity.TOP | Gravity.END;
+            mirrorLp.rightMargin = dp(22);
+            mirrorLp.topMargin = dp(22);
+            canvas.addView(mirrorBadge, mirrorLp);
+        }
 
         ImageView icon = new ImageView(this);
         icon.setScaleType(ImageView.ScaleType.CENTER_CROP);
         Drawable gameIcon = loadTargetIcon();
         if (gameIcon != null) icon.setImageDrawable(gameIcon);
-        GradientDrawable iconBg = round(Color.rgb(44, 50, 61), 18);
-        icon.setBackground(iconBg);
-        LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(dp(84), dp(84));
-        iconLp.rightMargin = dp(14);
-        row.addView(icon, iconLp);
+        icon.setBackground(round(Color.rgb(44, 50, 61), 24));
+        icon.setElevation(dp(8));
+        FrameLayout.LayoutParams iconLp = new FrameLayout.LayoutParams(dp(112), dp(112));
+        iconLp.gravity = Gravity.CENTER;
+        canvas.addView(icon, iconLp);
 
-        LinearLayout info = new LinearLayout(this);
-        info.setOrientation(LinearLayout.VERTICAL);
-        info.addView(text("封神榜汉化", 18, TEXT, true));
-        TextView desc = text("封神榜汉化模块", 12, MUTED, false);
-        desc.setPadding(0, dp(5), 0, dp(5));
-        info.addView(desc);
-        info.addView(text(
-                profile.membershipActive ? "当前账号可启动" : "体验 / VIP 已到期",
-                12,
-                profile.membershipActive ? GREEN : ORANGE,
-                true
-        ));
-        row.addView(info, new LinearLayout.LayoutParams(0, -2, 1f));
-        card.addView(row);
+        LinearLayout titleBox = new LinearLayout(this);
+        titleBox.setOrientation(LinearLayout.VERTICAL);
+        titleBox.addView(text(GAME_NAME, 20, TEXT, true));
+        TextView hint = text("点击查看游戏详情", 12, MUTED, false);
+        hint.setPadding(0, dp(4), 0, 0);
+        titleBox.addView(hint);
+        FrameLayout.LayoutParams titleLp = new FrameLayout.LayoutParams(-2, -2);
+        titleLp.gravity = Gravity.BOTTOM | Gravity.START;
+        titleLp.leftMargin = dp(24);
+        titleLp.bottomMargin = dp(24);
+        canvas.addView(titleBox, titleLp);
+
+        return canvas;
+    }
+
+    private void showUserPanel(AuthClient.ProfileResult profile) {
+        if (profile == null || overlayHost == null) return;
+        closeActiveOverlayImmediate();
+
+        FrameLayout overlay = overlay();
+        LinearLayout panel = panel();
+        panel.setPadding(dp(20), dp(18), dp(20), dp(20));
+
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        TextView close = closeCircle();
+        close.setOnClickListener(v -> closeActiveOverlay());
+        head.addView(close, new LinearLayout.LayoutParams(dp(40), dp(40)));
+        TextView heading = text("账号中心", 20, TEXT, true);
+        LinearLayout.LayoutParams headingLp = new LinearLayout.LayoutParams(0, -2, 1f);
+        headingLp.leftMargin = dp(12);
+        head.addView(heading, headingLp);
+        panel.addView(head);
+
+        TextView user = text(profile.username, 22, TEXT, true);
+        user.setPadding(0, dp(20), 0, dp(8));
+        panel.addView(user);
+
+        TextView state = membershipStateText(profile);
+        panel.addView(state);
+        panel.addView(infoRow("VIP 到期时间", formatExpiry(profile.expiresAt)));
+
+        Button refresh = button("刷新会员状态", CARD_SOFT, TEXT);
+        refresh.setOnClickListener(v -> refreshMembershipFromPanel(refresh));
+        LinearLayout.LayoutParams refreshLp = new LinearLayout.LayoutParams(-1, dp(46));
+        refreshLp.topMargin = dp(16);
+        panel.addView(refresh, refreshLp);
+
+        TextView redeemTitle = text("兑换码充值", 16, TEXT, true);
+        redeemTitle.setPadding(0, dp(22), 0, 0);
+        panel.addView(redeemTitle);
+        EditText code = input("输入兑换码", false);
+        code.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
+        panel.addView(code, inputParams());
+        Button redeem = button("兑换到当前账号", PRIMARY, Color.WHITE);
+        redeem.setOnClickListener(v -> redeemFromPanel(code, redeem));
+        LinearLayout.LayoutParams redeemLp = new LinearLayout.LayoutParams(-1, dp(48));
+        redeemLp.topMargin = dp(10);
+        panel.addView(redeem, redeemLp);
+
+        Button logout = button("退出登录", Color.rgb(68, 35, 38), Color.rgb(255, 185, 185));
+        logout.setOnClickListener(v -> {
+            closeActiveOverlayImmediate();
+            performLogout();
+        });
+        LinearLayout.LayoutParams logoutLp = new LinearLayout.LayoutParams(-1, dp(46));
+        logoutLp.topMargin = dp(18);
+        panel.addView(logout, logoutLp);
+
+        FrameLayout.LayoutParams panelLp = new FrameLayout.LayoutParams(-1, -2);
+        panelLp.gravity = Gravity.TOP;
+        panelLp.leftMargin = dp(16);
+        panelLp.rightMargin = dp(16);
+        panelLp.topMargin = dp(72);
+        overlay.addView(panel, panelLp);
+        attachOverlay(overlay, panel, false);
+    }
+
+    private void showGamePanel(AuthClient.ProfileResult profile) {
+        if (profile == null || overlayHost == null) return;
+        closeActiveOverlayImmediate();
+
+        FrameLayout overlay = overlay();
+        LinearLayout panel = panel();
+        panel.setPadding(dp(20), dp(18), dp(20), dp(20));
+
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        TextView close = closeCircle();
+        close.setOnClickListener(v -> closeActiveOverlay());
+        head.addView(close, new LinearLayout.LayoutParams(dp(40), dp(40)));
+        TextView heading = text("游戏详情", 20, TEXT, true);
+        LinearLayout.LayoutParams headingLp = new LinearLayout.LayoutParams(0, -2, 1f);
+        headingLp.leftMargin = dp(12);
+        head.addView(heading, headingLp);
+        panel.addView(head);
+
+        LinearLayout gameHead = new LinearLayout(this);
+        gameHead.setOrientation(LinearLayout.HORIZONTAL);
+        gameHead.setGravity(Gravity.CENTER_VERTICAL);
+        gameHead.setPadding(0, dp(18), 0, dp(12));
+        ImageView icon = new ImageView(this);
+        icon.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        Drawable drawable = loadTargetIcon();
+        if (drawable != null) icon.setImageDrawable(drawable);
+        icon.setBackground(round(Color.rgb(44, 50, 61), 18));
+        LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(dp(76), dp(76));
+        iconLp.rightMargin = dp(14);
+        gameHead.addView(icon, iconLp);
+
+        LinearLayout gameText = new LinearLayout(this);
+        gameText.setOrientation(LinearLayout.VERTICAL);
+        gameText.addView(text(GAME_NAME, 19, TEXT, true));
+        TextView supported = pill("已支持汉化", GREEN, Color.WHITE);
+        LinearLayout.LayoutParams supportedLp = new LinearLayout.LayoutParams(-2, dp(27));
+        supportedLp.topMargin = dp(8);
+        gameText.addView(supported, supportedLp);
+        gameHead.addView(gameText, new LinearLayout.LayoutParams(0, -2, 1f));
+        panel.addView(gameHead);
+
+        TextView description = text(GAME_DESCRIPTION, 13, MUTED, false);
+        description.setLineSpacing(0f, 1.25f);
+        description.setPadding(0, 0, 0, dp(8));
+        panel.addView(description);
+
+        panel.addView(infoRow("最近更新时间", GAME_LAST_UPDATED));
+        panel.addView(infoRow("汉化完成度", LOCALIZATION_PROGRESS));
+
+        MirrorPackManager.MirrorStatus mirror = MirrorPackManager.status(this);
+        mirrorStatusView = text(mirrorStatusText(mirror), 13, mirror.ready ? GREEN : MUTED, false);
+        mirrorStatusView.setPadding(0, dp(14), 0, dp(8));
+        panel.addView(mirrorStatusView);
+
+        mirrorSelectButton = button("选择镜像包", CARD_SOFT, TEXT);
+        mirrorSelectButton.setOnClickListener(v -> selectMirrorPack());
+        LinearLayout.LayoutParams mirrorButtonLp = new LinearLayout.LayoutParams(dp(128), dp(40));
+        panel.addView(mirrorSelectButton, mirrorButtonLp);
 
         boolean canLaunch = profile.membershipActive;
         Button start = button(
@@ -363,19 +559,17 @@ public class MainActivity extends Activity {
                 canLaunch ? Color.WHITE : MUTED
         );
         start.setEnabled(canLaunch);
-        start.setAlpha(canLaunch ? 1.0f : 0.72f);
-        if (canLaunch) {
-            start.setOnClickListener(v -> activateModule(start));
-        }
+        start.setAlpha(canLaunch ? 1f : 0.72f);
+        if (canLaunch) start.setOnClickListener(v -> activateModule(start));
         LinearLayout.LayoutParams startLp = new LinearLayout.LayoutParams(-1, dp(52));
-        startLp.topMargin = dp(14);
-        card.addView(start, startLp);
+        startLp.topMargin = dp(18);
+        panel.addView(start, startLp);
 
         moduleProgressText = text("", 12, MUTED, false);
         moduleProgressText.setVisibility(View.GONE);
         moduleProgressText.setGravity(Gravity.CENTER_HORIZONTAL);
         moduleProgressText.setPadding(0, dp(10), 0, dp(5));
-        card.addView(moduleProgressText, new LinearLayout.LayoutParams(-1, -2));
+        panel.addView(moduleProgressText, new LinearLayout.LayoutParams(-1, -2));
 
         moduleProgress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         moduleProgress.setMax(100);
@@ -386,12 +580,39 @@ public class MainActivity extends Activity {
         moduleProgress.setVisibility(View.GONE);
         LinearLayout.LayoutParams progressLp = new LinearLayout.LayoutParams(-1, dp(6));
         progressLp.topMargin = dp(2);
-        card.addView(moduleProgress, progressLp);
+        panel.addView(moduleProgress, progressLp);
 
-        return card;
+        FrameLayout.LayoutParams panelLp = new FrameLayout.LayoutParams(-1, -2);
+        panelLp.gravity = Gravity.BOTTOM;
+        panelLp.leftMargin = dp(14);
+        panelLp.rightMargin = dp(14);
+        panelLp.bottomMargin = dp(14);
+        overlay.addView(panel, panelLp);
+        attachOverlay(overlay, panel, true);
     }
 
-    private void redeemCode(EditText codeEdit, Button button) {
+    private void refreshMembershipFromPanel(Button button) {
+        final String token = currentToken;
+        if (token == null || token.trim().isEmpty()) return;
+        button.setEnabled(false);
+        button.setText("刷新中…");
+        new Thread(() -> {
+            AuthClient.ProfileResult profile = AuthClient.me(token);
+            runOnUiThread(() -> {
+                button.setEnabled(true);
+                button.setText("刷新会员状态");
+                if (!profile.requestOk || !profile.success) {
+                    toast(profile.message == null || profile.message.isEmpty() ? "刷新失败" : profile.message);
+                    return;
+                }
+                closeActiveOverlayImmediate();
+                showHome(profile);
+                toast("会员状态已刷新");
+            });
+        }, "RYLUX-Panel-Refresh").start();
+    }
+
+    private void redeemFromPanel(EditText codeEdit, Button button) {
         String code = codeEdit.getText().toString().trim();
         if (code.isEmpty()) {
             focusWithMessage(codeEdit, "请输入兑换码");
@@ -407,11 +628,76 @@ public class MainActivity extends Activity {
                 button.setText("兑换到当前账号");
                 toast(result.message);
                 if (result.requestOk && result.success) {
-                    codeEdit.setText("");
+                    closeActiveOverlayImmediate();
                     refreshProfile(false);
                 }
             });
         }, "RYLUX-Redeem").start();
+    }
+
+    private void selectMirrorPack() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{
+                "application/zip",
+                "application/octet-stream",
+                "application/x-zip-compressed"
+        });
+        try {
+            startActivityForResult(intent, REQUEST_MIRROR_PACK);
+        } catch (Throwable t) {
+            toast("无法打开文件选择器");
+        }
+    }
+
+    private void importMirrorPack(Uri uri) {
+        if (mirrorSelectButton != null) {
+            mirrorSelectButton.setEnabled(false);
+            mirrorSelectButton.setText("导入中…");
+        }
+        if (mirrorStatusView != null) {
+            mirrorStatusView.setText("正在导入镜像包，请保持 RYLUX 在前台…");
+            mirrorStatusView.setTextColor(MUTED);
+        }
+        showLaunchProgress("正在读取镜像包…", 0);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+
+        new Thread(() -> {
+            try {
+                MirrorPackManager.ImportResult result = MirrorPackManager.importPack(this, uri, (message, percent) ->
+                        runOnUiThread(() -> showLaunchProgress(message, percent))
+                );
+                runOnUiThread(() -> {
+                    getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                    hideLaunchProgress();
+                    if (mirrorSelectButton != null) {
+                        mirrorSelectButton.setEnabled(true);
+                        mirrorSelectButton.setText("选择镜像包");
+                    }
+                    MirrorPackManager.MirrorStatus status = MirrorPackManager.status(this);
+                    if (mirrorStatusView != null) {
+                        mirrorStatusView.setText(mirrorStatusText(status));
+                        mirrorStatusView.setTextColor(status.ready ? GREEN : MUTED);
+                    }
+                    toast(result.name + " 已导入，共 " + result.fileCount + " 个 PAK");
+                });
+            } catch (Throwable t) {
+                runOnUiThread(() -> {
+                    getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                    hideLaunchProgress();
+                    if (mirrorSelectButton != null) {
+                        mirrorSelectButton.setEnabled(true);
+                        mirrorSelectButton.setText("选择镜像包");
+                    }
+                    if (mirrorStatusView != null) {
+                        mirrorStatusView.setText("镜像包导入失败");
+                        mirrorStatusView.setTextColor(RED);
+                    }
+                    toast("镜像包导入失败：" + safeMessage(t));
+                });
+            }
+        }, "RYLUX-Mirror-Import").start();
     }
 
     private void activateModule(Button button) {
@@ -552,6 +838,9 @@ public class MainActivity extends Activity {
         currentToken = null;
         currentUsername = null;
         currentMembershipActive = false;
+        currentMembershipKind = "expired";
+        currentExpiresAt = null;
+        currentProfile = null;
         authStorage.clearSession();
         showAuthUi(false);
         if (token != null && !token.trim().isEmpty()) {
@@ -591,8 +880,8 @@ public class MainActivity extends Activity {
     private void resetStartButton(Button button, String message) {
         runOnUiThread(() -> {
             hideLaunchProgress();
-            button.setEnabled(true);
-            button.setText("启动游戏");
+            button.setEnabled(currentMembershipActive);
+            button.setText(currentMembershipActive ? "启动游戏" : "暂时无法使用");
             toast(message);
         });
     }
@@ -611,12 +900,98 @@ public class MainActivity extends Activity {
         if (authProgress != null) authProgress.setVisibility(busy ? View.VISIBLE : View.GONE);
     }
 
+    private FrameLayout overlay() {
+        FrameLayout overlay = new FrameLayout(this);
+        overlay.setBackgroundColor(Color.argb(178, 0, 0, 0));
+        overlay.setClickable(true);
+        overlay.setFocusable(true);
+        overlay.setOnClickListener(v -> closeActiveOverlay());
+        return overlay;
+    }
+
+    private LinearLayout panel() {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setClickable(true);
+        panel.setFocusable(true);
+        panel.setOnClickListener(v -> {});
+        GradientDrawable bg = round(CARD, 24);
+        bg.setStroke(dp(1), BORDER);
+        panel.setBackground(bg);
+        panel.setElevation(dp(20));
+        return panel;
+    }
+
+    private void attachOverlay(FrameLayout overlay, View panel, boolean fromBottom) {
+        if (overlayHost == null) return;
+        activeOverlay = overlay;
+        activePanel = panel;
+        activePanelFromBottom = fromBottom;
+        overlay.setAlpha(0f);
+        panel.setAlpha(0f);
+        panel.setScaleX(0.985f);
+        panel.setScaleY(0.985f);
+        panel.setTranslationY(dp(fromBottom ? 28 : -18));
+        overlayHost.addView(overlay, new FrameLayout.LayoutParams(-1, -1));
+        overlay.animate().alpha(1f).setDuration(190L).start();
+        panel.animate()
+                .alpha(1f)
+                .scaleX(1f)
+                .scaleY(1f)
+                .translationY(0f)
+                .setDuration(260L)
+                .setInterpolator(new DecelerateInterpolator())
+                .start();
+    }
+
+    private void closeActiveOverlay() {
+        final FrameLayout overlay = activeOverlay;
+        final View panel = activePanel;
+        if (overlay == null || overlayHost == null) return;
+        activeOverlay = null;
+        activePanel = null;
+        float exitY = dp(activePanelFromBottom ? 20 : -14);
+        overlay.animate().alpha(0f).setDuration(160L).start();
+        if (panel != null) {
+            panel.animate()
+                    .alpha(0f)
+                    .scaleX(0.99f)
+                    .scaleY(0.99f)
+                    .translationY(exitY)
+                    .setDuration(180L)
+                    .setInterpolator(new AccelerateDecelerateInterpolator())
+                    .withEndAction(() -> {
+                        if (overlay.getParent() instanceof ViewGroup) {
+                            ((ViewGroup) overlay.getParent()).removeView(overlay);
+                        }
+                        clearTransientViews();
+                    })
+                    .start();
+        } else if (overlay.getParent() instanceof ViewGroup) {
+            ((ViewGroup) overlay.getParent()).removeView(overlay);
+        }
+    }
+
+    private void closeActiveOverlayImmediate() {
+        if (activeOverlay != null && activeOverlay.getParent() instanceof ViewGroup) {
+            ((ViewGroup) activeOverlay.getParent()).removeView(activeOverlay);
+        }
+        activeOverlay = null;
+        activePanel = null;
+        clearTransientViews();
+    }
+
+    private void clearTransientViews() {
+        moduleProgress = null;
+        moduleProgressText = null;
+        mirrorStatusView = null;
+        mirrorSelectButton = null;
+    }
+
     private LinearLayout baseContent() {
         getWindow().setStatusBarColor(BG);
         getWindow().setNavigationBarColor(BG);
-        if (Build.VERSION.SDK_INT >= 23) {
-            getWindow().getDecorView().setSystemUiVisibility(0);
-        }
+        if (Build.VERSION.SDK_INT >= 23) getWindow().getDecorView().setSystemUiVisibility(0);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(18), dp(18), dp(18), dp(30));
@@ -629,7 +1004,14 @@ public class MainActivity extends Activity {
         scroll.setFillViewport(true);
         scroll.setBackgroundColor(BG);
         scroll.addView(content, new ScrollView.LayoutParams(-1, -2));
-        setContentView(scroll);
+
+        FrameLayout host = new FrameLayout(this);
+        host.setBackgroundColor(BG);
+        host.addView(scroll, new FrameLayout.LayoutParams(-1, -1));
+        overlayHost = host;
+        activeOverlay = null;
+        activePanel = null;
+        setContentView(host);
     }
 
     private LinearLayout card() {
@@ -645,12 +1027,6 @@ public class MainActivity extends Activity {
     private TextView title(String value) {
         TextView v = text(value, 28, TEXT, true);
         v.setPadding(0, 0, 0, dp(12));
-        return v;
-    }
-
-    private TextView sectionTitle(String value) {
-        TextView v = text(value, 16, TEXT, true);
-        v.setPadding(dp(2), dp(4), 0, dp(10));
         return v;
     }
 
@@ -731,6 +1107,45 @@ public class MainActivity extends Activity {
         return v;
     }
 
+    private TextView pill(String label, int bg, int fg) {
+        TextView v = text(label, 11, fg, true);
+        v.setGravity(Gravity.CENTER);
+        v.setPadding(dp(9), 0, dp(9), 0);
+        v.setBackground(round(bg, 8));
+        return v;
+    }
+
+    private TextView closeCircle() {
+        TextView close = text("×", 22, TEXT, false);
+        close.setGravity(Gravity.CENTER);
+        close.setBackground(round(CARD_SOFT, 20));
+        close.setClickable(true);
+        close.setFocusable(true);
+        return close;
+    }
+
+    private LinearLayout infoRow(String label, String value) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, dp(11), 0, dp(11));
+        TextView l = text(label, 13, MUTED, false);
+        row.addView(l, new LinearLayout.LayoutParams(0, -2, 1f));
+        TextView r = text(value == null || value.trim().isEmpty() ? "-" : value, 13, TEXT, true);
+        r.setGravity(Gravity.END);
+        row.addView(r, new LinearLayout.LayoutParams(-2, -2));
+        return row;
+    }
+
+    private TextView membershipStateText(AuthClient.ProfileResult profile) {
+        boolean trial = profile.membershipActive && "trial".equals(profile.membershipKind);
+        String label = trial ? "24 小时体验" : (profile.membershipActive ? "VIP 会员" : "使用时间已到期");
+        int color = trial ? YELLOW : (profile.membershipActive ? GREEN : RED);
+        TextView v = text(label, 14, color, true);
+        v.setPadding(0, 0, 0, dp(6));
+        return v;
+    }
+
     private Button button(String label, int bg, int fg) {
         Button b = new Button(this);
         b.setText(label);
@@ -766,6 +1181,26 @@ public class MainActivity extends Activity {
         } catch (Throwable ignored) {
             return iso;
         }
+    }
+
+    private String avatarLetter(String username) {
+        if (username == null || username.trim().isEmpty()) return "U";
+        String value = username.trim();
+        return value.substring(0, 1).toUpperCase(Locale.getDefault());
+    }
+
+    private String mirrorStatusText(MirrorPackManager.MirrorStatus status) {
+        if (status == null || !status.ready) return "镜像包：未选择";
+        return "镜像包：" + status.name + " · " + status.fileCount + " 个 PAK · " + humanBytes(status.totalBytes);
+    }
+
+    private String humanBytes(long bytes) {
+        if (bytes < 1024) return bytes + " B";
+        double kb = bytes / 1024.0;
+        if (kb < 1024) return String.format(Locale.US, "%.1f KB", kb);
+        double mb = kb / 1024.0;
+        if (mb < 1024) return String.format(Locale.US, "%.1f MB", mb);
+        return String.format(Locale.US, "%.2f GB", mb / 1024.0);
     }
 
     private String safeMessage(Throwable t) {
