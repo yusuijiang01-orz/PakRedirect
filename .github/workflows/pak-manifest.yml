@@ -1,163 +1,177 @@
-name: Publish RYLUX content manifest
+name: Validate RYLUX protected content
 
 on:
   push:
     branches:
       - main
     paths:
+      - 'pak/*.rpe'
       - 'pak/*.pak'
+      - 'pak/*.key'
+      - 'pak/linkspak.txt'
+      - 'pak/manifest.json'
+  pull_request:
+    paths:
+      - 'pak/*.rpe'
+      - 'pak/*.pak'
+      - 'pak/*.key'
       - 'pak/linkspak.txt'
       - 'pak/manifest.json'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  manifest:
+  validate-protected-content:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
 
-      - name: Generate SHA-256 content manifest
+      - name: Validate encrypted localization package
         shell: bash
         run: |
           python - <<'PY'
-          import datetime
+          import base64
           import hashlib
           import json
-          import os
           import pathlib
+          import struct
 
           root = pathlib.Path('pak')
-          repo = os.environ['GITHUB_REPOSITORY']
-          manifest_path = root / 'manifest.json'
+          required_plain = {'settings.pak', 'ui.pak', 'updatefs.pak'}
+          required_rpe = {name + '.rpe' for name in required_plain}
 
-          old = {}
-          if manifest_path.exists():
-              try:
-                  old = json.loads(manifest_path.read_text(encoding='utf-8'))
-              except Exception:
-                  old = {}
-          old_by_name = {
-              item.get('name'): item
-              for item in old.get('files', [])
-              if isinstance(item, dict) and item.get('name')
-          }
+          def fail(message):
+              raise SystemExit(message)
 
-          def digest(path):
+          def sha256(path):
               h = hashlib.sha256()
               with path.open('rb') as f:
                   for chunk in iter(lambda: f.read(1024 * 1024), b''):
                       h.update(chunk)
               return h.hexdigest()
 
-          max_old_revision = 0
-          for item in old_by_name.values():
-              try:
-                  max_old_revision = max(max_old_revision, int(item.get('revision', 0) or 0))
-              except Exception:
-                  pass
+          leaked_keys = sorted(root.glob('*.key'))
+          if leaked_keys:
+              fail('Do not commit content key files: ' + ', '.join(str(p) for p in leaked_keys))
 
-          # Signed-32-bit-safe monotonic content revision. YYYYMMDD00 leaves
-          # room for many same-day updates and stays below 2,147,483,647.
-          today_base = int(datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d')) * 100
-          next_revision = max(today_base, max_old_revision + 1)
+          leaked_plain = [root / name for name in sorted(required_plain) if (root / name).exists()]
+          if leaked_plain:
+              fail('Protected localization plaintext PAKs must not be committed: ' + ', '.join(str(p) for p in leaked_plain))
 
-          pak_entries = {}
-          for path in sorted(root.glob('*.pak')):
-              sha = digest(path)
-              size = path.stat().st_size
-              previous = old_by_name.get(path.name, {})
-              try:
-                  previous_revision = int(previous.get('revision', 0) or 0)
-              except Exception:
-                  previous_revision = 0
-              if previous.get('sha256') == sha and previous_revision > 0:
-                  revision = previous_revision
-              else:
-                  revision = next_revision
-                  next_revision += 1
-              pak_entries[path.name] = {
-                  'name': path.name,
-                  'size': size,
-                  'sha256': sha,
-                  'revision': revision,
-                  'url': f'https://raw.githubusercontent.com/{repo}/main/pak/{path.name}',
-              }
-
-          # Keep linkspak.txt synchronized with the exact PAK byte size and the
-          # monotonic revision. BundledPakServer later rewrites only the URL and
-          # preserves these values for the game's own update comparison.
+          manifest_path = root / 'manifest.json'
           link_path = root / 'linkspak.txt'
-          lines = link_path.read_text(encoding='utf-8').splitlines()
-          rewritten = []
-          for line in lines:
-              fields = line.split(',')
-              if len(fields) >= 6:
-                  pak_name = fields[2].strip()
-                  item = pak_entries.get(pak_name)
-                  if item is not None:
-                      fields[3] = str(item['size'])
-                      fields[5] = str(item['revision'])
-                      line = ','.join(fields)
-              rewritten.append(line)
-          link_path.write_text('\n'.join(rewritten) + '\n', encoding='utf-8')
+          if not manifest_path.is_file() or not link_path.is_file():
+              fail('pak/manifest.json and pak/linkspak.txt are required')
+          for name in sorted(required_rpe):
+              if not (root / name).is_file():
+                  fail('Missing encrypted resource: pak/' + name)
 
-          link_sha = digest(link_path)
-          link_size = link_path.stat().st_size
-          previous_link = old_by_name.get('linkspak.txt', {})
+          outer = json.loads(manifest_path.read_text(encoding='utf-8'))
+          if outer.get('schema') != 1 or outer.get('module') != 'sg_localization':
+              fail('Protected manifest schema/module is invalid')
+
+          key_id = str(outer.get('key_id', '')).lower()
+          manifest_hmac = str(outer.get('manifest_hmac', '')).lower()
+          if len(key_id) != 16 or any(c not in '0123456789abcdef' for c in key_id):
+              fail('Protected manifest key_id is invalid')
+          if len(manifest_hmac) != 64 or any(c not in '0123456789abcdef' for c in manifest_hmac):
+              fail('Protected manifest HMAC shape is invalid')
+
           try:
-              previous_link_revision = int(previous_link.get('revision', 0) or 0)
-          except Exception:
-              previous_link_revision = 0
-          if previous_link.get('sha256') == link_sha and previous_link_revision > 0:
-              link_revision = previous_link_revision
-          else:
-              link_revision = next_revision
-              next_revision += 1
+              payload_bytes = base64.b64decode(outer['payload_b64'], validate=True)
+              payload = json.loads(payload_bytes.decode('utf-8'))
+          except Exception as exc:
+              fail('Protected manifest payload_b64 is invalid: ' + str(exc))
 
-          files = list(pak_entries.values())
-          files.append({
-              'name': 'linkspak.txt',
-              'size': link_size,
-              'sha256': link_sha,
-              'revision': link_revision,
-              'url': f'https://raw.githubusercontent.com/{repo}/main/pak/linkspak.txt',
-          })
-          files.sort(key=lambda item: item['name'])
+          if payload.get('schema') != 1 or payload.get('module') != 'sg_localization':
+              fail('Protected manifest payload schema/module is invalid')
+          if str(payload.get('key_id', '')).lower() != key_id:
+              fail('Protected manifest key_id does not match payload')
+          if not str(payload.get('version', '')).strip():
+              fail('Protected manifest version is missing')
 
-          fingerprint = hashlib.sha256()
+          link = payload.get('linkspak')
+          if not isinstance(link, dict) or link.get('stored_name') != 'linkspak.txt':
+              fail('Protected manifest linkspak entry is invalid')
+          if int(link.get('size', -1)) != link_path.stat().st_size:
+              fail('linkspak.txt size does not match protected manifest')
+          if str(link.get('sha256', '')).lower() != sha256(link_path):
+              fail('linkspak.txt SHA-256 does not match protected manifest')
+
+          files = payload.get('files')
+          if not isinstance(files, list) or len(files) != 3:
+              fail('Protected manifest must contain exactly three encrypted PAK entries')
+
+          by_name = {}
           for item in files:
-              fingerprint.update(item['name'].encode('utf-8'))
-              fingerprint.update(str(item['size']).encode('ascii'))
-              fingerprint.update(item['sha256'].encode('ascii'))
-              fingerprint.update(str(item['revision']).encode('ascii'))
+              if not isinstance(item, dict):
+                  fail('Protected manifest contains a non-object file entry')
+              name = str(item.get('name', '')).lower()
+              if name in by_name:
+                  fail('Duplicate protected resource: ' + name)
+              by_name[name] = item
 
-          manifest = {
-              'schema': 1,
-              'module': 'sg_localization',
-              'version': fingerprint.hexdigest()[:12],
-              'files': files,
-          }
-          manifest_path.write_text(
-              json.dumps(manifest, ensure_ascii=False, indent=2) + '\n',
-              encoding='utf-8'
-          )
+          if set(by_name) != required_plain:
+              fail('Protected manifest file set is invalid')
+
+          for name in sorted(required_plain):
+              item = by_name[name]
+              encrypted_name = str(item.get('encrypted_name', ''))
+              if encrypted_name != name + '.rpe':
+                  fail('Unexpected encrypted filename for ' + name)
+              if item.get('format') != 'RYLUXE01':
+                  fail('Unexpected encrypted format for ' + name)
+
+              path = root / encrypted_name
+              actual_size = path.stat().st_size
+              if int(item.get('encrypted_size', -1)) != actual_size:
+                  fail(encrypted_name + ' size does not match protected manifest')
+              if str(item.get('encrypted_sha256', '')).lower() != sha256(path):
+                  fail(encrypted_name + ' SHA-256 does not match protected manifest')
+
+              plain_size = int(item.get('plain_size', -1))
+              revision = int(item.get('revision', 0))
+              plain_sha = str(item.get('plain_sha256', '')).lower()
+              if plain_size <= 0 or revision <= 0 or len(plain_sha) != 64:
+                  fail('Invalid plaintext metadata for ' + name)
+
+              with path.open('rb') as f:
+                  if f.read(8) != b'RYLUXE01':
+                      fail(encrypted_name + ' has invalid RPE magic')
+                  raw_len = f.read(4)
+                  if len(raw_len) != 4:
+                      fail(encrypted_name + ' has a truncated RPE header')
+                  header_len = struct.unpack('>I', raw_len)[0]
+                  if not 0 < header_len <= 128 * 1024:
+                      fail(encrypted_name + ' has an invalid RPE header length')
+                  header_raw = f.read(header_len)
+                  if len(header_raw) != header_len:
+                      fail(encrypted_name + ' has a truncated RPE header')
+                  header = json.loads(header_raw.decode('utf-8'))
+
+              if header.get('module') != 'sg_localization':
+                  fail(encrypted_name + ' module mismatch')
+              if str(header.get('name', '')).lower() != name:
+                  fail(encrypted_name + ' name mismatch')
+              if int(header.get('plain_size', -1)) != plain_size:
+                  fail(encrypted_name + ' plain_size mismatch')
+              if str(header.get('plain_sha256', '')).lower() != plain_sha:
+                  fail(encrypted_name + ' plain_sha256 mismatch')
+              if int(header.get('revision', 0)) != revision:
+                  fail(encrypted_name + ' revision mismatch')
+              if str(header.get('key_id', '')).lower() != key_id:
+                  fail(encrypted_name + ' key_id mismatch')
+
+              chunk_size = int(header.get('chunk_size', 0))
+              if not 64 * 1024 <= chunk_size <= 4 * 1024 * 1024:
+                  fail(encrypted_name + ' chunk_size is invalid')
+              chunks = (plain_size + chunk_size - 1) // chunk_size
+              expected_size = 12 + header_len + plain_size + chunks * 16
+              if expected_size != actual_size:
+                  fail(encrypted_name + ' RPE byte layout is invalid')
+
+          print('Protected content package structure and SHA-256 metadata are valid.')
+          print('HMAC/GCM verification intentionally remains server/client-side because CI has no content key.')
           PY
-
-      - name: Commit content metadata if changed
-        shell: bash
-        run: |
-          set -euo pipefail
-          if git diff --quiet -- pak/linkspak.txt pak/manifest.json; then
-            echo 'Content metadata unchanged'
-            exit 0
-          fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add pak/linkspak.txt pak/manifest.json
-          git commit -m 'Update RYLUX content manifest'
-          git push
