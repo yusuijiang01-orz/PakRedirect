@@ -20,7 +20,7 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/opt/pakredirect-license/data
-ReadOnlyPaths=/opt/pakredirect-license/protected-content
+ReadOnlyPaths=-/opt/pakredirect-license/protected-content
 
 [Install]
 WantedBy=multi-user.target
