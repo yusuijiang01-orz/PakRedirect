@@ -14,6 +14,7 @@ public class RyluxApplication extends Application {
             @Override public void onActivityResumed(Activity activity) {
                 if (activity instanceof MainActivity) {
                     RyluxUiPolish.attach(activity);
+                    RyluxResponsiveTuner.attach(activity);
                     if (!updateChecked) {
                         updateChecked = true;
                         AppUpdateChecker.check(activity);
@@ -26,7 +27,10 @@ public class RyluxApplication extends Application {
             @Override public void onActivityStopped(Activity activity) {}
             @Override public void onActivitySaveInstanceState(Activity activity, Bundle state) {}
             @Override public void onActivityDestroyed(Activity activity) {
-                if (activity instanceof MainActivity) RyluxUiPolish.detach(activity);
+                if (activity instanceof MainActivity) {
+                    RyluxResponsiveTuner.detach(activity);
+                    RyluxUiPolish.detach(activity);
+                }
             }
         });
     }
