@@ -7,7 +7,10 @@ android {
     buildFeatures { buildConfig = true }
     buildTypes { release { isMinifyEnabled = false; signingConfig = signingConfigs.getByName("debug") } }
     packaging { resources.excludes += setOf("META-INF/DEPENDENCIES", "META-INF/LICENSE*", "META-INF/NOTICE*") }
+    compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
 }
+
+kotlin { jvmToolchain(17) }
 
 dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
@@ -16,3 +19,4 @@ dependencies {
     implementation("org.nanohttpd:nanohttpd:2.3.1")
     implementation("io.github.webrtc-sdk:android:150.7871.01")
 }
+
