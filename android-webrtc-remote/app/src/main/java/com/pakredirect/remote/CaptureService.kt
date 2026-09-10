@@ -41,6 +41,10 @@ class CaptureService: Service() {
         pc=factory!!.createPeerConnection(PeerConnection.RTCConfiguration(emptyList()).apply{
             sdpSemantics=PeerConnection.SdpSemantics.UNIFIED_PLAN
             continualGatheringPolicy=PeerConnection.ContinualGatheringPolicy.GATHER_ONCE
+            // Tailscale is exposed to Android as a VPN adapter. Prefer it over
+            // LDPlayer's NAT-only Ethernet adapter so the answer advertises a
+            // candidate reachable by the iPhone on the same tailnet.
+            networkPreference=PeerConnection.AdapterType.VPN
         },observer)
         val track=factory!!.createVideoTrack("screen",source);pc!!.addTrack(track,listOf("screen"));pc!!.setRemoteDescription(object:SdpObserver{override fun onSetSuccess(){pc!!.createAnswer(object:SdpObserver{override fun onCreateSuccess(s:SessionDescription?){pc!!.setLocalDescription(object:SdpObserver{override fun onSetSuccess(){};override fun onSetFailure(e:String?){failure=e;latch.countDown()};override fun onCreateSuccess(s:SessionDescription?){};override fun onCreateFailure(e:String?){}},s)};override fun onCreateFailure(e:String?){failure=e;latch.countDown()};override fun onSetSuccess(){};override fun onSetFailure(e:String?){}},MediaConstraints())};override fun onSetFailure(e:String?){failure=e;latch.countDown()};override fun onCreateSuccess(s:SessionDescription?){};override fun onCreateFailure(e:String?){}},SessionDescription(SessionDescription.Type.OFFER,offer))
         latch.await(10,TimeUnit.SECONDS);return result?:throw IllegalStateException(failure?:"ICE gathering timeout")
