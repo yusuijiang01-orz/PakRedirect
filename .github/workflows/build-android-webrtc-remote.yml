@@ -47,7 +47,7 @@ jobs:
         run: sha256sum app/build/outputs/apk/release/app-release.apk > app/build/outputs/apk/release/app-release.apk.sha256
       - uses: actions/upload-artifact@v4
         with:
-          name: android-webrtc-remote-v3.0.0-alpha2-fixed-signature
+          name: android-webrtc-remote-v3.0.0-alpha3-video-diagnostics
           path: |
             android-webrtc-remote/app/build/outputs/apk/release/app-release.apk
             android-webrtc-remote/app/build/outputs/apk/release/app-release.apk.sha256
