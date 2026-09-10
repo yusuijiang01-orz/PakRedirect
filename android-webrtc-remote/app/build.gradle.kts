@@ -3,7 +3,7 @@ plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
 android {
     namespace = "com.pakredirect.remote"
     compileSdk = 35
-    defaultConfig { applicationId = "com.pakredirect.remote"; minSdk = 29; targetSdk = 35; versionCode = 3; versionName = "3.0.0-alpha3" }
+    defaultConfig { applicationId = "com.pakredirect.remote"; minSdk = 29; targetSdk = 35; versionCode = 4; versionName = "3.0.0-alpha4" }
     buildFeatures { buildConfig = true }
     signingConfigs {
         create("release") {
