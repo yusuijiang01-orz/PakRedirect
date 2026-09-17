@@ -86,9 +86,11 @@ public final class ProtectedContentManager {
         ManifestBundle remote;
         try {
             remote = fetchManifest(token);
+            PatchUpdateInfo.rememberRevision(context, latestRevision(remote));
         } catch (NetworkException network) {
             ManifestBundle installed = loadInstalledManifest(context);
             if (installed != null && installedFilesPresent(context, installed)) {
+                PatchUpdateInfo.rememberRevision(context, latestRevision(installed));
                 notifyProgress(listener, "内容服务暂不可用，继续使用已验证资源", 100, false);
                 return UpdateResult.softFailure(installed.version, "继续使用已验证资源");
             }
@@ -139,6 +141,7 @@ public final class ProtectedContentManager {
                         slot.downloadName,
                         slot.stage,
                         slot.expectedSize,
+                        slot.expectedSha,
                         written -> {
                             long overall = Math.min(totalBytes, base + written);
                             int percent = (int) Math.min(96L, (overall * 96L) / totalBytes);
@@ -358,6 +361,15 @@ public final class ProtectedContentManager {
         return new ManifestBundle(text, version, keyId, key, linkspak, entries);
     }
 
+    private static long latestRevision(ManifestBundle bundle) {
+        if (bundle == null || bundle.entries == null) return 0L;
+        long latest = 0L;
+        for (ProtectedEntry entry : bundle.entries.values()) {
+            if (entry != null) latest = Math.max(latest, entry.revision);
+        }
+        return latest;
+    }
+
     private static boolean installedFilesPresent(Context context, ManifestBundle bundle) {
         try {
             File dir = moduleDir(context);
@@ -455,49 +467,85 @@ public final class ProtectedContentManager {
             String remoteName,
             File target,
             long expectedSize,
+            String expectedSha,
             DownloadProgress progress
     ) throws Exception {
-        HttpURLConnection c = null;
-        try {
-            URL url = new URL(API + "/content/" + MODULE_CODE + "/files/" + remoteName);
-            c = (HttpURLConnection) url.openConnection();
-            c.setRequestMethod("GET");
-            c.setConnectTimeout(8000);
-            c.setReadTimeout(60000);
-            c.setUseCaches(false);
-            c.setRequestProperty("Accept", "application/octet-stream");
-            c.setRequestProperty("Authorization", "Bearer " + token.trim());
-            c.setRequestProperty("Cache-Control", "no-store");
-            c.setRequestProperty("User-Agent", "RYLUX/2.3.0");
-            int code = c.getResponseCode();
-            if (code != 200) {
-                String message = "资源下载失败 HTTP " + code;
-                try {
-                    String text = readUtf8(c.getErrorStream(), 128 * 1024);
-                    JSONObject error = new JSONObject(text);
-                    message = error.optString("detail", message);
-                } catch (Throwable ignored) {
-                }
-                throw new IllegalStateException(message);
-            }
-            try (InputStream in = new BufferedInputStream(c.getInputStream(), 256 * 1024);
-                 FileOutputStream out = new FileOutputStream(target)) {
-                byte[] buffer = new byte[256 * 1024];
-                long total = 0L;
-                int n;
-                while ((n = in.read(buffer)) >= 0) {
-                    if (n == 0) continue;
-                    out.write(buffer, 0, n);
-                    total += n;
-                    if (total > expectedSize) throw new IllegalStateException("资源长度超过清单");
-                    if (progress != null) progress.onBytes(total);
-                }
-                out.getFD().sync();
-                if (total != expectedSize) throw new IllegalStateException("资源长度与清单不一致");
-            }
-        } finally {
-            if (c != null) c.disconnect();
+        String[] publicUrls = CnDownloadRouter.publicRepoFileUrls("pak/" + remoteName);
+        List<DownloadSource> sources = new ArrayList<>();
+        if (publicUrls.length > 0) sources.add(new DownloadSource(publicUrls[0], false));
+        if (publicUrls.length > 1) sources.add(new DownloadSource(publicUrls[1], false));
+        sources.add(new DownloadSource(
+                API + "/content/" + MODULE_CODE + "/files/" + remoteName,
+                true
+        ));
+        for (int i = 2; i < publicUrls.length; i++) {
+            sources.add(new DownloadSource(publicUrls[i], false));
         }
+
+        Throwable last = null;
+        for (DownloadSource source : sources) {
+            quietDelete(target);
+            HttpURLConnection c = null;
+            try {
+                c = (HttpURLConnection) new URL(source.url).openConnection();
+                c.setRequestMethod("GET");
+                c.setConnectTimeout(source.authenticated ? 8000 : 6000);
+                c.setReadTimeout(source.authenticated ? 60000 : 45000);
+                c.setUseCaches(false);
+                c.setInstanceFollowRedirects(true);
+                c.setRequestProperty("Accept", "application/octet-stream,*/*");
+                c.setRequestProperty("Cache-Control", "no-cache, no-store");
+                c.setRequestProperty("Pragma", "no-cache");
+                c.setRequestProperty("User-Agent", "RYLUX/2.3.0");
+                if (source.authenticated) {
+                    c.setRequestProperty("Authorization", "Bearer " + token.trim());
+                }
+                int code = c.getResponseCode();
+                if (code != 200) {
+                    if (source.authenticated) {
+                        String message = "资源下载失败 HTTP " + code;
+                        try {
+                            String text = readUtf8(c.getErrorStream(), 128 * 1024);
+                            JSONObject error = new JSONObject(text);
+                            message = error.optString("detail", message);
+                        } catch (Throwable ignored) {
+                        }
+                        throw new IllegalStateException(message);
+                    }
+                    throw new IllegalStateException("HTTP " + code);
+                }
+
+                try (InputStream in = new BufferedInputStream(c.getInputStream(), 256 * 1024);
+                     FileOutputStream out = new FileOutputStream(target)) {
+                    byte[] buffer = new byte[256 * 1024];
+                    long total = 0L;
+                    int n;
+                    while ((n = in.read(buffer)) >= 0) {
+                        if (n == 0) continue;
+                        out.write(buffer, 0, n);
+                        total += n;
+                        if (total > expectedSize) throw new IllegalStateException("资源长度超过清单");
+                        if (progress != null) progress.onBytes(total);
+                    }
+                    out.getFD().sync();
+                    if (total != expectedSize) throw new IllegalStateException("资源长度与清单不一致");
+                }
+                if (!expectedSha.equals(sha256(target))) {
+                    throw new IllegalStateException("资源 SHA-256 与授权清单不一致");
+                }
+                return;
+            } catch (Throwable t) {
+                last = t;
+                quietDelete(target);
+            } finally {
+                if (c != null) c.disconnect();
+            }
+        }
+
+        throw new IllegalStateException(
+                "所有资源下载线路均不可用"
+                        + (last == null || last.getMessage() == null ? "" : "：" + last.getMessage())
+        );
     }
 
     private static void commitSlots(List<ContentSlot> slots) throws Exception {
@@ -734,6 +782,15 @@ public final class ProtectedContentManager {
     private static final class NetworkException extends Exception {
         NetworkException(String message) { super(message); }
         NetworkException(String message, Throwable cause) { super(message, cause); }
+    }
+
+    private static final class DownloadSource {
+        final String url;
+        final boolean authenticated;
+        DownloadSource(String url, boolean authenticated) {
+            this.url = url;
+            this.authenticated = authenticated;
+        }
     }
 
     private static final class LinkspakEntry {
