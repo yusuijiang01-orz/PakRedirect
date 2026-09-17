@@ -41,58 +41,64 @@ public final class AppUpdateChecker {
     }
 
     private static ReleaseInfo fetchLatest() {
-        HttpURLConnection connection = null;
-        try {
-            connection = (HttpURLConnection) new URL(LATEST_RELEASE_API).openConnection();
-            connection.setConnectTimeout(7000);
-            connection.setReadTimeout(7000);
-            connection.setUseCaches(false);
-            connection.setRequestProperty("Accept", "application/vnd.github+json");
-            connection.setRequestProperty("User-Agent", "RYLUX/2.1");
-            if (connection.getResponseCode() != 200) return null;
-            String text = readAll(connection.getInputStream());
-            JSONObject json = new JSONObject(text);
-            String tag = json.optString("tag_name", "").trim();
-            String version = tag.startsWith("v") || tag.startsWith("V") ? tag.substring(1) : tag;
-            if (version.isEmpty()) return null;
+        for (String apiUrl : CnDownloadRouter.githubApiUrls(LATEST_RELEASE_API)) {
+            HttpURLConnection connection = null;
+            try {
+                connection = (HttpURLConnection) new URL(apiUrl).openConnection();
+                connection.setConnectTimeout(4500);
+                connection.setReadTimeout(7000);
+                connection.setUseCaches(false);
+                connection.setInstanceFollowRedirects(true);
+                connection.setRequestProperty("Accept", "application/vnd.github+json");
+                connection.setRequestProperty("User-Agent", "RYLUX/2.3");
+                if (connection.getResponseCode() != 200) continue;
+                String text = readAll(connection.getInputStream());
+                JSONObject json = new JSONObject(text);
+                String tag = json.optString("tag_name", "").trim();
+                String version = tag.startsWith("v") || tag.startsWith("V") ? tag.substring(1) : tag;
+                if (version.isEmpty()) continue;
 
-            String apkUrl = null;
-            JSONArray assets = json.optJSONArray("assets");
-            if (assets != null) {
-                for (int i = 0; i < assets.length(); i++) {
-                    JSONObject asset = assets.optJSONObject(i);
-                    if (asset == null) continue;
-                    String name = asset.optString("name", "");
-                    if (name.startsWith("RYLUX-") && name.toLowerCase().endsWith(".apk")) {
-                        apkUrl = asset.optString("browser_download_url", null);
-                        break;
+                String apkUrl = null;
+                JSONArray assets = json.optJSONArray("assets");
+                if (assets != null) {
+                    for (int i = 0; i < assets.length(); i++) {
+                        JSONObject asset = assets.optJSONObject(i);
+                        if (asset == null) continue;
+                        String name = asset.optString("name", "");
+                        if (name.startsWith("RYLUX-") && name.toLowerCase().endsWith(".apk")) {
+                            apkUrl = asset.optString("browser_download_url", null);
+                            break;
+                        }
                     }
                 }
+                if (apkUrl == null || apkUrl.trim().isEmpty()) apkUrl = json.optString("html_url", "");
+                if (apkUrl == null || apkUrl.trim().isEmpty()) continue;
+                return new ReleaseInfo(version, apkUrl, CnDownloadRouter.accelerated(apkUrl));
+            } catch (Throwable ignored) {
+            } finally {
+                if (connection != null) connection.disconnect();
             }
-            if (apkUrl == null || apkUrl.trim().isEmpty()) apkUrl = json.optString("html_url", "");
-            if (apkUrl == null || apkUrl.trim().isEmpty()) return null;
-            return new ReleaseInfo(version, apkUrl);
-        } catch (Throwable ignored) {
-            return null;
-        } finally {
-            if (connection != null) connection.disconnect();
         }
+        return null;
     }
 
     private static void showDialog(Activity activity, ReleaseInfo info) {
         if (activity.isFinishing()) return;
         new AlertDialog.Builder(activity)
                 .setTitle("发现新版本 " + info.versionName)
-                .setMessage("可直接下载新版 RYLUX 覆盖更新。正式版本使用固定签名后，无需卸载旧版。")
+                .setMessage("检测到新版 RYLUX。国内网络建议优先使用加速下载；若加速节点异常，可改用 GitHub 直连。正式版本使用固定签名，可直接覆盖更新。")
                 .setNegativeButton("稍后", null)
-                .setPositiveButton("立即更新", (dialog, which) -> {
-                    try {
-                        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(info.url));
-                        activity.startActivity(intent);
-                    } catch (Throwable ignored) {
-                    }
-                })
+                .setNeutralButton("GitHub直连", (dialog, which) -> open(activity, info.directUrl))
+                .setPositiveButton("加速下载", (dialog, which) -> open(activity, info.acceleratedUrl))
                 .show();
+    }
+
+    private static void open(Activity activity, String url) {
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            activity.startActivity(intent);
+        } catch (Throwable ignored) {
+        }
     }
 
     static boolean isNewer(String remote, String local) {
@@ -128,10 +134,13 @@ public final class AppUpdateChecker {
 
     private static final class ReleaseInfo {
         final String versionName;
-        final String url;
-        ReleaseInfo(String versionName, String url) {
+        final String directUrl;
+        final String acceleratedUrl;
+
+        ReleaseInfo(String versionName, String directUrl, String acceleratedUrl) {
             this.versionName = versionName;
-            this.url = url;
+            this.directUrl = directUrl;
+            this.acceleratedUrl = acceleratedUrl;
         }
     }
 }
