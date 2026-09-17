@@ -6,7 +6,6 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
-import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -14,9 +13,9 @@ import android.widget.TextView;
 
 import java.util.WeakHashMap;
 
-/** Runtime fixes for compact phones, emulator resolutions and landscape panels. */
+/** Runtime fixes for emulator resolutions, landscape panels and short viewports. */
 public final class RyluxAdaptiveLayoutFix {
-    private static final String HOME_TAG = "rylux_home_navigation_v2";
+    private static final String HOME_TAG = "rylux_home_navigation_v3";
     private static final String GAME_SCROLL_TAG = "rylux_game_panel_scroll_v1";
 
     private static final WeakHashMap<Activity, ViewTreeObserver.OnGlobalLayoutListener> LISTENERS =
@@ -79,102 +78,30 @@ public final class RyluxAdaptiveLayoutFix {
             int heightDp,
             boolean landscape
     ) {
-        boolean compact = widthDp <= 420;
-        root.setPadding(
-                dp(activity, compact ? 10 : (landscape ? 20 : 16)),
-                dp(activity, compact ? 10 : 14),
-                dp(activity, compact ? 10 : (landscape ? 20 : 16)),
-                dp(activity, 28)
-        );
-
-        LinearLayout accountCard = findAccountCard(root);
-        if (accountCard != null) rebuildAccountCard(activity, accountCard, widthDp, compact);
+        int side = widthDp <= 360 ? 10 : (landscape ? 20 : 16);
+        root.setPadding(dp(activity, side), dp(activity, 14), dp(activity, side), dp(activity, 28));
 
         FrameLayout heroShell = findHeroShell(root);
-        if (heroShell != null) {
-            ViewGroup.LayoutParams raw = heroShell.getLayoutParams();
-            if (raw instanceof LinearLayout.LayoutParams) {
-                LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) raw;
-                int height;
-                if (landscape) {
-                    height = dp(activity, clamp(Math.round(heightDp * 0.52f), 220, 300));
-                } else if (widthDp <= 380 || heightDp <= 680) {
-                    height = dp(activity, 300);
-                } else if (widthDp >= 600) {
-                    height = dp(activity, 360);
-                } else {
-                    height = dp(activity, 340);
-                }
-                lp.height = height;
-                heroShell.setLayoutParams(lp);
-            }
-        }
-    }
+        if (heroShell == null) return;
 
-    private static void rebuildAccountCard(
-            Activity activity,
-            LinearLayout card,
-            int widthDp,
-            boolean compact
-    ) {
-        FrameLayout avatar = findFirst(card, FrameLayout.class);
-        Button button = findButton(card, "查看");
-        LinearLayout accountText = findLinearWithDirectText(card, "账号中心");
-        if (avatar == null || button == null || accountText == null || accountText == card) return;
+        ViewGroup.LayoutParams raw = heroShell.getLayoutParams();
+        if (!(raw instanceof LinearLayout.LayoutParams)) return;
+        LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) raw;
 
-        removeFromParent(avatar);
-        removeFromParent(button);
-        removeFromParent(accountText);
-        card.removeAllViews();
-        card.setPadding(
-                dp(activity, compact ? 10 : 13),
-                dp(activity, compact ? 10 : 11),
-                dp(activity, compact ? 10 : 11),
-                dp(activity, compact ? 10 : 11)
-        );
-
-        TextView title = findDirectExactText(accountText, "账号中心");
-        TextView hint = findHintText(accountText);
-        if (title != null) title.setTextSize(compact ? 15f : 16.5f);
-        if (hint != null) {
-            hint.setTextSize(compact ? 11f : 12f);
-            hint.setSingleLine(true);
-            if (widthDp <= 340) hint.setText("会员状态 · 兑换码 · 退出");
-            else hint.setText("会员状态 · 兑换码 · 退出登录");
-        }
-
-        int avatarSize = dp(activity, compact ? 64 : 72);
-        if (compact) {
-            card.setOrientation(LinearLayout.VERTICAL);
-            card.setGravity(Gravity.CENTER_VERTICAL);
-
-            LinearLayout top = new LinearLayout(activity);
-            top.setOrientation(LinearLayout.HORIZONTAL);
-            top.setGravity(Gravity.CENTER_VERTICAL);
-
-            LinearLayout.LayoutParams avatarLp = new LinearLayout.LayoutParams(avatarSize, avatarSize);
-            avatarLp.rightMargin = dp(activity, 11);
-            top.addView(avatar, avatarLp);
-            top.addView(accountText, new LinearLayout.LayoutParams(0, -2, 1f));
-            card.addView(top, new LinearLayout.LayoutParams(-1, -2));
-
-            LinearLayout.LayoutParams buttonLp = new LinearLayout.LayoutParams(-1, dp(activity, 40));
-            buttonLp.topMargin = dp(activity, 9);
-            card.addView(button, buttonLp);
+        int desiredDp;
+        if (landscape) {
+            desiredDp = clamp(Math.round(heightDp * 0.50f), 220, 300);
+        } else if (widthDp <= 360 || heightDp <= 640) {
+            desiredDp = 290;
+        } else if (widthDp <= 420 || heightDp <= 720) {
+            desiredDp = 320;
+        } else if (widthDp >= 600) {
+            desiredDp = 360;
         } else {
-            card.setOrientation(LinearLayout.HORIZONTAL);
-            card.setGravity(Gravity.CENTER_VERTICAL);
-
-            LinearLayout.LayoutParams avatarLp = new LinearLayout.LayoutParams(avatarSize, avatarSize);
-            avatarLp.rightMargin = dp(activity, 12);
-            card.addView(avatar, avatarLp);
-            card.addView(accountText, new LinearLayout.LayoutParams(0, -2, 1f));
-
-            int buttonWidth = dp(activity, widthDp >= 600 ? 78 : 66);
-            LinearLayout.LayoutParams buttonLp = new LinearLayout.LayoutParams(buttonWidth, dp(activity, 38));
-            buttonLp.leftMargin = dp(activity, 8);
-            card.addView(button, buttonLp);
+            desiredDp = 340;
         }
+        lp.height = dp(activity, desiredDp);
+        heroShell.setLayoutParams(lp);
     }
 
     private static void tuneGamePanel(
@@ -184,7 +111,7 @@ public final class RyluxAdaptiveLayoutFix {
             int heightDp,
             boolean landscape
     ) {
-        boolean needsScroll = landscape || heightDp <= 700;
+        boolean needsScroll = landscape || heightDp <= 760;
         View parent = panel.getParent() instanceof View ? (View) panel.getParent() : null;
 
         if (needsScroll && parent instanceof FrameLayout) {
@@ -239,18 +166,6 @@ public final class RyluxAdaptiveLayoutFix {
         return lp;
     }
 
-    private static LinearLayout findAccountCard(LinearLayout root) {
-        for (int i = 0; i < root.getChildCount(); i++) {
-            View child = root.getChildAt(i);
-            if (child instanceof LinearLayout
-                    && findExactText(child, "账号中心") != null
-                    && findButton(child, "查看") != null) {
-                return (LinearLayout) child;
-            }
-        }
-        return null;
-    }
-
     private static FrameLayout findHeroShell(LinearLayout root) {
         for (int i = 0; i < root.getChildCount(); i++) {
             View child = root.getChildAt(i);
@@ -300,70 +215,6 @@ public final class RyluxAdaptiveLayoutFix {
         return null;
     }
 
-    private static TextView findExactText(View view, String exact) {
-        if (view instanceof TextView) {
-            CharSequence text = ((TextView) view).getText();
-            if (text != null && exact.equals(text.toString().trim())) return (TextView) view;
-        }
-        if (view instanceof ViewGroup) {
-            ViewGroup group = (ViewGroup) view;
-            for (int i = 0; i < group.getChildCount(); i++) {
-                TextView found = findExactText(group.getChildAt(i), exact);
-                if (found != null) return found;
-            }
-        }
-        return null;
-    }
-
-    private static TextView findDirectExactText(LinearLayout parent, String exact) {
-        for (int i = 0; i < parent.getChildCount(); i++) {
-            View child = parent.getChildAt(i);
-            if (!(child instanceof TextView)) continue;
-            CharSequence text = ((TextView) child).getText();
-            if (text != null && exact.equals(text.toString().trim())) return (TextView) child;
-        }
-        return null;
-    }
-
-    private static TextView findHintText(LinearLayout accountText) {
-        for (int i = 0; i < accountText.getChildCount(); i++) {
-            View child = accountText.getChildAt(i);
-            if (child instanceof TextView) {
-                String value = ((TextView) child).getText() == null ? "" : ((TextView) child).getText().toString();
-                if (!"账号中心".equals(value.trim())) return (TextView) child;
-            }
-        }
-        return null;
-    }
-
-    private static LinearLayout findLinearWithDirectText(View view, String exact) {
-        if (view instanceof LinearLayout && findDirectExactText((LinearLayout) view, exact) != null) {
-            return (LinearLayout) view;
-        }
-        if (!(view instanceof ViewGroup)) return null;
-        ViewGroup group = (ViewGroup) view;
-        for (int i = 0; i < group.getChildCount(); i++) {
-            LinearLayout found = findLinearWithDirectText(group.getChildAt(i), exact);
-            if (found != null) return found;
-        }
-        return null;
-    }
-
-    private static Button findButton(View view, String exact) {
-        if (view instanceof Button) {
-            CharSequence text = ((Button) view).getText();
-            if (text != null && exact.equals(text.toString().trim())) return (Button) view;
-        }
-        if (view instanceof ViewGroup) {
-            ViewGroup group = (ViewGroup) view;
-            for (int i = 0; i < group.getChildCount(); i++) {
-                Button found = findButton(group.getChildAt(i), exact);
-                if (found != null) return found;
-            }
-        }
-        return null;
-    }
-
     @SuppressWarnings("unchecked")
     private static <T extends View> T findFirst(View view, Class<T> type) {
         if (type.isInstance(view)) return (T) view;
@@ -374,12 +225,6 @@ public final class RyluxAdaptiveLayoutFix {
             if (found != null) return found;
         }
         return null;
-    }
-
-    private static void removeFromParent(View view) {
-        if (view != null && view.getParent() instanceof ViewGroup) {
-            ((ViewGroup) view.getParent()).removeView(view);
-        }
     }
 
     private static int clamp(int value, int min, int max) {
