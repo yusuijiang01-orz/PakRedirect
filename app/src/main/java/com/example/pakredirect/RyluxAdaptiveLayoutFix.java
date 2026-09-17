@@ -119,8 +119,8 @@ public final class RyluxAdaptiveLayoutFix {
     ) {
         FrameLayout avatar = findFirst(card, FrameLayout.class);
         Button button = findButton(card, "查看");
-        LinearLayout accountText = findLinearWithExactText(card, "账号中心");
-        if (avatar == null || button == null || accountText == null) return;
+        LinearLayout accountText = findLinearWithDirectText(card, "账号中心");
+        if (avatar == null || button == null || accountText == null || accountText == card) return;
 
         removeFromParent(avatar);
         removeFromParent(button);
@@ -133,7 +133,7 @@ public final class RyluxAdaptiveLayoutFix {
                 dp(activity, compact ? 10 : 11)
         );
 
-        TextView title = findExactText(accountText, "账号中心");
+        TextView title = findDirectExactText(accountText, "账号中心");
         TextView hint = findHintText(accountText);
         if (title != null) title.setTextSize(compact ? 15f : 16.5f);
         if (hint != null) {
@@ -315,6 +315,16 @@ public final class RyluxAdaptiveLayoutFix {
         return null;
     }
 
+    private static TextView findDirectExactText(LinearLayout parent, String exact) {
+        for (int i = 0; i < parent.getChildCount(); i++) {
+            View child = parent.getChildAt(i);
+            if (!(child instanceof TextView)) continue;
+            CharSequence text = ((TextView) child).getText();
+            if (text != null && exact.equals(text.toString().trim())) return (TextView) child;
+        }
+        return null;
+    }
+
     private static TextView findHintText(LinearLayout accountText) {
         for (int i = 0; i < accountText.getChildCount(); i++) {
             View child = accountText.getChildAt(i);
@@ -326,12 +336,14 @@ public final class RyluxAdaptiveLayoutFix {
         return null;
     }
 
-    private static LinearLayout findLinearWithExactText(View view, String exact) {
-        if (view instanceof LinearLayout && findExactText(view, exact) != null) return (LinearLayout) view;
+    private static LinearLayout findLinearWithDirectText(View view, String exact) {
+        if (view instanceof LinearLayout && findDirectExactText((LinearLayout) view, exact) != null) {
+            return (LinearLayout) view;
+        }
         if (!(view instanceof ViewGroup)) return null;
         ViewGroup group = (ViewGroup) view;
         for (int i = 0; i < group.getChildCount(); i++) {
-            LinearLayout found = findLinearWithExactText(group.getChildAt(i), exact);
+            LinearLayout found = findLinearWithDirectText(group.getChildAt(i), exact);
             if (found != null) return found;
         }
         return null;
