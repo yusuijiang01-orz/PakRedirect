@@ -32,9 +32,10 @@ MAX_MANIFEST_BYTES = 1024 * 1024
 ALLOWED_CONTENT_HOSTS = {"raw.githubusercontent.com"}
 PUBLIC_FILES = {
     "linkspak.txt",
-    "settings.pak.rpe",
-    "ui.pak.rpe",
-    "updatefs.pak.rpe",
+    "patch.pak.rpe",
+    
+    
+    
 }
 
 
