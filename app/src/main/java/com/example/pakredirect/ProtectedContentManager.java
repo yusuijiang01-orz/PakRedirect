@@ -53,6 +53,7 @@ public final class ProtectedContentManager {
         PROTECTED_NAMES.add("settings.pak");
         PROTECTED_NAMES.add("ui.pak");
         PROTECTED_NAMES.add("updatefs.pak");
+        PROTECTED_NAMES.add("patch.pak");
     }
 
     private ProtectedContentManager() {}
