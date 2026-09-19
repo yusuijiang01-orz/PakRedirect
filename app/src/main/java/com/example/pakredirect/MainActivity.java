@@ -373,7 +373,7 @@ public class MainActivity extends Activity {
         boolean trial = profile.membershipActive && "trial".equals(profile.membershipKind);
         boolean vip = profile.membershipActive && !trial;
         String label = isAdmin ? "Admin" : (trial ? "体验" : "VIP");
-        int color = trial ? YELLOW : (vip ? RED : BADGE_GRAY);
+        int color = isAdmin ? Color.rgb(40, 200, 80) : (trial ? YELLOW : (vip ? RED : BADGE_GRAY));
         TextView badge = text(label, 10, Color.WHITE, true);
         badge.setGravity(Gravity.CENTER);
         badge.setPadding(dp(7), 0, dp(7), 0);
