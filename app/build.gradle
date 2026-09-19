@@ -43,7 +43,7 @@ android {
         }
     }
 
-    compileOptions {
+    dependencies {\n        implementation 'androidx.core:core:1.13.1'\n        implementation 'androidx.appcompat:appcompat:1.7.0'\n    }\n\n    compileOptions {
         sourceCompatibility JavaVersion.VERSION_11
         targetCompatibility JavaVersion.VERSION_11
     }
