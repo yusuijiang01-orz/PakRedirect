@@ -16,7 +16,9 @@ import hmac
 import json
 import os
 import secrets
+import shutil
 import struct
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -276,9 +278,20 @@ def decrypt_file(source: Path, output: Path, key: bytes, progress=None) -> None:
     temp.replace(output)
 
 
-def build_package(source_dir: Path, linkspak: Path, output_dir: Path, key_file: Path, chunk_size=DEFAULT_CHUNK, progress=None):
+def rewrite_linkspak(lines: list[str], subdir: str) -> list[str]:
+    if subdir not in ("pak", "pak-test"):
+        raise SystemExit("subdir 只能是 pak 或 pak-test")
+    result = []
+    for line in lines:
+        result.append(line.replace("/main/pak/", f"/main/{subdir}/"))
+    return result
+
+
+def build_package(source_dir: Path, linkspak: Path, output_dir: Path, key_file: Path,
+                  chunk_size=DEFAULT_CHUNK, progress=None, subdir="pak"):
     key = load_key(key_file)
     lines, records = parse_linkspak(linkspak)
+    lines = rewrite_linkspak(lines, subdir)
     revisions = next_revisions(records)
 
     for name in PROTECTED:
@@ -357,6 +370,50 @@ def build_package(source_dir: Path, linkspak: Path, output_dir: Path, key_file: 
     }
 
 
+def run_git(repo_dir: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", *args], cwd=repo_dir, check=False, capture_output=True, text=True,
+        encoding="utf-8", errors="replace"
+    )
+    if result.returncode:
+        detail = (result.stderr or result.stdout).strip()
+        raise SystemExit(f"git {' '.join(args)} 失败: {detail}")
+    return result.stdout.strip()
+
+
+def push_output_to_repo(output_dir: Path, repo_dir: Path, subdir: str) -> str:
+    if subdir not in ("pak", "pak-test"):
+        raise SystemExit("subdir 只能是 pak 或 pak-test")
+    if not (repo_dir / ".git").exists():
+        raise SystemExit(f"GitHub 工作树无效: {repo_dir}")
+    files = [output_dir / name for name in ("settings.pak.rpe", "ui.pak.rpe", "updatefs.pak.rpe", "linkspak.txt", "manifest.json")]
+    missing = [str(path) for path in files if not path.is_file()]
+    if missing:
+        raise SystemExit("部署输出缺少: " + ", ".join(missing))
+
+    had_changes = bool(run_git(repo_dir, "status", "--porcelain"))
+    stashed = False
+    try:
+        if had_changes:
+            run_git(repo_dir, "stash", "push", "--include-untracked", "-m", "RYLUX encrypt-push pre-pull")
+            stashed = True
+        run_git(repo_dir, "pull", "--rebase")
+        target = repo_dir / subdir
+        target.mkdir(parents=True, exist_ok=True)
+        for path in files:
+            shutil.copy2(path, target / path.name)
+        run_git(repo_dir, "add", *(str(Path(subdir) / path.name) for path in files))
+        if run_git(repo_dir, "status", "--porcelain", "--", subdir):
+            run_git(repo_dir, "commit", "-m", f"chore: publish {subdir} localization package")
+            run_git(repo_dir, "push")
+        else:
+            return f"{subdir} 无变化，未创建提交"
+    finally:
+        if stashed:
+            run_git(repo_dir, "stash", "pop")
+    return f"已推送 {subdir} 到 GitHub"
+
+
 def verify_package(output_dir: Path, key_file: Path) -> None:
     key = load_key(key_file)
     manifest = json.loads((output_dir / "manifest.json").read_text(encoding="utf-8"))
@@ -396,6 +453,14 @@ def cli(argv=None) -> int:
     p_enc.add_argument("--output", required=True, type=Path)
     p_enc.add_argument("--key", required=True, type=Path)
     p_enc.add_argument("--chunk-size", type=int, default=DEFAULT_CHUNK)
+    p_enc.add_argument("--subdir", choices=("pak", "pak-test"), default="pak")
+
+    p_push = sub.add_parser("encrypt-push", help="加密、验证并推送到 PakRedirect 工作树")
+    for name in ("source", "linkspak", "output", "key"):
+        p_push.add_argument("--" + name, required=True, type=Path)
+    p_push.add_argument("--repo", required=True, type=Path)
+    p_push.add_argument("--subdir", choices=("pak", "pak-test"), default="pak")
+    p_push.add_argument("--chunk-size", type=int, default=DEFAULT_CHUNK)
 
     p_verify = sub.add_parser("verify", help="完整验证已生成的部署目录")
     p_verify.add_argument("--output", required=True, type=Path)
@@ -422,12 +487,17 @@ def cli(argv=None) -> int:
         print(f"已生成密钥: {args.key}")
         print(f"key_id: {key_id(key)}")
     elif args.command == "encrypt":
-        result = build_package(args.source, args.linkspak, args.output, args.key, args.chunk_size, progress)
+        result = build_package(args.source, args.linkspak, args.output, args.key, args.chunk_size, progress, args.subdir)
         print(f"完成: {result['output']}")
         print(f"version: {result['version']}")
         print(f"key_id: {result['key_id']}")
         for name, rev in result["revisions"].items():
             print(f"{name}: revision {rev}")
+    elif args.command == "encrypt-push":
+        result = build_package(args.source, args.linkspak, args.output, args.key, args.chunk_size, progress, args.subdir)
+        verify_package(args.output, args.key)
+        print(f"完整验证通过: {result['output']}")
+        print(push_output_to_repo(args.output, args.repo, args.subdir))
     elif args.command == "verify":
         verify_package(args.output, args.key)
         print("完整验证通过")
@@ -453,6 +523,7 @@ def gui() -> int:
     source_var = tk.StringVar()
     link_var = tk.StringVar()
     output_var = tk.StringVar()
+    repo_var = tk.StringVar()
     key_var = tk.StringVar()
     status_var = tk.StringVar(value="请选择 PAK 目录、linkspak.txt、输出目录和密钥文件。")
     progress_var = tk.DoubleVar(value=0)
@@ -482,6 +553,7 @@ def gui() -> int:
     path_row("PAK 目录", source_var, "dir")
     path_row("linkspak.txt", link_var, "file")
     path_row("输出目录", output_var, "dir")
+    path_row("PakRedirect 工作树", repo_var, "dir")
     path_row("内容密钥", key_var, "save-key")
 
     buttons = ttk.Frame(frame)
@@ -526,12 +598,14 @@ def gui() -> int:
         log.see("end")
         log.configure(state="disabled")
 
-    def start_encrypt():
+    def start_encrypt(subdir):
         def worker():
+            button = prod_btn if subdir == "pak" else beta_btn
             try:
                 source = Path(source_var.get().strip())
                 link = Path(link_var.get().strip())
-                out = Path(output_var.get().strip())
+                out = Path(output_var.get().strip()) / subdir
+                repo = Path(repo_var.get().strip())
                 key = Path(key_var.get().strip())
                 if not source.is_dir():
                     raise SystemExit("PAK 目录无效")
@@ -539,34 +613,39 @@ def gui() -> int:
                     raise SystemExit("linkspak.txt 无效")
                 if not key.is_file():
                     raise SystemExit("请先生成或选择内容密钥")
-                if not str(out):
+                if not str(output_var.get().strip()):
                     raise SystemExit("请选择输出目录")
+                if not repo.is_dir():
+                    raise SystemExit("请选择 PakRedirect GitHub 工作树")
 
                 def progress(name, done, total):
                     percent = int(done * 100 / total) if total else 100
                     root.after(0, lambda: progress_var.set(percent))
                     root.after(0, lambda: status_var.set(f"正在加密 {name} · {percent}%"))
 
-                root.after(0, lambda: encrypt_btn.configure(state="disabled"))
-                result = build_package(source, link, out, key, DEFAULT_CHUNK, progress)
+                root.after(0, lambda: button.configure(state="disabled"))
+                result = build_package(source, link, out, key, DEFAULT_CHUNK, progress, subdir)
                 verify_package(out, key)
+                push_message = push_output_to_repo(out, repo, subdir)
                 root.after(0, lambda: progress_var.set(100))
                 root.after(0, lambda: status_var.set(f"完成 · version {result['version']} · key_id {result['key_id']}"))
                 root.after(0, lambda: log_line("部署目录: " + result["output"]))
                 for name, rev in result["revisions"].items():
                     root.after(0, lambda n=name, r=rev: log_line(f"{n}: revision {r}"))
-                root.after(0, lambda: log_line("完整解密验证通过。只上传输出目录，不要上传 .key 密钥文件。"))
-                root.after(0, lambda: messagebox.showinfo("完成", "加密与完整验证已完成。\n\n请只把输出目录部署到 VPS protected-content/sg_localization。"))
+                root.after(0, lambda: log_line("完整解密验证通过，" + push_message))
+                root.after(0, lambda: messagebox.showinfo("完成", f"{subdir} 已加密、验证并推送。\n\n密钥文件未复制到 GitHub。"))
             except BaseException as exc:
                 root.after(0, lambda: messagebox.showerror("失败", str(exc)))
                 root.after(0, lambda: status_var.set("加密失败"))
             finally:
-                root.after(0, lambda: encrypt_btn.configure(state="normal"))
+                root.after(0, lambda: button.configure(state="normal"))
 
         threading.Thread(target=worker, daemon=True).start()
 
-    encrypt_btn = ttk.Button(frame, text="加密并完整验证", command=start_encrypt)
-    encrypt_btn.pack(fill="x", ipady=6, pady=(4, 0))
+    prod_btn = ttk.Button(frame, text="加密并验证 + 推送生产 pak", command=lambda: start_encrypt("pak"))
+    prod_btn.pack(fill="x", ipady=6, pady=(4, 0))
+    beta_btn = ttk.Button(frame, text="加密并验证 + 推送内测 pak-test", command=lambda: start_encrypt("pak-test"))
+    beta_btn.pack(fill="x", ipady=6, pady=(6, 0))
 
     root.mainloop()
     return 0
@@ -580,3 +659,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
