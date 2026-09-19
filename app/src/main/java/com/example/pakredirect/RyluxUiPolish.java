@@ -53,6 +53,8 @@ public final class RyluxUiPolish {
     private static final int RED_BORDER = Color.rgb(133, 49, 57);
     private static final int RED_TEXT = Color.rgb(255, 150, 153);
     private static final int YELLOW = Color.rgb(246, 192, 78);
+    private static final int ADMIN_GREEN = Color.rgb(40, 200, 80);
+    private static final int ADMIN_BORDER = Color.rgb(126, 236, 146);
 
     private static final Set<View> HOME_STYLED =
             Collections.newSetFromMap(new WeakHashMap<>());
@@ -156,12 +158,19 @@ public final class RyluxUiPolish {
     private static void styleAvatar(Activity activity, FrameLayout shell) {
         if (!AVATAR_STYLED.add(shell)) return;
 
-        String membership = "VIP";
+        boolean admin = MainActivity.currentRole != null
+                && "admin".equalsIgnoreCase(MainActivity.currentRole.trim());
+        String membership = admin ? "Admin" : "VIP";
         for (int i = 0; i < shell.getChildCount(); i++) {
             View child = shell.getChildAt(i);
             if (child instanceof TextView) {
                 String value = value((TextView) child);
-                if ("体验".equals(value) || "VIP".equals(value)) membership = value;
+                if ("Admin".equalsIgnoreCase(value)) {
+                    admin = true;
+                    membership = "Admin";
+                } else if (!admin && ("体验".equals(value) || "VIP".equals(value))) {
+                    membership = value;
+                }
             }
         }
 
@@ -198,15 +207,15 @@ public final class RyluxUiPolish {
         }
         portraitFrame.addView(portrait, new FrameLayout.LayoutParams(-1, -1));
 
-        boolean trial = "体验".equals(membership);
+        boolean trial = !admin && "体验".equals(membership);
         TextView badge = label(activity, membership, 10, Color.WHITE, true);
         badge.setGravity(Gravity.CENTER);
         badge.setPadding(dp(activity, 8), 0, dp(activity, 8), 0);
         badge.setBackground(round(
                 activity,
-                trial ? Color.rgb(109, 77, 22) : RED,
+                admin ? ADMIN_GREEN : (trial ? Color.rgb(109, 77, 22) : RED),
                 9,
-                trial ? Color.rgb(173, 126, 36) : Color.rgb(255, 104, 106),
+                admin ? ADMIN_BORDER : (trial ? Color.rgb(173, 126, 36) : Color.rgb(255, 104, 106)),
                 1
         ));
         FrameLayout.LayoutParams badgeLp =
@@ -384,7 +393,8 @@ public final class RyluxUiPolish {
         String stateText = value(state);
         state.setTextSize(14);
         state.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        state.setTextColor(stateText.contains("体验") ? YELLOW
+        state.setTextColor(stateText.contains("Admin") ? ADMIN_GREEN
+                : stateText.contains("体验") ? YELLOW
                 : stateText.contains("VIP") ? Color.rgb(255, 102, 112)
                 : MUTED);
         LinearLayout.LayoutParams stateLp = new LinearLayout.LayoutParams(-1, -2);
