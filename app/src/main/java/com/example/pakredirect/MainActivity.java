@@ -279,6 +279,7 @@ public class MainActivity extends Activity {
                         result.membershipActive,
                         result.membershipKind,
                         result.expiresAt,
+                        result.role,
                         ""
                 ));
             });
