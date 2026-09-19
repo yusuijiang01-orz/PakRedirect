@@ -313,7 +313,6 @@ public class MainActivity extends Activity {
                     return;
                 }
                 currentUsername = profile.username;
-        currentRole = profile.role != null ? profile.role : "user";
                 showHome(profile);
             });
         }, "RYLUX-Profile").start();
@@ -321,11 +320,11 @@ public class MainActivity extends Activity {
 
     private void showHome(AuthClient.ProfileResult profile) {
         currentProfile = profile;
+        currentRole = profile.role != null ? profile.role : "user";
         currentMembershipActive = profile.membershipActive;
         currentMembershipKind = profile.membershipKind == null ? "expired" : profile.membershipKind;
         currentExpiresAt = profile.expiresAt;
         currentUsername = profile.username;
-        currentRole = profile.role != null ? profile.role : "user";
         clearTransientViews();
 
         LinearLayout root = baseContent();
@@ -370,9 +369,10 @@ public class MainActivity extends Activity {
     }
 
     private TextView membershipBadge(AuthClient.ProfileResult profile) {
+        boolean isAdmin = "admin".equals(profile.role);
         boolean trial = profile.membershipActive && "trial".equals(profile.membershipKind);
         boolean vip = profile.membershipActive && !trial;
-        String label = trial ? "体验" : "VIP";
+        String label = isAdmin ? "Admin" : (trial ? "体验" : "VIP");
         int color = trial ? YELLOW : (vip ? RED : BADGE_GRAY);
         TextView badge = text(label, 10, Color.WHITE, true);
         badge.setGravity(Gravity.CENTER);

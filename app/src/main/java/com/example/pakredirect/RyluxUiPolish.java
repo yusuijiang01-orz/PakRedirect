@@ -156,12 +156,13 @@ public final class RyluxUiPolish {
     private static void styleAvatar(Activity activity, FrameLayout shell) {
         if (!AVATAR_STYLED.add(shell)) return;
 
-        String membership = "VIP";
+        boolean isAdmin = "admin".equals(MainActivity.currentRole);
+        String membership = isAdmin ? "Admin" : "VIP";
         for (int i = 0; i < shell.getChildCount(); i++) {
             View child = shell.getChildAt(i);
             if (child instanceof TextView) {
                 String value = value((TextView) child);
-                if ("体验".equals(value) || "VIP".equals(value)) membership = value;
+                if ("体验".equals(value) || "VIP".equals(value) || "Admin".equals(value)) membership = isAdmin ? "Admin" : value;
             }
         }
 
@@ -199,6 +200,7 @@ public final class RyluxUiPolish {
         portraitFrame.addView(portrait, new FrameLayout.LayoutParams(-1, -1));
 
         boolean trial = "体验".equals(membership);
+        boolean adminBadge = "Admin".equals(membership);
         TextView badge = label(activity, membership, 10, Color.WHITE, true);
         badge.setGravity(Gravity.CENTER);
         badge.setPadding(dp(activity, 8), 0, dp(activity, 8), 0);

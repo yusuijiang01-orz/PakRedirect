@@ -53,7 +53,6 @@ public final class AuthClient {
             JSONObject user = http.json.optJSONObject("user");
             if (user == null) return ProfileResult.failure("用户数据异常");
             JSONObject membership = user.optJSONObject("membership");
-            String role = user.optString("role", "user");
             return new ProfileResult(
                     true,
                     true,
@@ -61,7 +60,7 @@ public final class AuthClient {
                     membership != null && membership.optBoolean("active", false),
                     membership == null ? "expired" : membership.optString("kind", "expired"),
                     membership == null ? null : nullable(membership.optString("expires_at", null)),
-                    role,
+                    user.optString("role", "user"),
                     ""
             );
         } catch (Throwable t) {
