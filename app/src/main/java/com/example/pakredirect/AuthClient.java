@@ -255,11 +255,11 @@ public final class AuthClient {
         }
 
         static ProfileResult networkError(String message) {
-            return new ProfileResult(false, false, "", false, "expired", null, message);
+            return new ProfileResult(false, false, "", false, "expired", null, "user", message);
         }
 
         static ProfileResult failure(String message) {
-            return new ProfileResult(true, false, "", false, "expired", null, message);
+            return new ProfileResult(true, false, "", false, "expired", null, "user", message);
         }
     }
 
