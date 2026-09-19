@@ -235,7 +235,9 @@ class SetRolePayload(BaseModel):
 def admin_users_batch_renew(payload: BatchRenewPayload, request: Request):
     token = require_ready(request)
     require_csrf(request, token)
-    days = max(1, min(payload.days, 3650))
+    if payload.days not in (7, 30, 90, 180, 365):
+        raise HTTPException(status_code=400, detail="批量续期天数只能是 7/30/90/180/365")
+    days = payload.days
     now = utc_now()
     renewed = []
     with open_db() as db:
