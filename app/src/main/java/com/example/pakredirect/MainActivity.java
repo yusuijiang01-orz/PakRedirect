@@ -320,7 +320,7 @@ public class MainActivity extends Activity {
 
     private void showHome(AuthClient.ProfileResult profile) {
         currentProfile = profile;
-        currentRole = profile.role != null ? profile.role : "user";
+        currentRole = normalizeRole(profile.role);
         currentMembershipActive = profile.membershipActive;
         currentMembershipKind = profile.membershipKind == null ? "expired" : profile.membershipKind;
         currentExpiresAt = profile.expiresAt;
@@ -369,7 +369,7 @@ public class MainActivity extends Activity {
     }
 
     private TextView membershipBadge(AuthClient.ProfileResult profile) {
-        boolean isAdmin = "admin".equals(profile.role);
+        boolean isAdmin = isAdminRole(profile.role);
         boolean trial = profile.membershipActive && "trial".equals(profile.membershipKind);
         boolean vip = profile.membershipActive && !trial;
         String label = isAdmin ? "Admin" : (trial ? "体验" : "VIP");
@@ -558,7 +558,7 @@ public class MainActivity extends Activity {
 
         boolean canLaunch = profile.membershipActive;
         Button start = button(
-                canLaunch ? ("admin".equals(profile.role) ? "▶ 启动内测游戏" : "启动游戏") : "暂时无法使用",
+                canLaunch ? (isAdminRole(profile.role) ? "▶ 启动内测游戏" : "启动游戏") : "暂时无法使用",
                 canLaunch ? PRIMARY : DISABLED,
                 canLaunch ? Color.WHITE : MUTED
         );
@@ -722,7 +722,7 @@ public class MainActivity extends Activity {
                 runOnUiThread(() -> {
                     hideLaunchProgress();
                     button.setEnabled(true);
-                    button.setText("admin".equals(currentRole) ? "▶ 启动内测游戏" : "启动游戏");
+                    button.setText(isAdminRole(currentRole) ? "▶ 启动内测游戏" : "启动游戏");
                     toast(result.message);
                     if (result.requestOk) refreshProfile(false);
                 });
@@ -761,7 +761,7 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> {
                 hideLaunchProgress();
                 button.setEnabled(true);
-                button.setText("admin".equals(currentRole) ? "▶ 启动内测游戏" : "启动游戏");
+                button.setText(isAdminRole(currentRole) ? "▶ 启动内测游戏" : "启动游戏");
                 if (!launchGame()) toast("服务已启动，但未找到封神榜游戏启动入口");
             });
         }, "RYLUX-Module-Authorize").start();
@@ -885,7 +885,7 @@ public class MainActivity extends Activity {
         runOnUiThread(() -> {
             hideLaunchProgress();
             button.setEnabled(currentMembershipActive);
-            button.setText(currentMembershipActive ? ("admin".equals(currentRole) ? "▶ 启动内测游戏" : "启动游戏") : "暂时无法使用");
+            button.setText(currentMembershipActive ? (isAdminRole(currentRole) ? "▶ 启动内测游戏" : "启动游戏") : "暂时无法使用");
             toast(message);
         });
     }
@@ -1142,14 +1142,24 @@ public class MainActivity extends Activity {
     }
 
     private TextView membershipStateText(AuthClient.ProfileResult profile) {
+        boolean admin = isAdminRole(profile.role);
         boolean trial = profile.membershipActive && "trial".equals(profile.membershipKind);
-        String label = trial ? "24 小时体验" : (profile.membershipActive ? "VIP 会员" : "使用时间已到期");
-        int color = trial ? YELLOW : (profile.membershipActive ? GREEN : RED);
+        String label = admin ? "Admin 内测账号"
+                : (trial ? "24 小时体验" : (profile.membershipActive ? "VIP 会员" : "使用时间已到期"));
+        int color = admin ? GREEN : (trial ? YELLOW : (profile.membershipActive ? GREEN : RED));
         TextView v = text(label, 14, color, true);
         v.setPadding(0, 0, 0, dp(6));
         return v;
     }
 
+    private static String normalizeRole(String role) {
+        String value = role == null ? "" : role.trim().toLowerCase(Locale.US);
+        return "admin".equals(value) ? "admin" : "user";
+    }
+
+    private static boolean isAdminRole(String role) {
+        return "admin".equals(normalizeRole(role));
+    }
     private Button button(String label, int bg, int fg) {
         Button b = new Button(this);
         b.setText(label);
