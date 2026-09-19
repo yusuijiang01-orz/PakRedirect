@@ -1,4 +1,4 @@
-import base64
+﻿import base64
 import hashlib
 import hmac
 import json
@@ -27,6 +27,14 @@ MANIFEST_URL = os.environ.get(
 DOWNLOAD_BASE_URL = os.environ.get(
     "RYLUX_PROTECTED_DOWNLOAD_BASE_URL",
     "https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/pak/",
+).strip()
+BETA_DOWNLOAD_BASE_URL = os.environ.get(
+    "RYLUX_PROTECTED_BETA_DOWNLOAD_BASE_URL",
+    "https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/pak-test/",
+).strip()
+BETA_MANIFEST_URL = os.environ.get(
+    "RYLUX_PROTECTED_BETA_MANIFEST_URL",
+    "https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/pak-test/manifest.json",
 ).strip()
 MAX_MANIFEST_BYTES = 1024 * 1024
 ALLOWED_CONTENT_HOSTS = {"raw.githubusercontent.com"}
@@ -116,9 +124,9 @@ def _fetch_manifest_bytes() -> bytes:
     return data
 
 
-def _load_manifest(module_code: str) -> tuple[dict, dict, bytes]:
+def _load_manifest(module_code: str, beta: bool = False) -> tuple[dict, dict, bytes]:
     _module_guard(module_code)
-    raw = _fetch_manifest_bytes()
+    raw = _fetch_manifest_bytes(beta)
     try:
         outer = json.loads(raw.decode("utf-8"))
         if int(outer.get("schema", 0)) != 1:

@@ -1,4 +1,4 @@
-from datetime import timezone
+﻿from datetime import timezone, timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
@@ -220,3 +220,67 @@ def admin_user_delete(user_id: int, request: Request):
         request_ip(request),
     )
     return {"ok": True, "username": username}
+
+
+class BatchRenewPayload(BaseModel):
+    user_ids: list[int]
+    days: int
+
+
+class SetRolePayload(BaseModel):
+    role: str = Field(min_length=2, max_length=16)
+
+
+@router.post("/admin/api/users/batch-renew")
+def admin_users_batch_renew(payload: BatchRenewPayload, request: Request):
+    token = require_ready(request)
+    require_csrf(request, token)
+    days = max(1, min(payload.days, 3650))
+    now = utc_now()
+    renewed = []
+    with open_db() as db:
+        for uid in payload.user_ids:
+            row = db.execute(
+                "SELECT id,username,vip_expires_at FROM app_users WHERE id=?",
+                (uid,),
+            ).fetchone()
+            if row is None:
+                continue
+            old_expiry = parse_iso(row["vip_expires_at"])
+            if old_expiry is None or old_expiry < now:
+                old_expiry = now
+            new_expiry = old_expiry + timedelta(days=days)
+            old_text = row["vip_expires_at"]
+            new_text = iso(new_expiry)
+            db.execute(
+                "UPDATE app_users SET vip_expires_at=?,updated_at=? WHERE id=?",
+                (new_text, iso(now), uid),
+            )
+            db.execute(
+                "INSERT INTO vip_events(user_id,source,duration_seconds,reference,old_expires_at,new_expires_at,created_at) VALUES(?,?,?,?,?,?,?)",
+                (uid, "admin_batch", days * 86400, "batch-renew", old_text, new_text, iso(now)),
+            )
+            renewed.append({"id": uid, "username": row["username"], "expires_at": new_text})
+        db.commit()
+    log_action("user_batch_renew", f"count={len(renewed)}", f"days={days}", request_ip(request))
+    return {"ok": True, "renewed": renewed, "count": len(renewed)}
+
+
+@router.post("/admin/api/users/{user_id}/set-role")
+def admin_user_set_role(user_id: int, payload: SetRolePayload, request: Request):
+    token = require_ready(request)
+    require_csrf(request, token)
+    role = payload.role.strip()
+    if role not in ("admin", "user"):
+        raise HTTPException(status_code=400, detail="角色只能是 admin 或 user")
+    with open_db() as db:
+        row = db.execute("SELECT id,username FROM app_users WHERE id=?", (user_id,)).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="用户不存在")
+        db.execute(
+            "UPDATE app_users SET role=?,updated_at=? WHERE id=?",
+            (role, iso(utc_now()), user_id),
+        )
+        db.commit()
+    log_action("user_role_set", f"user:{user_id}", f"role={role}", request_ip(request))
+    return {"ok": True, "role": role}

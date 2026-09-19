@@ -1,4 +1,4 @@
-(()=>{
+﻿(()=>{
   "use strict";
 
   function ensureSessionModal(){
@@ -212,6 +212,63 @@
     }catch(e){alertMsg(e.message,"error")}
   }
 
+  let selectedIds = new Set();
+
+  function renderBatchBar(){
+    let bar = document.getElementById("batchBar");
+    if(!bar){
+      bar = document.createElement("div");
+      bar.id = "batchBar";
+      bar.style.cssText = "margin:12px 0;padding:10px 14px;background:#e8f0fe;border-radius:8px;display:none;align-items:center;gap:12px;";
+      document.querySelector(".toolbar, .filters, main")?.prepend(bar);
+    }
+    const n = selectedIds.size;
+    bar.style.display = n > 0 ? "flex" : "none";
+    bar.innerHTML = `已选 <strong>${n}</strong> 个用户
+      <button class="btn btn-primary btn-sm" id="batchRenewBtn">批量续期 30 天</button>
+      <button class="btn btn-secondary btn-sm" id="batchRoleBtn">设为管理员</button>
+      <button class="btn btn-ghost btn-sm" id="batchClearBtn">取消选择</button>`;
+    document.getElementById("batchRenewBtn").onclick = () => batchRenew(30);
+    document.getElementById("batchRoleBtn").onclick = () => batchSetRole("admin");
+    document.getElementById("batchClearBtn").onclick = () => { selectedIds.clear(); renderBatchBar(); enhanceRows(); };
+  }
+
+  async function batchRenew(days){
+    if(!selectedIds.size) return;
+    const ok = await openActionDialog({
+      title: "批量续期",
+      subtitle: `将 ${selectedIds.size} 个用户各延长 ${days} 天`,
+      confirmText: "确认续期",
+      bodyHtml: `<div class="alert alert-warn" style="margin-top:0">每个用户在当前到期时间基础上延长 ${days} 天。</div>`
+    });
+    if(!ok) return;
+    try{
+      const ids = [...selectedIds];
+      const d = await api("/admin/api/users/batch-renew", {method:"POST", body:{user_ids:ids, days:days}});
+      alertMsg(`已为 ${d.count} 个用户续期 ${days} 天`);
+      selectedIds.clear();
+      loadUsers();
+    }catch(e){alertMsg(e.message,"error")}
+  }
+
+  async function batchSetRole(role){
+    if(!selectedIds.size) return;
+    const ok = await openActionDialog({
+      title: "设置角色",
+      subtitle: `将 ${selectedIds.size} 个用户设为${role === "admin" ? "管理员（内测补丁）" : "普通用户"}`,
+      confirmText: "确认",
+      bodyHtml: `<div class="alert alert-info" style="margin-top:0">管理员可使用内测补丁（pak-test 路径）。</div>`
+    });
+    if(!ok) return;
+    try{
+      for(const uid of selectedIds){
+        await api(`/admin/api/users/${uid}/set-role`, {method:"POST", body:{role:role}});
+      }
+      alertMsg(`已设置 ${selectedIds.size} 个用户角色`);
+      selectedIds.clear();
+      loadUsers();
+    }catch(e){alertMsg(e.message,"error")}
+  }
   function enhanceRows(){
     const body=document.getElementById("userBody");
     if(!body)return;
