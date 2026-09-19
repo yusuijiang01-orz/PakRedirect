@@ -565,7 +565,7 @@ public final class RyluxUiPolish {
         panel.addView(mirrorButton, mirrorLp);
 
         stylePrimaryButton(activity, startButton);
-        startButton.setText(startButton.isEnabled() ? "▶  启动游戏" : startButton.getText());
+        startButton.setText(startButton.isEnabled() ? ("admin".equals(MainActivity.currentRole) ? "▶  启动内测游戏" : "▶  启动游戏") : startButton.getText());
         LinearLayout.LayoutParams startLp =
                 new LinearLayout.LayoutParams(-1, dp(activity, 56));
         startLp.topMargin = dp(activity, 12);
