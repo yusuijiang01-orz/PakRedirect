@@ -1,4 +1,4 @@
-const state={csrf:"",username:"",mustChange:false,view:"overview",licensePage:1,licensePages:1,userPage:1,userPages:1,logPage:1,logPages:1,days:30,revealKeys:false};
+const state={csrf:"",username:"",mustChange:false,view:"overview",licensePage:1,licensePages:1,userPage:1,userPages:1,logPage:1,logPages:1,days:30,revealKeys:false,selectedUserIds:new Set()};
 
 const $=(id)=>document.getElementById(id);
 const qs=(s,root=document)=>root.querySelector(s);
@@ -10,8 +10,9 @@ function badge(s){
   const map={active:["有效","badge-active"],disabled:["已禁用","badge-disabled"],expired:["已到期","badge-expired"]};
   const [t,c]=map[s]||[s,""];return `<span class="badge ${c}">${t}</span>`;
 }
-function membershipBadge(m,enabled=true){
+function membershipBadge(m,enabled=true,role="user"){
   if(!enabled)return `<span class="badge badge-disabled">账号禁用</span>`;
+  if(role==="admin")return `<span class="badge badge-admin">Admin · 内测</span>`;
   if(!m||!m.active)return `<span class="badge badge-expired">已到期</span>`;
   if(m.kind==="trial")return `<span class="badge badge-expired">24h 体验</span>`;
   return `<span class="badge badge-active">VIP 有效</span>`;
@@ -64,18 +65,19 @@ async function loadUsers(){
     const q=encodeURIComponent($("userSearchInput").value.trim()),status=encodeURIComponent($("userStatusFilter").value);
     const d=await api(`/admin/api/users?q=${q}&status=${status}&page=${state.userPage}&page_size=30`);state.userPages=d.pages;
     $("userBody").innerHTML=d.items.length?d.items.map(r=>`<tr>
-      <td>#${r.id}</td><td><strong>${esc(r.username)}</strong></td><td>${membershipBadge(r.membership,r.enabled)}</td>
+      <td><label><input type="checkbox" data-user-check="${r.id}" ${state.selectedUserIds.has(Number(r.id))?"checked":""}> #${r.id}</label></td><td><strong>${esc(r.username)}</strong></td><td>${r.role==="admin"?'<span class="badge badge-admin">Admin</span>':'<span class="muted">普通用户</span>'}</td><td>${membershipBadge(r.membership,r.enabled,r.role)}
       <td>${fmt(r.membership.expires_at)}</td><td>${fmt(r.created_at)}</td><td>${fmt(r.last_login_at)}</td><td>${esc(r.last_login_ip||"-")}</td><td>${r.login_count}</td>
       <td><div class="actions">
         <button class="btn ${r.enabled?"btn-danger":"btn-success"} btn-sm" data-user-toggle="${r.id}" data-enabled="${r.enabled?0:1}">${r.enabled?"禁用":"启用"}</button>
         <select class="select" data-user-extend-select="${r.id}"><option value="1">+1天</option><option value="7">+7天</option><option value="30" selected>+30天</option><option value="90">+90天</option><option value="180">+180天</option><option value="365">+365天</option></select>
         <button class="btn btn-secondary btn-sm" data-user-extend="${r.id}">续期</button>
-      </div></td></tr>`).join(""):`<tr><td class="empty" colspan="9">暂无匹配用户</td></tr>`;
+      </div></td></tr>`).join(""):`<tr><td class="empty" colspan="10">暂无匹配用户</td></tr>`;
     $("userPagerInfo").textContent=`第 ${d.page} / ${d.pages} 页 · 共 ${d.total} 个用户`;
-    $("userPrevBtn").disabled=state.userPage<=1;$("userNextBtn").disabled=state.userPage>=state.userPages;bindUserActions();
+    $("userPrevBtn").disabled=state.userPage<=1;$("userNextBtn").disabled=state.userPage>=state.userPages;bindUserActions();updateUserBatchControls();
   }catch(e){alertMsg(e.message,"error")}
 }
 function bindUserActions(){
+  qsa("[data-user-check]").forEach(c=>c.onchange=()=>{const id=Number(c.dataset.userCheck);if(c.checked)state.selectedUserIds.add(id);else state.selectedUserIds.delete(id);updateUserBatchControls()});
   qsa("[data-user-toggle]").forEach(b=>b.onclick=async()=>{
     try{await api(`/admin/api/users/${b.dataset.userToggle}/toggle`,{method:"POST",body:{enabled:b.dataset.enabled==="1"}});alertMsg("用户状态已更新");loadUsers();loadOverview()}
     catch(e){alertMsg(e.message,"error")}
@@ -87,7 +89,27 @@ function bindUserActions(){
     catch(e){alertMsg(e.message,"error")}
   });
 }
-
+function updateUserBatchControls(){
+  const n=state.selectedUserIds.size;
+  $("userSelectedInfo").textContent=`已选 ${n} 个`;
+  ["userBatchRenewBtn","userBatchAdminBtn","userBatchUserBtn"].forEach(id=>$(id).disabled=n===0);
+  const boxes=qsa("[data-user-check]");
+  $("userSelectAll").checked=boxes.length>0&&boxes.every(x=>x.checked);
+  $("userSelectAll").indeterminate=boxes.some(x=>x.checked)&&!$("userSelectAll").checked;
+}
+async function batchRenewUsers(){
+  const ids=[...state.selectedUserIds],days=Number($("userBatchDays").value);
+  if(!ids.length||!confirm(`确认给 ${ids.length} 个用户各增加 ${days} 天使用时间？`))return;
+  try{const d=await api("/admin/api/users/batch-renew",{method:"POST",body:{user_ids:ids,days}});
+  alertMsg(`已为 ${d.count} 个用户续期 ${days} 天`);state.selectedUserIds.clear();loadUsers();loadOverview()}catch(e){alertMsg(e.message,"error")}
+}
+async function batchSetUserRole(role){
+  const ids=[...state.selectedUserIds];if(!ids.length)return;
+  const label=role==="admin"?"管理员":"普通用户";
+  if(!confirm(`确认将 ${ids.length} 个用户设为${label}？`))return;
+  try{for(const id of ids)await api(`/admin/api/users/${id}/set-role`,{method:"POST",body:{role}});
+  alertMsg(`已设置 ${ids.length} 个用户为${label}`);state.selectedUserIds.clear();loadUsers()}catch(e){alertMsg(e.message,"error")}
+}
 function keyCell(r){
   if(!state.revealKeys)return `<span class="code">***${esc(r.key_hint)}</span>`;
   if(!r.key_available||!r.key_value)return `<span class="code">***${esc(r.key_hint)}</span><div class="muted">历史记录不可恢复</div>`;
@@ -140,6 +162,7 @@ function bind(){
   $("prevBtn").onclick=()=>{if(state.licensePage>1){state.licensePage--;loadLicenses()}};$("nextBtn").onclick=()=>{if(state.licensePage<state.licensePages){state.licensePage++;loadLicenses()}};
   $("userSearchBtn").onclick=()=>{state.userPage=1;loadUsers()};$("userResetBtn").onclick=()=>{$("userSearchInput").value="";$("userStatusFilter").value="";state.userPage=1;loadUsers()};$("userSearchInput").addEventListener("keydown",e=>{if(e.key==="Enter")$("userSearchBtn").click()});
   $("userPrevBtn").onclick=()=>{if(state.userPage>1){state.userPage--;loadUsers()}};$("userNextBtn").onclick=()=>{if(state.userPage<state.userPages){state.userPage++;loadUsers()}};
+  $("userSelectAll").onchange=()=>{qsa("[data-user-check]").forEach(c=>{c.checked=$("userSelectAll").checked;const id=Number(c.dataset.userCheck);if(c.checked)state.selectedUserIds.add(id);else state.selectedUserIds.delete(id)});updateUserBatchControls()};$("userBatchRenewBtn").onclick=batchRenewUsers;$("userBatchAdminBtn").onclick=()=>batchSetUserRole("admin");$("userBatchUserBtn").onclick=()=>batchSetUserRole("user");
   $("logPrevBtn").onclick=()=>{if(state.logPage>1){state.logPage--;loadLogs()}};$("logNextBtn").onclick=()=>{if(state.logPage<state.logPages){state.logPage++;loadLogs()}};$("credentialForm").addEventListener("submit",saveCredentials);
   $("exportBtn").onclick=()=>{const q=encodeURIComponent($("searchInput").value.trim()),s=encodeURIComponent($("statusFilter").value);location.href=`/admin/api/licenses/export.csv?q=${q}&status=${s}`};qsa(".modal-backdrop").forEach(m=>m.addEventListener("click",e=>{if(e.target===m)closeModal(m.id)}));
 }

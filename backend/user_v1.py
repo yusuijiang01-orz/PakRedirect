@@ -148,6 +148,7 @@ def init_user_v1() -> None:
                 username_key TEXT NOT NULL UNIQUE,
                 password_hash TEXT NOT NULL,
                 status INTEGER NOT NULL DEFAULT 1,
+                role TEXT NOT NULL DEFAULT 'user',
                 vip_level INTEGER NOT NULL DEFAULT 1,
                 vip_expires_at TEXT NOT NULL,
                 trial_started_at TEXT NOT NULL,
@@ -229,6 +230,15 @@ def init_user_v1() -> None:
             db.execute("ALTER TABLE licenses ADD COLUMN redeemed_by_user_id INTEGER")
         if "redeemed_at" not in license_columns:
             db.execute("ALTER TABLE licenses ADD COLUMN redeemed_at TEXT")
+
+        user_columns = {
+            row["name"] for row in db.execute("PRAGMA table_info(app_users)").fetchall()
+        }
+        if "role" not in user_columns:
+            db.execute("ALTER TABLE app_users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
+        db.execute(
+            "UPDATE app_users SET role='user' WHERE role IS NULL OR role NOT IN ('user','admin')"
+        )
 
         plans = [
             ("7d", "7 天", 7, 1, 10),
@@ -334,6 +344,7 @@ def serialize_user(row) -> dict:
     return {
         "id": int(user["id"]),
         "username": user["username"],
+        "role": user.get("role", "user") or "user",
         "enabled": bool(user["status"]),
         "membership": m,
         "created_at": user["created_at"],
@@ -416,6 +427,7 @@ def register(payload: RegisterPayload, request: Request):
         "user": {
             "id": user_id,
             "username": username,
+            "role": "user",
             "membership": {
                 "active": True,
                 "kind": "trial",
