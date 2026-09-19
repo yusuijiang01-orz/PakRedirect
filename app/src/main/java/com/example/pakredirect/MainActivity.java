@@ -69,6 +69,7 @@ public class MainActivity extends Activity {
     private String currentMembershipKind = "expired";
     private String currentExpiresAt;
     private AuthClient.ProfileResult currentProfile;
+    public static String currentRole = "user";
     private boolean registerMode;
 
     private EditText usernameEdit;
@@ -311,6 +312,7 @@ public class MainActivity extends Activity {
                     return;
                 }
                 currentUsername = profile.username;
+        currentRole = profile.role != null ? profile.role : "user";
                 showHome(profile);
             });
         }, "RYLUX-Profile").start();
@@ -322,6 +324,7 @@ public class MainActivity extends Activity {
         currentMembershipKind = profile.membershipKind == null ? "expired" : profile.membershipKind;
         currentExpiresAt = profile.expiresAt;
         currentUsername = profile.username;
+        currentRole = profile.role != null ? profile.role : "user";
         clearTransientViews();
 
         LinearLayout root = baseContent();
@@ -554,7 +557,7 @@ public class MainActivity extends Activity {
 
         boolean canLaunch = profile.membershipActive;
         Button start = button(
-                canLaunch ? "启动游戏" : "暂时无法使用",
+                canLaunch ? ("admin".equals(profile.role) ? "▶ 启动内测游戏" : "启动游戏") : "暂时无法使用",
                 canLaunch ? PRIMARY : DISABLED,
                 canLaunch ? Color.WHITE : MUTED
         );
@@ -718,7 +721,7 @@ public class MainActivity extends Activity {
                 runOnUiThread(() -> {
                     hideLaunchProgress();
                     button.setEnabled(true);
-                    button.setText("启动游戏");
+                    button.setText("admin".equals(currentRole) ? "▶ 启动内测游戏" : "启动游戏");
                     toast(result.message);
                     if (result.requestOk) refreshProfile(false);
                 });
@@ -757,7 +760,7 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> {
                 hideLaunchProgress();
                 button.setEnabled(true);
-                button.setText("启动游戏");
+                button.setText("admin".equals(currentRole) ? "▶ 启动内测游戏" : "启动游戏");
                 if (!launchGame()) toast("服务已启动，但未找到封神榜游戏启动入口");
             });
         }, "RYLUX-Module-Authorize").start();
@@ -881,7 +884,7 @@ public class MainActivity extends Activity {
         runOnUiThread(() -> {
             hideLaunchProgress();
             button.setEnabled(currentMembershipActive);
-            button.setText(currentMembershipActive ? "启动游戏" : "暂时无法使用");
+            button.setText(currentMembershipActive ? ("admin".equals(currentRole) ? "▶ 启动内测游戏" : "启动游戏") : "暂时无法使用");
             toast(message);
         });
     }
