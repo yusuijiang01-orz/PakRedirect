@@ -30,9 +30,19 @@ public final class CnDownloadRouter {
     }
 
     public static String[] publicRepoFileUrls(String path) {
-        String safePath = normalizeRepoPath(path);
-        String raw = "https://raw.githubusercontent.com/" + OWNER_REPO + "/" + BRANCH + "/" + safePath;
-        String jsdelivr = "https://cdn.jsdelivr.net/gh/" + OWNER_REPO + "@" + BRANCH + "/" + safePath;
+        return publicRepoFileUrls(
+                "https://raw.githubusercontent.com/" + OWNER_REPO + "/" + BRANCH + "/pak/",
+                path
+        );
+    }
+
+    /** Build mirrors from the directory selected by the authorized manifest. */
+    public static String[] publicRepoFileUrls(String baseUrl, String fileName) {
+        String base = baseUrl == null ? "" : baseUrl.trim();
+        if (!base.endsWith("/")) base += "/";
+        String safeName = normalizeRepoPath(fileName);
+        String raw = base + safeName;
+        String jsdelivr = jsdelivrUrl(base, safeName);
         return unique(accelerated(raw), jsdelivr, raw);
     }
 
@@ -45,6 +55,13 @@ public final class CnDownloadRouter {
         while (value.startsWith("/")) value = value.substring(1);
         if (value.contains("..")) throw new IllegalArgumentException("Invalid repository path");
         return value;
+    }
+
+    private static String jsdelivrUrl(String rawBase, String fileName) {
+        String prefix = "https://raw.githubusercontent.com/" + OWNER_REPO + "/";
+        if (!rawBase.startsWith(prefix)) return "";
+        String relativeBase = rawBase.substring(prefix.length());
+        return "https://cdn.jsdelivr.net/gh/" + OWNER_REPO + "@" + relativeBase + fileName;
     }
 
     private static String[] unique(String... values) {
