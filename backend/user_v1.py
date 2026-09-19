@@ -288,7 +288,7 @@ def require_user(authorization: str | None):
             """
             SELECT s.id AS session_id,s.user_id,s.expires_at,
                    u.username,u.status,u.vip_level,u.vip_expires_at,u.trial_expires_at,
-                   u.last_login_at,u.last_login_ip
+                   u.last_login_at,u.last_login_ip,u.role
             FROM app_sessions s
             JOIN app_users u ON u.id=s.user_id
             WHERE s.token_hash=? AND s.revoked=0 AND s.expires_at>?
@@ -762,3 +762,4 @@ def admin_user_extend(user_id: int, payload: UserExtendPayload, request: Request
         request_ip(request),
     )
     return {"ok": True, "expires_at": iso(new_exp)}
+

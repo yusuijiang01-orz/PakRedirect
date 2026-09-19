@@ -91,8 +91,8 @@ def _validated_https_url(value: str, *, require_trailing_slash: bool = False) ->
     return value
 
 
-def _fetch_manifest_bytes() -> bytes:
-    url = _validated_https_url(MANIFEST_URL)
+def _fetch_manifest_bytes(beta: bool = False) -> bytes:
+    url = _validated_https_url(BETA_MANIFEST_URL if beta else MANIFEST_URL)
     request = urllib.request.Request(
         url,
         method="GET",
@@ -244,9 +244,10 @@ def protected_manifest(
     request: Request,
     authorization: str | None = Header(default=None),
 ):
-    _require_module_access(module_code, request, authorization, True)
+    auth, m = _require_module_access(module_code, request, authorization, True)
+    is_admin = auth.get("role") == "admin"
     key = _content_key()
-    outer, manifest_payload, payload_bytes = _load_manifest(module_code)
+    outer, manifest_payload, payload_bytes = _load_manifest(module_code, beta=is_admin)
     _validate_manifest_key(outer, payload_bytes, key)
 
     allowed = _allowed_downloads(manifest_payload)
@@ -256,6 +257,7 @@ def protected_manifest(
     public_key = _load_public_key(payload.device_public_key)
     wrapped_key = _wrap_key(public_key, key)
 
+    base_url = BETA_DOWNLOAD_BASE_URL if is_admin else DOWNLOAD_BASE_URL
     return {
         "schema": 1,
         "module": module_code,
@@ -265,7 +267,7 @@ def protected_manifest(
         "wrapped_key": wrapped_key,
         "version": manifest_payload.get("version", ""),
         "download_base_url": _validated_https_url(
-            DOWNLOAD_BASE_URL, require_trailing_slash=True
+            base_url, require_trailing_slash=True
         ),
     }
 
@@ -286,3 +288,4 @@ def protected_file(module_code: str, file_name: str):
     response.headers["Cache-Control"] = "no-store, max-age=0"
     response.headers["X-Content-Type-Options"] = "nosniff"
     return response
+
