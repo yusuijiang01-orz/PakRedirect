@@ -43,12 +43,13 @@ android {
         }
     }
 
-    dependencies {
-        implementation 'androidx.core:core:1.13.1'
-    }
-
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_11
         targetCompatibility JavaVersion.VERSION_11
     }
 }
+
+dependencies {
+    implementation 'androidx.core:core:1.13.1'
+}
+
