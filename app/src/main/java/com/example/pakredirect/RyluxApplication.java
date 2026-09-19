@@ -16,6 +16,7 @@ public class RyluxApplication extends Application {
                     RyluxUiPolish.attach(activity);
                     RyluxResponsiveTuner.attach(activity);
                     GameInstallAndMirrorHelper.onActivityResumed(activity);
+                    QqMirrorImportHelper.attach(activity);
                     GameApkCloudInstaller.onActivityResumed(activity);
                     RyluxHomeNavigationPolish.attach(activity);
                     RyluxAdaptiveLayoutFix.attach(activity);
@@ -37,6 +38,7 @@ public class RyluxApplication extends Application {
                     RyluxAdaptiveLayoutFix.detach(activity);
                     RyluxHomeNavigationPolish.detach(activity);
                     GameApkCloudInstaller.detach(activity);
+                    QqMirrorImportHelper.detach(activity);
                     GameInstallAndMirrorHelper.detach(activity);
                     RyluxResponsiveTuner.detach(activity);
                     RyluxUiPolish.detach(activity);
