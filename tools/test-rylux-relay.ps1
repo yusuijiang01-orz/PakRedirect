@@ -2,7 +2,7 @@ param(
     [string]$Url = "wss://relay.lovenom.eu.org/rylux-game"
 )
 
-$Url = $Url -replace '\\://', '://'
+$Url = $Url -replace '\\+://', '://'
 $secure = Read-Host "Enter RYLUX_RELAY_TOKEN" -AsSecureString
 $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
 try {
@@ -14,7 +14,7 @@ try {
 Write-Host "Testing relay: $Url"
 
 $curlArgs = @(
-    "-i", "--http1.1", "--max-time", "12", $Url,
+    "--dump-header", "-", "--output", "NUL", "--http1.1", "--max-time", "12", $Url,
     "-H", "Authorization: Bearer $token",
     "-H", "Connection: Upgrade",
     "-H", "Upgrade: websocket",
@@ -34,11 +34,17 @@ try {
     Write-Host ("WebSocket state: " + $socket.State)
     if ($socket.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
         Write-Host "Relay handshake succeeded; target TCP is reachable."
-        $socket.CloseAsync(
-            [System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure,
-            "smoke test",
-            [Threading.CancellationToken]::None
-        ).GetAwaiter().GetResult()
+        # The target may send binary data immediately after the 101 response.
+        # CloseOutputAsync avoids waiting for a close frame while that data is in flight.
+        try {
+            $socket.CloseOutputAsync(
+                [System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure,
+                "smoke test",
+                [Threading.CancellationToken]::None
+            ).GetAwaiter().GetResult()
+        } catch {
+            Write-Host "WebSocket closed after successful handshake."
+        }
         exit 0
     }
     exit 1

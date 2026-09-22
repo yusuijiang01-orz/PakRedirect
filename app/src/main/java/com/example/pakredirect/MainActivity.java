@@ -10,6 +10,7 @@ import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import android.net.VpnService;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
@@ -43,6 +44,7 @@ public class MainActivity extends Activity {
     private static final String TARGET_PACKAGE = "com.tepaylink.tamgioiphantranhmobile";
     private static final String MODULE_CODE = "sg_localization";
     private static final int REQUEST_MIRROR_PACK = 4107;
+    private static final int REQUEST_VPN_PERMISSION = 4108;
     private static final String GAME_NAME = "封神榜(越南版)";
     private static final String GAME_DESCRIPTION = "越南版封神榜，RYLUX 提供本地汉化、资源校验与本地 PAK 接管。";
     private static final String GAME_LAST_UPDATED = "2026-09-01";
@@ -90,6 +92,7 @@ public class MainActivity extends Activity {
     private TextView mirrorStatusView;
     private Button mirrorSelectButton;
     private volatile String launchWaitError = "";
+    private Button pendingVpnButton;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -118,6 +121,17 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_VPN_PERMISSION) {
+            Button button = pendingVpnButton;
+            pendingVpnButton = null;
+            if (button == null) return;
+            if (resultCode != RESULT_OK) {
+                resetStartButton(button, "未获得 VPN 权限，未启动游戏 relay");
+                return;
+            }
+            beginModuleLaunch(button);
+            return;
+        }
         if (requestCode != REQUEST_MIRROR_PACK || resultCode != RESULT_OK || data == null) return;
         Uri uri = data.getData();
         if (uri == null) return;
@@ -722,12 +736,30 @@ public class MainActivity extends Activity {
                 return;
             }
 
-            LaunchProgress.begin("正在检查封神榜资源更新…");
-            runOnUiThread(() -> {
-                button.setText("正在准备资源…");
-                showLaunchProgress("正在检查封神榜资源更新…", -1);
-            });
+            runOnUiThread(() -> requestRelayVpn(button));
+        }, "RYLUX-Module-Authorize").start();
+    }
 
+    private void requestRelayVpn(Button button) {
+        try {
+            Intent prepare = VpnService.prepare(this);
+            if (prepare != null) {
+                pendingVpnButton = button;
+                startActivityForResult(prepare, REQUEST_VPN_PERMISSION);
+                return;
+            }
+            beginModuleLaunch(button);
+        } catch (Throwable t) {
+            resetStartButton(button, "无法请求 VPN 权限：" + safeMessage(t));
+        }
+    }
+
+    private void beginModuleLaunch(Button button) {
+        LaunchProgress.begin("正在检查封神榜资源更新…");
+        button.setText("正在准备资源…");
+        showLaunchProgress("正在检查封神榜资源更新…", -1);
+
+        new Thread(() -> {
             try {
                 Intent service = new Intent(this, InterceptService.class)
                         .setAction(InterceptService.ACTION_START);
@@ -747,12 +779,59 @@ public class MainActivity extends Activity {
             }
 
             runOnUiThread(() -> {
+                button.setText("正在启动游戏 relay…");
+                showLaunchProgress("正在启动游戏 relay…", -1);
+            });
+            try {
+                Intent relay = new Intent(this, RelayVpnService.class)
+                        .setAction(RelayVpnService.ACTION_START);
+                if (Build.VERSION.SDK_INT >= 26) startForegroundService(relay);
+                else startService(relay);
+            } catch (Throwable t) {
+                stopRelayVpn();
+                resetStartButton(button, "relay 启动失败：" + safeMessage(t));
+                return;
+            }
+
+            if (!waitForRelayReady()) {
+                String message = RelayVpnService.error();
+                if (message == null || message.trim().isEmpty()) message = "游戏 relay 健康检查失败";
+                stopRelayVpn();
+                resetStartButton(button, message);
+                return;
+            }
+
+            runOnUiThread(() -> {
                 hideLaunchProgress();
                 button.setEnabled(true);
                 button.setText(isAdminRole(currentRole) ? "▶ 启动内测游戏" : "启动游戏");
                 if (!launchGame()) toast("服务已启动，但未找到封神榜游戏启动入口");
             });
-        }, "RYLUX-Module-Authorize").start();
+        }, "RYLUX-Module-Launch").start();
+    }
+
+    private boolean waitForRelayReady() {
+        long deadline = System.currentTimeMillis() + 30_000L;
+        while (System.currentTimeMillis() < deadline) {
+            if (RelayVpnService.isRunning()) return true;
+            String error = RelayVpnService.error();
+            if (!RelayVpnService.isStarting() && error != null && !error.trim().isEmpty()) return false;
+            runOnUiThread(() -> showLaunchProgress("正在等待 relay 健康检查…", -1));
+            try {
+                Thread.sleep(150L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private void stopRelayVpn() {
+        try {
+            stopService(new Intent(this, RelayVpnService.class));
+        } catch (Throwable ignored) {
+        }
     }
 
     private boolean waitForModuleReady() {
