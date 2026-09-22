@@ -2,6 +2,7 @@ param(
     [string]$Url = "wss://relay.lovenom.eu.org/rylux-game"
 )
 
+$Url = $Url -replace '\\://', '://'
 $secure = Read-Host "Enter RYLUX_RELAY_TOKEN" -AsSecureString
 $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
 try {
@@ -9,6 +10,20 @@ try {
 } finally {
     [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr)
 }
+
+Write-Host "Testing relay: $Url"
+
+$curlArgs = @(
+    "-i", "--http1.1", "--max-time", "12", $Url,
+    "-H", "Authorization: Bearer $token",
+    "-H", "Connection: Upgrade",
+    "-H", "Upgrade: websocket",
+    "-H", "Sec-WebSocket-Version: 13",
+    "-H", "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ=="
+)
+Write-Host "--- HTTP handshake ---"
+& curl.exe @curlArgs
+Write-Host "--- WebSocket client ---"
 
 $socket = [System.Net.WebSockets.ClientWebSocket]::new()
 $socket.Options.SetRequestHeader("Authorization", "Bearer $token")
