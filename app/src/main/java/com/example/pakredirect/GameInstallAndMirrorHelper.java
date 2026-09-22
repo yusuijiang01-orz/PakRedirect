@@ -187,7 +187,7 @@ public final class GameInstallAndMirrorHelper {
         if (Build.VERSION.SDK_INT >= 21) button.setElevation(dp(activity, 2));
     }
 
-    private static void showMirrorChoiceDialog(Activity activity) {
+    public static void showMirrorChoiceDialog(Activity activity) {
         LinearLayout panel = new LinearLayout(activity);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(dp(activity, 20), dp(activity, 18), dp(activity, 20), dp(activity, 16));

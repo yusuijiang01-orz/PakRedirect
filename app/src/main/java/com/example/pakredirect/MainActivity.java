@@ -43,10 +43,6 @@ public class MainActivity extends Activity {
     private static final String TARGET_PACKAGE = "com.tepaylink.tamgioiphantranhmobile";
     private static final String MODULE_CODE = "sg_localization";
     private static final int REQUEST_MIRROR_PACK = 4107;
-    // 国内用户镜像包下载地址（迅雷云盘分享，免登录可见，无强制扫码付费）。
-    private static final String MIRROR_DOWNLOAD_URL =
-            "https://pan.xunlei.com/s/VP26gzcX-oxUz_z11q56k2AAA1?pwd=c2cx";
-
     private static final String GAME_NAME = "封神榜(越南版)";
     private static final String GAME_DESCRIPTION = "越南版封神榜，RYLUX 提供本地汉化、资源校验与本地 PAK 接管。";
     private static final String GAME_LAST_UPDATED = "2026-09-01";
@@ -644,39 +640,7 @@ public class MainActivity extends Activity {
     }
 
     private void selectMirrorPack() {
-        new AlertDialog.Builder(this)
-                .setTitle("镜像包说明")
-                .setMessage("镜像包属于方便国内用户快速更新，也可以通过游戏内部直接更新游戏补丁。\n\n"
-                        + "当前版本依然也是 v2.4.0。\n\n"
-                        + "可以从这里下载：\n" + MIRROR_DOWNLOAD_URL)
-                .setNegativeButton("取消", null)
-                .setNeutralButton("选择本地镜像包", (dialog, which) -> openMirrorPicker())
-                .setPositiveButton("前往下载", (dialog, which) -> openMirrorDownloadLink())
-                .show();
-    }
-
-    private void openMirrorPicker() {
-        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-        intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType("*/*");
-        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{
-                "application/zip",
-                "application/octet-stream",
-                "application/x-zip-compressed"
-        });
-        try {
-            startActivityForResult(intent, REQUEST_MIRROR_PACK);
-        } catch (Throwable t) {
-            toast("无法打开文件选择器");
-        }
-    }
-
-    private void openMirrorDownloadLink() {
-        try {
-            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(MIRROR_DOWNLOAD_URL)));
-        } catch (Throwable t) {
-            toast("无法打开浏览器，请手动访问下载链接");
-        }
+        GameInstallAndMirrorHelper.showMirrorChoiceDialog(this);
     }
 
     private void importMirrorPack(Uri uri) {
