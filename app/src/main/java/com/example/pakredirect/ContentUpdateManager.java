@@ -20,8 +20,7 @@ import java.util.Locale;
 
 public final class ContentUpdateManager {
     public static final String MODULE_CODE = "sg_localization";
-    private static final String MANIFEST_URL =
-            "https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/pak/manifest.json";
+    // 清单地址统一走 CnDownloadRouter 候选链（CF Worker 反代 → gh-proxy → jsDelivr → 原始直连）。
     private static final String PREFS = "rylux_content_update";
 
     private ContentUpdateManager() {}
@@ -52,21 +51,25 @@ public final class ContentUpdateManager {
     public static UpdateResult checkAndApply(Context context, ProgressListener listener) throws Exception {
         notifyProgress(listener, "正在检查封神榜资源更新…", -1, true);
 
-        String jsonText;
+        String jsonText = null;
         HttpURLConnection connection = null;
-        try {
-            connection = open(cacheBust(MANIFEST_URL, String.valueOf(System.currentTimeMillis())));
-            int code = connection.getResponseCode();
-            if (code != 200) {
-                notifyProgress(listener, "更新检查暂不可用，继续使用本地资源", -1, true);
-                return UpdateResult.softFailure("资源更新检查失败 HTTP " + code);
+        for (String manifestUrl : CnDownloadRouter.publicRepoFileUrls("manifest.json")) {
+            try {
+                connection = open(cacheBust(manifestUrl, String.valueOf(System.currentTimeMillis())));
+                int code = connection.getResponseCode();
+                if (code != 200) throw new IllegalStateException("HTTP " + code);
+                jsonText = readUtf8(connection.getInputStream(), 512 * 1024);
+                break;
+            } catch (Throwable t) {
+                if (connection != null) {
+                    connection.disconnect();
+                    connection = null;
+                }
             }
-            jsonText = readUtf8(connection.getInputStream(), 512 * 1024);
-        } catch (Throwable t) {
+        }
+        if (jsonText == null) {
             notifyProgress(listener, "更新检查暂不可用，继续使用本地资源", -1, true);
             return UpdateResult.softFailure("资源更新检查暂不可用");
-        } finally {
-            if (connection != null) connection.disconnect();
         }
 
         final JSONObject manifest;
@@ -143,8 +146,9 @@ public final class ContentUpdateManager {
                 String token = version + "-" + item.revision;
                 final long baseBytes = completedBytes;
                 final String displayName = item.name;
-                download(
-                        cacheBust(item.url, token),
+                downloadWithFallback(
+                        CnDownloadRouter.acceleratedCandidates(item.url),
+                        token,
                         item.stage,
                         item.expectedSize,
                         written -> {
@@ -304,39 +308,53 @@ public final class ContentUpdateManager {
         return url + separator + "rylux_rev=" + token.replaceAll("[^A-Za-z0-9._-]", "");
     }
 
-    private static void download(
-            String url,
+    private static void downloadWithFallback(
+            String[] candidates,
+            String token,
             File target,
             long expectedSize,
             DownloadProgress progress
     ) throws Exception {
-        HttpURLConnection c = null;
-        try {
-            c = open(url);
-            int code = c.getResponseCode();
-            if (code != 200) throw new IllegalStateException("HTTP " + code);
-            try (InputStream in = new BufferedInputStream(c.getInputStream());
-                 FileOutputStream out = new FileOutputStream(target)) {
-                byte[] buffer = new byte[64 * 1024];
-                long total = 0;
-                int n;
-                while ((n = in.read(buffer)) >= 0) {
-                    if (n == 0) continue;
-                    out.write(buffer, 0, n);
-                    total += n;
-                    if (expectedSize >= 0 && total > expectedSize) {
-                        throw new IllegalStateException("文件长度超过清单");
-                    }
-                    if (progress != null) progress.onBytes(total);
-                }
-                out.getFD().sync();
-                if (expectedSize >= 0 && total != expectedSize) {
-                    throw new IllegalStateException("文件长度与清单不一致");
-                }
-            }
-        } finally {
-            if (c != null) c.disconnect();
+        if (candidates == null || candidates.length == 0) {
+            throw new IllegalStateException("下载地址为空");
         }
+        Throwable last = null;
+        for (String candidate : candidates) {
+            HttpURLConnection c = null;
+            try {
+                c = open(cacheBust(candidate, token));
+                int code = c.getResponseCode();
+                if (code != 200) throw new IllegalStateException("HTTP " + code);
+                try (InputStream in = new BufferedInputStream(c.getInputStream());
+                     FileOutputStream out = new FileOutputStream(target)) {
+                    byte[] buffer = new byte[64 * 1024];
+                    long total = 0;
+                    int n;
+                    while ((n = in.read(buffer)) >= 0) {
+                        if (n == 0) continue;
+                        out.write(buffer, 0, n);
+                        total += n;
+                        if (expectedSize >= 0 && total > expectedSize) {
+                            throw new IllegalStateException("文件长度超过清单");
+                        }
+                        if (progress != null) progress.onBytes(total);
+                    }
+                    out.getFD().sync();
+                    if (expectedSize >= 0 && total != expectedSize) {
+                        throw new IllegalStateException("文件长度与清单不一致");
+                    }
+                }
+                return;
+            } catch (Throwable t) {
+                last = t;
+                if (target.exists() && !target.delete()) target.deleteOnExit();
+            } finally {
+                if (c != null) c.disconnect();
+            }
+        }
+        String detail = last == null || last.getMessage() == null
+                ? "" : "：" + last.getMessage().trim();
+        throw new IllegalStateException("所有下载线路均不可用" + detail);
     }
 
     private static String sha256(File file) throws Exception {

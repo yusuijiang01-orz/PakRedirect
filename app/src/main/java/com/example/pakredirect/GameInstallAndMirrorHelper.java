@@ -33,9 +33,7 @@ import java.io.FileOutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.security.MessageDigest;
-import java.util.ArrayDeque;
 import java.util.Collections;
-import java.util.Deque;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Set;
@@ -51,18 +49,20 @@ public final class GameInstallAndMirrorHelper {
     private static final int REQUEST_MIRROR_PACK = 4107;
 
     private static final String GAME_APK_NAME = "TamGioiPhanTranhMobile-587.apk";
+    // 游戏 APK 本体迁移到 GitHub Release（tag=game-apk）分发，避开 Git LFS 每月 1GB 带宽配额。
     private static final String GAME_APK_URL =
-            "https://media.githubusercontent.com/media/yusuijiang01-orz/PakRedirect/main/apk/"
+            "https://github.com/yusuijiang01-orz/PakRedirect/releases/download/game-apk/"
                     + GAME_APK_NAME;
     private static final long GAME_APK_SIZE = 101_938_646L;
-    // Git LFS object id from apk/TamGioiPhanTranhMobile-587.apk.
+    // Git LFS object id from apk/TamGioiPhanTranhMobile-587.apk（上传到 Release 的 APK 必须与此一致）。
     private static final String GAME_APK_SHA256 =
-            "a6afbc3da4d887b70f2a3801e9160a052e103be795c86835a4398e2ad7f56cde";
+            "48b5037202bedfcdbe3bf37d5447af6f71a8b5fddc6e79cc57efb6c304fdec6c";
 
-    private static final String MIRROR_FILE_NAME = "RYLUX-Official-v1.rmp";
     private static final String QQ_RELATIVE_DIR =
             "Android/data/com.tencent.mobileqq/Tencent/QQfile_recv";
-    private static final String QQ_ABSOLUTE_DIR = "/storage/emulated/0/" + QQ_RELATIVE_DIR;
+    // 国内用户镜像包下载地址（迅雷云盘分享，免登录可见，无强制扫码付费）。
+    private static final String MIRROR_DOWNLOAD_URL =
+            "https://pan.xunlei.com/s/VP26gzcX-oxUz_z11q56k2AAA1?pwd=c2cx";
 
     private static final String PREFS = "rylux_game_installer";
     private static final String KEY_MD5 = "game_apk_md5";
@@ -123,7 +123,7 @@ public final class GameInstallAndMirrorHelper {
         if (raw == null || raw.width != ViewGroup.LayoutParams.MATCH_PARENT) return;
 
         if (MIRROR_HOOKED.add(mirrorButton)) {
-            mirrorButton.setOnClickListener(v -> searchQqThenChoose(activity, mirrorButton));
+            mirrorButton.setOnClickListener(v -> showMirrorChoiceDialog(activity));
         }
 
         LinearLayout parent = (LinearLayout) mirrorButton.getParent();
@@ -180,92 +180,27 @@ public final class GameInstallAndMirrorHelper {
         if (Build.VERSION.SDK_INT >= 21) button.setElevation(dp(activity, 2));
     }
 
-    private static void searchQqThenChoose(Activity activity, Button mirrorButton) {
-        mirrorButton.setEnabled(false);
-        mirrorButton.setText("正在搜索 QQ 下载目录…");
-        new Thread(() -> {
-            String found = findQqMirrorPack();
-            activity.runOnUiThread(() -> {
-                if (activity.isFinishing()) return;
-                mirrorButton.setEnabled(true);
-                mirrorButton.setText("选择镜像包");
-                if (found != null && !found.trim().isEmpty()) {
-                    showMirrorFoundDialog(activity, found.trim());
-                } else {
-                    showMirrorMissingDialog(activity);
-                }
-            });
-        }, "RYLUX-QQ-Mirror-Search").start();
-    }
-
-    private static String findQqMirrorPack() {
-        File direct = findRecursively(new File(QQ_ABSOLUTE_DIR));
-        if (direct != null) return direct.getAbsolutePath();
-
-        RootShell.Result result = RootShell.run(
-                "find " + shellQuote(QQ_ABSOLUTE_DIR)
-                        + " -type f -name " + shellQuote(MIRROR_FILE_NAME)
-                        + " -print -quit 2>/dev/null"
-        );
-        if (!result.ok() || result.output == null || result.output.trim().isEmpty()) return null;
-        String[] lines = result.output.split("\\r?\\n");
-        for (String line : lines) {
-            String value = line == null ? "" : line.trim();
-            if (value.endsWith("/" + MIRROR_FILE_NAME) || value.equals(MIRROR_FILE_NAME)) return value;
-        }
-        return null;
-    }
-
-    private static File findRecursively(File base) {
-        if (base == null || !base.exists() || !base.isDirectory()) return null;
-        Deque<File> pending = new ArrayDeque<>();
-        pending.add(base);
-        int visited = 0;
-        while (!pending.isEmpty() && visited < 20_000) {
-            File dir = pending.removeFirst();
-            File[] children;
-            try {
-                children = dir.listFiles();
-            } catch (Throwable ignored) {
-                children = null;
-            }
-            if (children == null) continue;
-            for (File child : children) {
-                visited++;
-                if (child == null) continue;
-                if (child.isFile() && MIRROR_FILE_NAME.equals(child.getName())) return child;
-                if (child.isDirectory()) pending.addLast(child);
-                if (visited >= 20_000) break;
-            }
-        }
-        return null;
-    }
-
-    private static void showMirrorFoundDialog(Activity activity, String foundPath) {
-        String parentPath = foundPath;
-        File found = new File(foundPath);
-        File parent = found.getParentFile();
-        if (parent != null) parentPath = parent.getAbsolutePath();
-        final String initial = storageRelativePath(parentPath);
+    private static void showMirrorChoiceDialog(Activity activity) {
         new AlertDialog.Builder(activity)
-                .setTitle("已找到镜像包")
-                .setMessage("已在 QQ 下载目录找到：\n" + foundPath
-                        + "\n\n下一步请直接选择 “" + MIRROR_FILE_NAME + "”。")
+                .setTitle("镜像包说明")
+                .setMessage("镜像包属于方便国内用户快速更新，也可以通过游戏内部直接更新游戏补丁。\n\n"
+                        + "当前版本依然也是 v2.4.0。\n\n"
+                        + "可以从这里下载：\n" + MIRROR_DOWNLOAD_URL)
                 .setNegativeButton("取消", null)
-                .setNeutralButton("手动选择", (dialog, which) -> openMirrorPicker(activity, null))
-                .setPositiveButton("直接选择", (dialog, which) -> openMirrorPicker(activity, initial))
-                .show();
-    }
-
-    private static void showMirrorMissingDialog(Activity activity) {
-        new AlertDialog.Builder(activity)
-                .setTitle("未找到镜像包")
-                .setMessage("未在 QQ 下载路径及其子目录找到 “" + MIRROR_FILE_NAME
-                        + "”。\n\n请手动选择该文件。")
-                .setNegativeButton("取消", null)
-                .setPositiveButton("手动选择", (dialog, which) ->
+                .setNeutralButton("选择本地镜像包", (dialog, which) ->
                         openMirrorPicker(activity, QQ_RELATIVE_DIR))
+                .setPositiveButton("前往下载", (dialog, which) ->
+                        openMirrorDownloadLink(activity))
                 .show();
+    }
+
+    private static void openMirrorDownloadLink(Activity activity) {
+        try {
+            activity.startActivity(
+                    new Intent(Intent.ACTION_VIEW, Uri.parse(MIRROR_DOWNLOAD_URL)));
+        } catch (Throwable t) {
+            toast(activity, "无法打开浏览器，请手动访问下载链接");
+        }
     }
 
     private static void openMirrorPicker(Activity activity, String relativeInitialDir) {
@@ -301,16 +236,6 @@ public final class GameInstallAndMirrorHelper {
                 toast(activity, "无法打开文件选择器");
             }
         }
-    }
-
-    private static String storageRelativePath(String absolutePath) {
-        if (absolutePath == null) return QQ_RELATIVE_DIR;
-        String normalized = absolutePath.replace('\\', '/');
-        String primaryPrefix = "/storage/emulated/0/";
-        if (normalized.startsWith(primaryPrefix)) return normalized.substring(primaryPrefix.length());
-        String sdcardPrefix = "/sdcard/";
-        if (normalized.startsWith(sdcardPrefix)) return normalized.substring(sdcardPrefix.length());
-        return QQ_RELATIVE_DIR;
     }
 
     private static void startGameInstall(Activity activity, Button installButton) {
@@ -389,58 +314,76 @@ public final class GameInstallAndMirrorHelper {
         File part = new File(target.getParentFile(), target.getName() + ".part");
         if (part.exists() && !part.delete()) throw new IllegalStateException("无法清理旧下载缓存");
 
+        String[] sources = CnDownloadRouter.largeGithubFileUrls(GAME_APK_URL);
+        Throwable last = null;
         HttpURLConnection connection = null;
-        try {
-            updateButton(activity, button, "正在下载游戏… 0%");
-            connection = (HttpURLConnection) new URL(GAME_APK_URL).openConnection();
-            connection.setConnectTimeout(15_000);
-            connection.setReadTimeout(30_000);
-            connection.setUseCaches(false);
-            connection.setInstanceFollowRedirects(true);
-            connection.setRequestProperty("User-Agent", "RYLUX/2.3");
-            connection.setRequestProperty("Accept", "application/octet-stream,*/*");
-            int code = connection.getResponseCode();
-            if (code < 200 || code >= 300) {
-                throw new IllegalStateException("下载服务器返回 HTTP " + code);
+        for (int sourceIndex = 0; sourceIndex < sources.length; sourceIndex++) {
+            if (part.exists() && !part.delete()) {
+                throw new IllegalStateException("无法清理旧下载缓存");
             }
-
-            long total = connection.getContentLengthLong();
-            long read = 0L;
-            int lastPercent = -1;
-            try (BufferedInputStream in = new BufferedInputStream(connection.getInputStream(), 64 * 1024);
-                 FileOutputStream out = new FileOutputStream(part)) {
-                byte[] buffer = new byte[64 * 1024];
-                int n;
-                while ((n = in.read(buffer)) != -1) {
-                    out.write(buffer, 0, n);
-                    read += n;
-                    long denominator = total > 0 ? total : GAME_APK_SIZE;
-                    int percent = denominator > 0
-                            ? (int) Math.min(99L, (read * 100L) / denominator)
-                            : 0;
-                    if (percent != lastPercent) {
-                        lastPercent = percent;
-                        updateButton(activity, button, "正在下载游戏… " + percent + "%");
-                    }
+            try {
+                updateButton(activity, button, "正在下载游戏（线路 " + (sourceIndex + 1)
+                        + "/" + sources.length + "）… 0%");
+                connection = (HttpURLConnection) new URL(sources[sourceIndex]).openConnection();
+                connection.setConnectTimeout(sourceIndex == 0 ? 15_000 : 20_000);
+                connection.setReadTimeout(30_000);
+                connection.setUseCaches(false);
+                connection.setInstanceFollowRedirects(true);
+                connection.setRequestProperty("User-Agent", "RYLUX/2.3");
+                connection.setRequestProperty("Accept", "application/octet-stream,*/*");
+                int code = connection.getResponseCode();
+                if (code < 200 || code >= 300) {
+                    throw new IllegalStateException("下载服务器返回 HTTP " + code);
                 }
-                out.getFD().sync();
-            }
 
-            if (read != GAME_APK_SIZE) {
-                throw new IllegalStateException("下载文件大小不正确：" + read + " 字节");
+                long total = connection.getContentLengthLong();
+                long read = 0L;
+                int lastPercent = -1;
+                try (BufferedInputStream in = new BufferedInputStream(connection.getInputStream(), 64 * 1024);
+                     FileOutputStream out = new FileOutputStream(part)) {
+                    byte[] buffer = new byte[64 * 1024];
+                    int n;
+                    while ((n = in.read(buffer)) != -1) {
+                        out.write(buffer, 0, n);
+                        read += n;
+                        long denominator = total > 0 ? total : GAME_APK_SIZE;
+                        int percent = denominator > 0
+                                ? (int) Math.min(99L, (read * 100L) / denominator)
+                                : 0;
+                        if (percent != lastPercent) {
+                            lastPercent = percent;
+                            updateButton(activity, button, "正在下载游戏… " + percent + "%");
+                        }
+                    }
+                    out.getFD().sync();
+                }
+
+                if (read != GAME_APK_SIZE) {
+                    throw new IllegalStateException("下载文件大小不正确：" + read + " 字节");
+                }
+                if (target.exists() && !target.delete()) {
+                    throw new IllegalStateException("无法替换旧 APK");
+                }
+                if (!part.renameTo(target)) {
+                    copyFile(part, target);
+                    if (!part.delete()) part.deleteOnExit();
+                }
+                updateButton(activity, button, "正在校验 APK（MD5）…");
+                return;
+            } catch (Throwable t) {
+                last = t;
+                if (part.exists()) part.delete();
+                if (sourceIndex + 1 < sources.length) {
+                    updateButton(activity, button, "当前线路不可用，正在切换备用线路…");
+                }
+            } finally {
+                if (connection != null) connection.disconnect();
+                connection = null;
             }
-            if (target.exists() && !target.delete()) {
-                throw new IllegalStateException("无法替换旧 APK");
-            }
-            if (!part.renameTo(target)) {
-                copyFile(part, target);
-                if (!part.delete()) part.deleteOnExit();
-            }
-            updateButton(activity, button, "正在校验 APK（MD5）…");
-        } finally {
-            if (connection != null) connection.disconnect();
-            if (part.exists() && !target.exists()) part.delete();
         }
+        if (part.exists() && !target.exists()) part.delete();
+        throw new IllegalStateException("所有 APK 下载线路均不可用"
+                + (last == null ? "" : "：" + safeMessage(last)));
     }
 
     private static void copyFile(File source, File target) throws Exception {
@@ -675,10 +618,6 @@ public final class GameInstallAndMirrorHelper {
             button.setEnabled(true);
             button.setText("安装游戏");
         }
-    }
-
-    private static String shellQuote(String value) {
-        return "'" + value.replace("'", "'\\''") + "'";
     }
 
     private static void toast(Context context, String message) {

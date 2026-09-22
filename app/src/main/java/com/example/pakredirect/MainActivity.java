@@ -43,7 +43,7 @@ public class MainActivity extends Activity {
     private static final String TARGET_PACKAGE = "com.tepaylink.tamgioiphantranhmobile";
     private static final String MODULE_CODE = "sg_localization";
     private static final int REQUEST_MIRROR_PACK = 4107;
-    // 国内用户镜像包下载地址（迅雷云盘分享）。
+    // 国内用户镜像包下载地址（迅雷云盘分享，免登录可见，无强制扫码付费）。
     private static final String MIRROR_DOWNLOAD_URL =
             "https://pan.xunlei.com/s/VP26gzcX-oxUz_z11q56k2AAA1?pwd=c2cx";
 
@@ -644,63 +644,38 @@ public class MainActivity extends Activity {
     }
 
     private void selectMirrorPack() {
-        LinearLayout content = new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(22), dp(20), dp(22), dp(4));
-        content.addView(text("镜像包说明", 19, TEXT, true), new LinearLayout.LayoutParams(-1, -2));
-
-        TextView badge = pill("可选资源", PRIMARY, Color.WHITE);
-        LinearLayout.LayoutParams badgeLp = new LinearLayout.LayoutParams(-2, dp(26));
-        badgeLp.topMargin = dp(10);
-        content.addView(badge, badgeLp);
-
-        TextView message = text("镜像包属于方便国内用户快速更新，也可以通过游戏内部直接更新游戏补丁。\n\n"
-                + "当前版本依然是 v2.4.0。", 14, MUTED, false);
-        message.setLineSpacing(0f, 1.28f);
-        LinearLayout.LayoutParams messageLp = new LinearLayout.LayoutParams(-1, -2);
-        messageLp.topMargin = dp(14);
-        content.addView(message, messageLp);
-
-        TextView link = text("下载地址\n" + MIRROR_DOWNLOAD_URL, 12, PRIMARY, false);
-        link.setLineSpacing(0f, 1.15f);
-        link.setTextIsSelectable(true);
-        link.setPadding(0, dp(10), 0, dp(12));
-        content.addView(link, new LinearLayout.LayoutParams(-1, -2));
-
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setView(content)
+        new AlertDialog.Builder(this)
+                .setTitle("镜像包说明")
+                .setMessage("镜像包属于方便国内用户快速更新，也可以通过游戏内部直接更新游戏补丁。\n\n"
+                        + "当前版本依然也是 v2.4.0。\n\n"
+                        + "可以从这里下载：\n" + MIRROR_DOWNLOAD_URL)
                 .setNegativeButton("取消", null)
-                .setNeutralButton("选择本地镜像包", (d, which) -> openMirrorPicker())
-                .setPositiveButton("前往下载", (d, which) -> openMirrorDownloadLink())
+                .setNeutralButton("选择本地镜像包", (dialog, which) -> openMirrorPicker())
+                .setPositiveButton("前往下载", (dialog, which) -> openMirrorDownloadLink())
                 .show();
-        styleMirrorDialog(dialog);
     }
 
-    private void styleMirrorDialog(AlertDialog dialog) {
-        if (dialog.getWindow() != null) {
-            dialog.getWindow().setBackgroundDrawable(round(CARD, 22));
-            dialog.getWindow().setDimAmount(0.64f);
-            dialog.getWindow().setLayout(Math.min(dp(380), getResources().getDisplayMetrics().widthPixels - dp(32)), -2);
+    private void openMirrorPicker() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{
+                "application/zip",
+                "application/octet-stream",
+                "application/x-zip-compressed"
+        });
+        try {
+            startActivityForResult(intent, REQUEST_MIRROR_PACK);
+        } catch (Throwable t) {
+            toast("无法打开文件选择器");
         }
-        Button negative = dialog.getButton(AlertDialog.BUTTON_NEGATIVE);
-        Button neutral = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
-        Button positive = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
-        if (negative != null) negative.setTextColor(MUTED);
-        if (neutral != null) {
-            neutral.setTextColor(TEXT);
-            neutral.setBackground(round(CARD_SOFT, 10));
-        }
-        if (positive != null) {
-            positive.setTextColor(Color.WHITE);
-            positive.setBackground(round(PRIMARY, 10));
-        }
-        for (Button button : new Button[]{negative, neutral, positive}) {
-            if (button != null) {
-                button.setAllCaps(false);
-                button.setTextSize(13);
-                button.setMinHeight(dp(42));
-                button.setPadding(dp(12), 0, dp(12), 0);
-            }
+    }
+
+    private void openMirrorDownloadLink() {
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(MIRROR_DOWNLOAD_URL)));
+        } catch (Throwable t) {
+            toast("无法打开浏览器，请手动访问下载链接");
         }
     }
 
@@ -1209,7 +1184,6 @@ public class MainActivity extends Activity {
     private static boolean isAdminRole(String role) {
         return "admin".equals(normalizeRole(role));
     }
-
     private Button button(String label, int bg, int fg) {
         Button b = new Button(this);
         b.setText(label);

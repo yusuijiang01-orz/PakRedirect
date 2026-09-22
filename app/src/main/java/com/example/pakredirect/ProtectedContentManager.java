@@ -47,6 +47,8 @@ public final class ProtectedContentManager {
     private static final int MAX_MANIFEST_BYTES = 1024 * 1024;
     private static final String AUTH_MANIFEST = "manifest.auth.json";
     private static final String LINKSPAK = "linkspak.txt";
+    private static final String DEFAULT_DOWNLOAD_BASE_URL =
+            "https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/pak/";
     private static final Set<String> PROTECTED_NAMES = new HashSet<>();
 
     static {
@@ -142,6 +144,7 @@ public final class ProtectedContentManager {
                         slot.stage,
                         slot.expectedSize,
                         slot.expectedSha,
+                        remote.downloadBaseUrl,
                         written -> {
                             long overall = Math.min(totalBytes, base + written);
                             int percent = (int) Math.min(96L, (overall * 96L) / totalBytes);
@@ -314,6 +317,9 @@ public final class ProtectedContentManager {
         }
         String version = payload.optString("version", "").trim();
         if (version.isEmpty()) throw new IllegalStateException("受保护资源缺少版本号");
+        String downloadBaseUrl = normalizeDownloadBaseUrl(
+                outer.optString("download_base_url", DEFAULT_DOWNLOAD_BASE_URL)
+        );
 
         JSONObject link = payload.optJSONObject("linkspak");
         if (link == null) throw new IllegalStateException("受保护资源缺少 linkspak");
@@ -358,7 +364,18 @@ public final class ProtectedContentManager {
             }
             entries.put(name, entry);
         }
-        return new ManifestBundle(text, version, keyId, key, linkspak, entries);
+        return new ManifestBundle(text, version, keyId, key, downloadBaseUrl, linkspak, entries);
+    }
+
+    private static String normalizeDownloadBaseUrl(String value) {
+        String base = value == null || value.trim().isEmpty()
+                ? DEFAULT_DOWNLOAD_BASE_URL
+                : value.trim();
+        String prefix = "https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/";
+        if (!base.startsWith(prefix) || !base.endsWith("/")) {
+            throw new IllegalStateException("受保护资源下载地址无效");
+        }
+        return base;
     }
 
     private static long latestRevision(ManifestBundle bundle) {
@@ -468,9 +485,10 @@ public final class ProtectedContentManager {
             File target,
             long expectedSize,
             String expectedSha,
+            String downloadBaseUrl,
             DownloadProgress progress
     ) throws Exception {
-        String[] publicUrls = CnDownloadRouter.publicRepoFileUrls("pak/" + remoteName);
+        String[] publicUrls = CnDownloadRouter.publicRepoFileUrls(downloadBaseUrl, remoteName);
         List<DownloadSource> sources = new ArrayList<>();
         if (publicUrls.length > 0) sources.add(new DownloadSource(publicUrls[0], false));
         if (publicUrls.length > 1) sources.add(new DownloadSource(publicUrls[1], false));
@@ -809,6 +827,7 @@ public final class ProtectedContentManager {
         final String version;
         final String keyId;
         final byte[] contentKey;
+        final String downloadBaseUrl;
         final LinkspakEntry linkspak;
         final Map<String, ProtectedEntry> entries;
         ManifestBundle(
@@ -816,6 +835,7 @@ public final class ProtectedContentManager {
                 String version,
                 String keyId,
                 byte[] contentKey,
+                String downloadBaseUrl,
                 LinkspakEntry linkspak,
                 Map<String, ProtectedEntry> entries
         ) {
@@ -823,6 +843,7 @@ public final class ProtectedContentManager {
             this.version = version;
             this.keyId = keyId;
             this.contentKey = contentKey;
+            this.downloadBaseUrl = downloadBaseUrl;
             this.linkspak = linkspak;
             this.entries = entries;
         }
