@@ -64,6 +64,7 @@ public final class GameInstallAndMirrorHelper {
     // 国内用户镜像包下载地址（迅雷云盘分享，免登录可见，无强制扫码付费）。
     private static final String MIRROR_DOWNLOAD_URL =
             "https://pan.xunlei.com/s/VP26gzcX-oxUz_z11q56k2AAA1?pwd=c2cx";
+    private static final String XUNLEI_PACKAGE = "com.xunlei.downloadprovider";
 
     private static final String PREFS = "rylux_game_installer";
     private static final String KEY_MD5 = "game_apk_md5";
@@ -320,8 +321,16 @@ public final class GameInstallAndMirrorHelper {
 
     private static void openMirrorDownloadLink(Activity activity) {
         try {
-            activity.startActivity(
-                    new Intent(Intent.ACTION_VIEW, Uri.parse(MIRROR_DOWNLOAD_URL)));
+            Uri url = Uri.parse(MIRROR_DOWNLOAD_URL);
+            Intent xunlei = new Intent(Intent.ACTION_VIEW, url);
+            xunlei.setPackage(XUNLEI_PACKAGE);
+            if (xunlei.resolveActivity(activity.getPackageManager()) != null) {
+                activity.startActivity(xunlei);
+                return;
+            }
+
+            Intent browser = new Intent(Intent.ACTION_VIEW, url);
+            activity.startActivity(Intent.createChooser(browser, "打开迅雷网盘"));
         } catch (Throwable t) {
             toast(activity, "无法打开浏览器，请手动访问下载链接");
         }
