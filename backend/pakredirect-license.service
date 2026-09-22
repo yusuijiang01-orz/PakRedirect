@@ -12,6 +12,7 @@ Environment=PAKREDIRECT_LICENSE_DB=/opt/pakredirect-license/data/licenses.db
 Environment=RYLUX_PROTECTED_MANIFEST_URL=https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/pak/manifest.json
 Environment=RYLUX_PROTECTED_DOWNLOAD_BASE_URL=https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/pak/
 EnvironmentFile=-/etc/pakredirect-license/content.env
+EnvironmentFile=-/etc/pakredirect-license/relay.env
 ExecStart=/opt/pakredirect-license/.venv/bin/uvicorn app:app --host 127.0.0.1 --port 18888 --workers 1
 Restart=on-failure
 RestartSec=3

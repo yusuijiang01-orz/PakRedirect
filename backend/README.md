@@ -75,7 +75,8 @@ V1 增加：
 
 部署 relay 功能前，在后端服务环境中配置与 Cloudflare Worker 相同的
 `RYLUX_RELAY_TOKEN`。该值只用于后端签发短时 relay 凭据，不写入仓库或 APK。
-建议使用 `systemctl edit pakredirect-license` 写入环境变量后重启服务。
+可写入 root-only 文件 `/etc/pakredirect-license/relay.env`，内容只包含
+`RYLUX_RELAY_TOKEN=<same-secret-as-Cloudflare>`，再重启服务；该文件不会被 Git 复制。
 
 数据库文件：
 
