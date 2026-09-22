@@ -60,6 +60,7 @@ public final class AuthClient {
                     membership != null && membership.optBoolean("active", false),
                     membership == null ? "expired" : membership.optString("kind", "expired"),
                     membership == null ? null : nullable(membership.optString("expires_at", null)),
+                    user.optString("role", "user"),
                     ""
             );
         } catch (Throwable t) {
@@ -109,6 +110,7 @@ public final class AuthClient {
         boolean active = membership != null && membership.optBoolean("active", false);
         String kind = membership == null ? "expired" : membership.optString("kind", "expired");
         String expiresAt = membership == null ? null : nullable(membership.optString("expires_at", null));
+        String role = user.optString("role", "user");
         return new AuthResult(
                 true,
                 true,
@@ -117,6 +119,7 @@ public final class AuthClient {
                 active,
                 kind,
                 expiresAt,
+                role,
                 json.optString("message", fallbackMessage)
         );
     }
@@ -211,10 +214,11 @@ public final class AuthClient {
         public final boolean membershipActive;
         public final String membershipKind;
         public final String expiresAt;
+        public final String role;
         public final String message;
 
         AuthResult(boolean requestOk, boolean success, String token, String username,
-                   boolean membershipActive, String membershipKind, String expiresAt, String message) {
+                   boolean membershipActive, String membershipKind, String expiresAt, String role, String message) {
             this.requestOk = requestOk;
             this.success = success;
             this.token = token;
@@ -222,15 +226,16 @@ public final class AuthClient {
             this.membershipActive = membershipActive;
             this.membershipKind = membershipKind;
             this.expiresAt = expiresAt;
+            this.role = role;
             this.message = message;
         }
 
         static AuthResult networkError(String message) {
-            return new AuthResult(false, false, null, "", false, "expired", null, message);
+            return new AuthResult(false, false, null, "", false, "expired", null, "user", message);
         }
 
         static AuthResult failure(String message) {
-            return new AuthResult(true, false, null, "", false, "expired", null, message);
+            return new AuthResult(true, false, null, "", false, "expired", null, "user", message);
         }
     }
 
@@ -241,25 +246,27 @@ public final class AuthClient {
         public final boolean membershipActive;
         public final String membershipKind;
         public final String expiresAt;
+        public final String role;
         public final String message;
 
         ProfileResult(boolean requestOk, boolean success, String username, boolean membershipActive,
-                      String membershipKind, String expiresAt, String message) {
+                      String membershipKind, String expiresAt, String role, String message) {
             this.requestOk = requestOk;
             this.success = success;
             this.username = username;
             this.membershipActive = membershipActive;
             this.membershipKind = membershipKind;
             this.expiresAt = expiresAt;
+            this.role = role;
             this.message = message;
         }
 
         static ProfileResult networkError(String message) {
-            return new ProfileResult(false, false, "", false, "expired", null, message);
+            return new ProfileResult(false, false, "", false, "expired", null, "user", message);
         }
 
         static ProfileResult failure(String message) {
-            return new ProfileResult(true, false, "", false, "expired", null, message);
+            return new ProfileResult(true, false, "", false, "expired", null, "user", message);
         }
     }
 

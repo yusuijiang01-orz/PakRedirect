@@ -45,6 +45,7 @@ h1,h2,h3,p{margin-top:0}.login-card h1{font-size:22px;margin-bottom:4px}
 .panel-head{padding:16px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:12px}
 .panel-head h3{font-size:15px;margin:0}.panel-body{padding:18px}
 .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.batch-toolbar{margin-top:12px;padding:10px 12px;background:#f8fafc;border:1px solid var(--line);border-radius:10px}.batch-toolbar label{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700}
 .toolbar .input{width:280px}.toolbar .select{width:140px}
 .table-wrap{overflow:auto}
 table{width:100%;border-collapse:collapse;min-width:920px}
@@ -52,7 +53,7 @@ th,td{padding:12px 14px;border-bottom:1px solid var(--line);text-align:left;vert
 th{font-size:12px;color:var(--muted);font-weight:700;background:#fafafa;position:sticky;top:0}
 tr:last-child td{border-bottom:0}
 .badge{display:inline-flex;align-items:center;border-radius:999px;padding:4px 8px;font-size:11px;font-weight:700}
-.badge-active{background:#d1fae5;color:#065f46}.badge-disabled{background:#fee2e2;color:#991b1b}.badge-expired{background:#fef3c7;color:#92400e}
+.badge-active{background:#d1fae5;color:#065f46}.badge-disabled{background:#fee2e2;color:#991b1b}.badge-expired{background:#fef3c7;color:#92400e}.badge-admin{background:#dcfce7;color:#166534}
 .actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap}.actions .select{width:100px;height:32px;font-size:12px}
 .pager{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:14px 18px;border-top:1px solid var(--line)}
 .empty{padding:32px!important;text-align:center;color:var(--muted)}

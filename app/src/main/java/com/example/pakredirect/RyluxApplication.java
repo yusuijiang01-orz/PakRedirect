@@ -15,6 +15,11 @@ public class RyluxApplication extends Application {
                 if (activity instanceof MainActivity) {
                     RyluxUiPolish.attach(activity);
                     RyluxResponsiveTuner.attach(activity);
+                    GameInstallAndMirrorHelper.onActivityResumed(activity);
+                    GameApkCloudInstaller.onActivityResumed(activity);
+                    RyluxHomeNavigationPolish.attach(activity);
+                    RyluxAdaptiveLayoutFix.attach(activity);
+                    PatchUpdateInfo.attach(activity);
                     if (!updateChecked) {
                         updateChecked = true;
                         AppUpdateChecker.check(activity);
@@ -28,6 +33,11 @@ public class RyluxApplication extends Application {
             @Override public void onActivitySaveInstanceState(Activity activity, Bundle state) {}
             @Override public void onActivityDestroyed(Activity activity) {
                 if (activity instanceof MainActivity) {
+                    PatchUpdateInfo.detach(activity);
+                    RyluxAdaptiveLayoutFix.detach(activity);
+                    RyluxHomeNavigationPolish.detach(activity);
+                    GameApkCloudInstaller.detach(activity);
+                    GameInstallAndMirrorHelper.detach(activity);
                     RyluxResponsiveTuner.detach(activity);
                     RyluxUiPolish.detach(activity);
                 }
