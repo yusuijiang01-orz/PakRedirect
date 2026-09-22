@@ -23,7 +23,7 @@ public final class CnDownloadRouter {
      * 部署 worker.js 后把下面的占位符替换为真实地址，例如
      * https://rylux-cdn.你的子域名.workers.dev/
      */
-    private static final String CF_WORKER = "https://rylux-cdn.<你的子域名>.workers.dev/";
+    private static final String CF_WORKER = "https://rylux-cdn.335399288.workers.dev/";
     /** 公共加速，作为自建 Worker 的兜底。 */
     private static final String GH_PROXY = "https://gh-proxy.com/";
 

@@ -47,6 +47,8 @@ async function handle(request) {
   let rawTarget = url.pathname.replace(/^\/+/, '');
   if (url.search) rawTarget += url.search;
   rawTarget = decodeURIComponent(rawTarget);
+  // 兼容边缘/客户端对路径中 "//" 的归一化（如 https:/ 或 http:/）
+  rawTarget = rawTarget.replace(/^(https?:)\/(?!\/)/, '$1//');
 
   if (!rawTarget) {
     return new Response(
