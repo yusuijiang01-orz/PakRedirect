@@ -22,6 +22,7 @@ import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
 import android.widget.Button;
 import android.widget.LinearLayout;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.core.content.FileProvider;
@@ -186,17 +187,135 @@ public final class GameInstallAndMirrorHelper {
     }
 
     private static void showMirrorChoiceDialog(Activity activity) {
-        new AlertDialog.Builder(activity)
-                .setTitle("镜像包说明")
-                .setMessage("镜像包属于方便国内用户快速更新，也可以通过游戏内部直接更新游戏补丁。\n\n"
-                        + "当前版本依然也是 v2.4.0。\n\n"
-                        + "可以从这里下载：\n" + MIRROR_DOWNLOAD_URL)
-                .setNegativeButton("取消", null)
-                .setNeutralButton("选择本地镜像包", (dialog, which) ->
-                        openMirrorPicker(activity, QQ_RELATIVE_DIR))
-                .setPositiveButton("前往下载", (dialog, which) ->
-                        openMirrorDownloadLink(activity))
-                .show();
+        LinearLayout panel = new LinearLayout(activity);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(activity, 20), dp(activity, 18), dp(activity, 20), dp(activity, 16));
+        panel.setBackground(dialogSurface(activity));
+
+        LinearLayout titleRow = new LinearLayout(activity);
+        titleRow.setGravity(Gravity.CENTER_VERTICAL);
+        TextView title = dialogText(activity, "镜像包说明", 20, Color.rgb(245, 247, 250), true);
+        titleRow.addView(title, new LinearLayout.LayoutParams(0, -2, 1f));
+        TextView badge = dialogText(activity, "可选资源", 11, Color.rgb(218, 232, 255), true);
+        badge.setGravity(Gravity.CENTER);
+        badge.setPadding(dp(activity, 9), 0, dp(activity, 9), 0);
+        badge.setBackground(dialogRound(activity, Color.rgb(24, 47, 87), 7,
+                Color.rgb(64, 123, 219), 1));
+        titleRow.addView(badge, new LinearLayout.LayoutParams(-2, dp(activity, 28)));
+        panel.addView(titleRow);
+
+        TextView intro = dialogText(activity,
+                "镜像包方便国内用户快速更新，也可以在游戏内直接更新游戏补丁。",
+                14, Color.rgb(190, 202, 218), false);
+        intro.setLineSpacing(0f, 1.2f);
+        LinearLayout.LayoutParams introLp = new LinearLayout.LayoutParams(-1, -2);
+        introLp.topMargin = dp(activity, 14);
+        panel.addView(intro, introLp);
+
+        TextView version = dialogText(activity, "当前版本：v2.4.0", 13,
+                Color.rgb(190, 202, 218), false);
+        LinearLayout.LayoutParams versionLp = new LinearLayout.LayoutParams(-1, -2);
+        versionLp.topMargin = dp(activity, 8);
+        panel.addView(version, versionLp);
+
+        LinearLayout sourceCard = new LinearLayout(activity);
+        sourceCard.setOrientation(LinearLayout.VERTICAL);
+        sourceCard.setPadding(dp(activity, 13), dp(activity, 10), dp(activity, 13), dp(activity, 10));
+        sourceCard.setBackground(dialogRound(activity, Color.rgb(16, 24, 36), 10,
+                Color.rgb(55, 83, 121), 1));
+        TextView sourceLabel = dialogText(activity, "下载来源", 12,
+                Color.rgb(154, 163, 176), false);
+        sourceCard.addView(sourceLabel);
+        TextView sourceLink = dialogText(activity, "迅雷网盘镜像包  ·  点击查看下载页面", 14,
+                Color.rgb(118, 169, 255), true);
+        sourceLink.setPadding(0, dp(activity, 5), 0, 0);
+        sourceLink.setOnClickListener(v -> openMirrorDownloadLink(activity));
+        sourceCard.addView(sourceLink);
+        LinearLayout.LayoutParams sourceLp = new LinearLayout.LayoutParams(-1, -2);
+        sourceLp.topMargin = dp(activity, 14);
+        panel.addView(sourceCard, sourceLp);
+
+        AlertDialog dialog = new AlertDialog.Builder(activity)
+                .setView(panel)
+                .create();
+
+        Button download = dialogButton(activity, "前往下载", true);
+        download.setOnClickListener(v -> {
+            dialog.dismiss();
+            openMirrorDownloadLink(activity);
+        });
+        LinearLayout.LayoutParams downloadLp = new LinearLayout.LayoutParams(-1, dp(activity, 46));
+        downloadLp.topMargin = dp(activity, 16);
+        panel.addView(download, downloadLp);
+
+        Button local = dialogButton(activity, "选择本地镜像包", false);
+        local.setOnClickListener(v -> {
+            dialog.dismiss();
+            openMirrorPicker(activity, QQ_RELATIVE_DIR);
+        });
+        LinearLayout.LayoutParams localLp = new LinearLayout.LayoutParams(-1, dp(activity, 44));
+        localLp.topMargin = dp(activity, 10);
+        panel.addView(local, localLp);
+
+        TextView cancel = dialogText(activity, "取消", 14, Color.rgb(154, 163, 176), false);
+        cancel.setGravity(Gravity.CENTER);
+        cancel.setClickable(true);
+        cancel.setPadding(0, dp(activity, 8), 0, 0);
+        cancel.setOnClickListener(v -> dialog.dismiss());
+        panel.addView(cancel, new LinearLayout.LayoutParams(-1, dp(activity, 34)));
+
+        dialog.setOnShowListener(ignored -> {
+            if (dialog.getWindow() != null) {
+                dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+                dialog.getWindow().setLayout(-1, -2);
+            }
+        });
+        dialog.show();
+    }
+
+    private static TextView dialogText(Activity activity, String value, float size, int color, boolean bold) {
+        TextView text = new TextView(activity);
+        text.setText(value);
+        text.setTextSize(size);
+        text.setTextColor(color);
+        if (bold) text.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        return text;
+    }
+
+    private static Button dialogButton(Activity activity, String label, boolean primary) {
+        Button button = new Button(activity);
+        button.setText(label);
+        button.setAllCaps(false);
+        button.setTextSize(14);
+        button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        button.setTextColor(primary ? Color.WHITE : Color.rgb(221, 229, 240));
+        button.setPadding(dp(activity, 12), 0, dp(activity, 12), 0);
+        if (primary) {
+            button.setBackground(dialogRound(activity, Color.rgb(37, 103, 226), 10,
+                    Color.rgb(104, 173, 255), 1));
+        } else {
+            button.setBackground(dialogRound(activity, Color.rgb(17, 26, 39), 10,
+                    Color.rgb(55, 83, 121), 1));
+        }
+        if (Build.VERSION.SDK_INT >= 21) {
+            button.setStateListAnimator(null);
+            button.setElevation(primary ? dp(activity, 2) : 0);
+        }
+        return button;
+    }
+
+    private static GradientDrawable dialogSurface(Activity activity) {
+        return dialogRound(activity, Color.rgb(20, 29, 43), 18,
+                Color.rgb(55, 83, 121), 1);
+    }
+
+    private static GradientDrawable dialogRound(Activity activity, int color, int radius,
+                                                int strokeColor, int strokeWidth) {
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(color);
+        background.setCornerRadius(dp(activity, radius));
+        if (strokeWidth > 0) background.setStroke(dp(activity, strokeWidth), strokeColor);
+        return background;
     }
 
     private static void openMirrorDownloadLink(Activity activity) {
