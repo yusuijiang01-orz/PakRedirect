@@ -1,5 +1,7 @@
 # PakRedirect 项目协作规则
 
+涉及 RYLUX/PakRedirect 修改时，使用 `rylux-verified-change` Skill，并在交付前完成其中的源码、构建和验收流程。
+
 ## 唯一工作目录
 
 - 本仓库唯一工作目录是当前 Git 仓库根目录。
