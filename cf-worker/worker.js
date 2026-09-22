@@ -42,7 +42,7 @@ async function handleGameRelay(request, env) {
   }
 
   const suppliedToken =
-    request.headers.get("Authorization")?.replace(/^Bearer\\s+/i, "") ||
+    request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") ||
     new URL(request.url).searchParams.get("token");
 
   if (!suppliedToken || suppliedToken !== token) {
@@ -51,7 +51,7 @@ async function handleGameRelay(request, env) {
 
   const upgrade = request.headers.get("Upgrade");
   if (!upgrade || upgrade.toLowerCase() !== "websocket") {
-    return new Response("WebSocket upgrade required\\n", {
+    return new Response("WebSocket upgrade required\n", {
       status: 426,
       headers: { "content-type": "text/plain; charset=utf-8" },
     });
@@ -61,7 +61,7 @@ async function handleGameRelay(request, env) {
   try {
     socket = connect(GAME_TARGET);
     await socket.opened;
-  } catch (error) {
+  } catch (_) {
     return jsonResponse("target connection failed", 502);
   }
 
@@ -123,15 +123,15 @@ async function handleGameRelay(request, env) {
 
 async function handleCdnProxy(request) {
   const url = new URL(request.url);
-  let rawTarget = url.pathname.replace(/^\\/+/, "");
+  let rawTarget = url.pathname.replace(/^\/+/, "");
   if (url.search) rawTarget += url.search;
   rawTarget = decodeURIComponent(rawTarget);
-  rawTarget = rawTarget.replace(/^(https?:)\\/(?!\\/)/, "$1//");
+  rawTarget = rawTarget.replace(/^(https?:)\/(?!\/)/, "$1//");
 
   if (!rawTarget) {
     return new Response(
-      "RYLUX-CDN Worker 已就绪。\\n" +
-      "用法：/https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/pak/manifest.json\\n",
+      "RYLUX-CDN Worker 已就绪。\n" +
+      "用法：/https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/pak/manifest.json\n",
       { status: 200, headers: { "content-type": "text/plain; charset=utf-8" } }
     );
   }
