@@ -1,6 +1,7 @@
 package com.example.pakredirect;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
@@ -42,6 +43,9 @@ public class MainActivity extends Activity {
     private static final String TARGET_PACKAGE = "com.tepaylink.tamgioiphantranhmobile";
     private static final String MODULE_CODE = "sg_localization";
     private static final int REQUEST_MIRROR_PACK = 4107;
+    // 国内用户镜像包下载地址（迅雷云盘分享）。
+    private static final String MIRROR_DOWNLOAD_URL =
+            "https://pan.xunlei.com/s/VP26gzcX-oxUz_z11q56k2AAA1?pwd=c2cx";
 
     private static final String GAME_NAME = "封神榜(越南版)";
     private static final String GAME_DESCRIPTION = "越南版封神榜，RYLUX 提供本地汉化、资源校验与本地 PAK 接管。";
@@ -279,6 +283,7 @@ public class MainActivity extends Activity {
                         result.membershipActive,
                         result.membershipKind,
                         result.expiresAt,
+                        result.role,
                         ""
                 ));
             });
@@ -312,7 +317,6 @@ public class MainActivity extends Activity {
                     return;
                 }
                 currentUsername = profile.username;
-        currentRole = profile.role != null ? profile.role : "user";
                 showHome(profile);
             });
         }, "RYLUX-Profile").start();
@@ -320,11 +324,11 @@ public class MainActivity extends Activity {
 
     private void showHome(AuthClient.ProfileResult profile) {
         currentProfile = profile;
+        currentRole = normalizeRole(profile.role);
         currentMembershipActive = profile.membershipActive;
         currentMembershipKind = profile.membershipKind == null ? "expired" : profile.membershipKind;
         currentExpiresAt = profile.expiresAt;
         currentUsername = profile.username;
-        currentRole = profile.role != null ? profile.role : "user";
         clearTransientViews();
 
         LinearLayout root = baseContent();
@@ -369,10 +373,11 @@ public class MainActivity extends Activity {
     }
 
     private TextView membershipBadge(AuthClient.ProfileResult profile) {
+        boolean isAdmin = isAdminRole(profile.role);
         boolean trial = profile.membershipActive && "trial".equals(profile.membershipKind);
         boolean vip = profile.membershipActive && !trial;
-        String label = trial ? "体验" : "VIP";
-        int color = trial ? YELLOW : (vip ? RED : BADGE_GRAY);
+        String label = isAdmin ? "Admin" : (trial ? "体验" : "VIP");
+        int color = isAdmin ? Color.rgb(40, 200, 80) : (trial ? YELLOW : (vip ? RED : BADGE_GRAY));
         TextView badge = text(label, 10, Color.WHITE, true);
         badge.setGravity(Gravity.CENTER);
         badge.setPadding(dp(7), 0, dp(7), 0);
@@ -550,14 +555,14 @@ public class MainActivity extends Activity {
         mirrorStatusView.setPadding(0, dp(14), 0, dp(8));
         panel.addView(mirrorStatusView);
 
-        mirrorSelectButton = button("选择镜像包", CARD_SOFT, TEXT);
+        mirrorSelectButton = button("选择镜像包（可选）", CARD_SOFT, TEXT);
         mirrorSelectButton.setOnClickListener(v -> selectMirrorPack());
         LinearLayout.LayoutParams mirrorButtonLp = new LinearLayout.LayoutParams(dp(128), dp(40));
         panel.addView(mirrorSelectButton, mirrorButtonLp);
 
         boolean canLaunch = profile.membershipActive;
         Button start = button(
-                canLaunch ? ("admin".equals(profile.role) ? "▶ 启动内测游戏" : "启动游戏") : "暂时无法使用",
+                canLaunch ? (isAdminRole(profile.role) ? "▶ 启动内测游戏" : "启动游戏") : "暂时无法使用",
                 canLaunch ? PRIMARY : DISABLED,
                 canLaunch ? Color.WHITE : MUTED
         );
@@ -639,18 +644,63 @@ public class MainActivity extends Activity {
     }
 
     private void selectMirrorPack() {
-        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-        intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType("*/*");
-        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{
-                "application/zip",
-                "application/octet-stream",
-                "application/x-zip-compressed"
-        });
-        try {
-            startActivityForResult(intent, REQUEST_MIRROR_PACK);
-        } catch (Throwable t) {
-            toast("无法打开文件选择器");
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(22), dp(20), dp(22), dp(4));
+        content.addView(text("镜像包说明", 19, TEXT, true), new LinearLayout.LayoutParams(-1, -2));
+
+        TextView badge = pill("可选资源", PRIMARY, Color.WHITE);
+        LinearLayout.LayoutParams badgeLp = new LinearLayout.LayoutParams(-2, dp(26));
+        badgeLp.topMargin = dp(10);
+        content.addView(badge, badgeLp);
+
+        TextView message = text("镜像包属于方便国内用户快速更新，也可以通过游戏内部直接更新游戏补丁。\n\n"
+                + "当前版本依然是 v2.4.0。", 14, MUTED, false);
+        message.setLineSpacing(0f, 1.28f);
+        LinearLayout.LayoutParams messageLp = new LinearLayout.LayoutParams(-1, -2);
+        messageLp.topMargin = dp(14);
+        content.addView(message, messageLp);
+
+        TextView link = text("下载地址\n" + MIRROR_DOWNLOAD_URL, 12, PRIMARY, false);
+        link.setLineSpacing(0f, 1.15f);
+        link.setTextIsSelectable(true);
+        link.setPadding(0, dp(10), 0, dp(12));
+        content.addView(link, new LinearLayout.LayoutParams(-1, -2));
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setView(content)
+                .setNegativeButton("取消", null)
+                .setNeutralButton("选择本地镜像包", (d, which) -> openMirrorPicker())
+                .setPositiveButton("前往下载", (d, which) -> openMirrorDownloadLink())
+                .show();
+        styleMirrorDialog(dialog);
+    }
+
+    private void styleMirrorDialog(AlertDialog dialog) {
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(round(CARD, 22));
+            dialog.getWindow().setDimAmount(0.64f);
+            dialog.getWindow().setLayout(Math.min(dp(380), getResources().getDisplayMetrics().widthPixels - dp(32)), -2);
+        }
+        Button negative = dialog.getButton(AlertDialog.BUTTON_NEGATIVE);
+        Button neutral = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
+        Button positive = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+        if (negative != null) negative.setTextColor(MUTED);
+        if (neutral != null) {
+            neutral.setTextColor(TEXT);
+            neutral.setBackground(round(CARD_SOFT, 10));
+        }
+        if (positive != null) {
+            positive.setTextColor(Color.WHITE);
+            positive.setBackground(round(PRIMARY, 10));
+        }
+        for (Button button : new Button[]{negative, neutral, positive}) {
+            if (button != null) {
+                button.setAllCaps(false);
+                button.setTextSize(13);
+                button.setMinHeight(dp(42));
+                button.setPadding(dp(12), 0, dp(12), 0);
+            }
         }
     }
 
@@ -676,7 +726,7 @@ public class MainActivity extends Activity {
                     hideLaunchProgress();
                     if (mirrorSelectButton != null) {
                         mirrorSelectButton.setEnabled(true);
-                        mirrorSelectButton.setText("选择镜像包");
+                        mirrorSelectButton.setText("选择镜像包（可选）");
                     }
                     MirrorPackManager.MirrorStatus status = MirrorPackManager.status(this);
                     if (mirrorStatusView != null) {
@@ -691,7 +741,7 @@ public class MainActivity extends Activity {
                     hideLaunchProgress();
                     if (mirrorSelectButton != null) {
                         mirrorSelectButton.setEnabled(true);
-                        mirrorSelectButton.setText("选择镜像包");
+                        mirrorSelectButton.setText("选择镜像包（可选）");
                     }
                     if (mirrorStatusView != null) {
                         mirrorStatusView.setText("镜像包导入失败");
@@ -721,7 +771,7 @@ public class MainActivity extends Activity {
                 runOnUiThread(() -> {
                     hideLaunchProgress();
                     button.setEnabled(true);
-                    button.setText("admin".equals(currentRole) ? "▶ 启动内测游戏" : "启动游戏");
+                    button.setText(isAdminRole(currentRole) ? "▶ 启动内测游戏" : "启动游戏");
                     toast(result.message);
                     if (result.requestOk) refreshProfile(false);
                 });
@@ -760,7 +810,7 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> {
                 hideLaunchProgress();
                 button.setEnabled(true);
-                button.setText("admin".equals(currentRole) ? "▶ 启动内测游戏" : "启动游戏");
+                button.setText(isAdminRole(currentRole) ? "▶ 启动内测游戏" : "启动游戏");
                 if (!launchGame()) toast("服务已启动，但未找到封神榜游戏启动入口");
             });
         }, "RYLUX-Module-Authorize").start();
@@ -884,7 +934,7 @@ public class MainActivity extends Activity {
         runOnUiThread(() -> {
             hideLaunchProgress();
             button.setEnabled(currentMembershipActive);
-            button.setText(currentMembershipActive ? ("admin".equals(currentRole) ? "▶ 启动内测游戏" : "启动游戏") : "暂时无法使用");
+            button.setText(currentMembershipActive ? (isAdminRole(currentRole) ? "▶ 启动内测游戏" : "启动游戏") : "暂时无法使用");
             toast(message);
         });
     }
@@ -1141,12 +1191,23 @@ public class MainActivity extends Activity {
     }
 
     private TextView membershipStateText(AuthClient.ProfileResult profile) {
+        boolean admin = isAdminRole(profile.role);
         boolean trial = profile.membershipActive && "trial".equals(profile.membershipKind);
-        String label = trial ? "24 小时体验" : (profile.membershipActive ? "VIP 会员" : "使用时间已到期");
-        int color = trial ? YELLOW : (profile.membershipActive ? GREEN : RED);
+        String label = admin ? "Admin 内测账号"
+                : (trial ? "24 小时体验" : (profile.membershipActive ? "VIP 会员" : "使用时间已到期"));
+        int color = admin ? GREEN : (trial ? YELLOW : (profile.membershipActive ? GREEN : RED));
         TextView v = text(label, 14, color, true);
         v.setPadding(0, 0, 0, dp(6));
         return v;
+    }
+
+    private static String normalizeRole(String role) {
+        String value = role == null ? "" : role.trim().toLowerCase(Locale.US);
+        return "admin".equals(value) ? "admin" : "user";
+    }
+
+    private static boolean isAdminRole(String role) {
+        return "admin".equals(normalizeRole(role));
     }
 
     private Button button(String label, int bg, int fg) {
