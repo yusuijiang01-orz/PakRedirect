@@ -34,11 +34,15 @@ GET  /api/v1/plans
 POST /api/v1/redeem
 GET  /api/v1/modules
 POST /api/v1/modules/sg_localization/authorize
+GET  /api/v1/modules/sg_localization/relay-token
 ```
 
 注册默认赠送 24 小时体验。同一公网 IP 在成功注册后的 48 小时内再次注册返回 HTTP 429。登录会返回 Bearer Token；服务端数据库只保存 Token 的 SHA-256 摘要。
 
 首个模块的用户可见名称为“封神榜汉化”；内部模块代码仍保持 `sg_localization`，避免破坏已有客户端接口。
+
+游戏 relay 凭据只通过已登录且有效的授权接口按需返回。后端运行环境必须配置与
+Cloudflare Worker Secret `RYLUX_RELAY_TOKEN` 相同的环境变量；不要把真实值写入仓库、APK 或日志。
 
 旧接口仍保留：
 
@@ -68,6 +72,10 @@ V1 增加：
 管理员登录体系、PBKDF2-SHA256、Secure + HttpOnly Cookie、CSRF 和登录限流继续保留。
 
 ## 已有 VPS 升级
+
+部署 relay 功能前，在后端服务环境中配置与 Cloudflare Worker 相同的
+`RYLUX_RELAY_TOKEN`。该值只用于后端按授权接口返回 relay 凭据，不写入仓库或 APK。
+建议使用 `systemctl edit pakredirect-license` 写入环境变量后重启服务。
 
 数据库文件：
 

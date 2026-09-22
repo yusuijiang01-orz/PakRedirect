@@ -30,6 +30,7 @@ public final class RelayVpnService extends VpnService {
     public static final String ACTION_STOP = "com.example.pakredirect.RELAY_STOP";
     public static final String ACTION_STATUS = "com.example.pakredirect.RELAY_STATUS";
     public static final String EXTRA_MESSAGE = "message";
+    public static final String EXTRA_RELAY_TOKEN = "relay_token";
     public static final int NOTIFICATION_ID = 8;
 
     private static final String TAG = "RYLUX-Relay";
@@ -47,6 +48,7 @@ public final class RelayVpnService extends VpnService {
     private RelaySocks5Server socksServer;
     private ParcelFileDescriptor tunInterface;
     private File configFile;
+    private volatile String relayToken;
     private boolean nativeStarted;
     private ScheduledExecutorService idleScheduler;
 
@@ -63,6 +65,10 @@ public final class RelayVpnService extends VpnService {
             return START_NOT_STICKY;
         }
         if (!ACTION_START.equals(action)) return START_NOT_STICKY;
+        String requestedToken = intent.getStringExtra(EXTRA_RELAY_TOKEN);
+        if (requestedToken != null && !requestedToken.trim().isEmpty()) {
+            relayToken = requestedToken.trim();
+        }
 
         try {
             if (Build.VERSION.SDK_INT >= 29) {
@@ -90,9 +96,9 @@ public final class RelayVpnService extends VpnService {
 
     private void startRelay() {
         try {
-            String token = new AuthStorage(this).loadToken();
+            String token = relayToken;
             if (token == null || token.trim().isEmpty()) {
-                throw new IllegalStateException("登录状态无效，请重新登录");
+                throw new IllegalStateException("relay 凭据无效，请重新授权");
             }
 
             updateNotification("正在检查 relay 到游戏服务器的连接…");
@@ -224,6 +230,7 @@ public final class RelayVpnService extends VpnService {
             configFile = null;
             sessions.set(0);
             acceptedSession = false;
+            relayToken = null;
         }
         broadcast("游戏 relay 已停止");
     }

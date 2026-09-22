@@ -782,9 +782,15 @@ public class MainActivity extends Activity {
                 button.setText("正在启动游戏 relay…");
                 showLaunchProgress("正在启动游戏 relay…", -1);
             });
+            AuthClient.RelayTokenResult relayCredentials = AuthClient.relayToken(currentToken, MODULE_CODE);
+            if (!relayCredentials.requestOk || !relayCredentials.success) {
+                resetStartButton(button, relayCredentials.message);
+                return;
+            }
             try {
                 Intent relay = new Intent(this, RelayVpnService.class)
-                        .setAction(RelayVpnService.ACTION_START);
+                        .setAction(RelayVpnService.ACTION_START)
+                        .putExtra(RelayVpnService.EXTRA_RELAY_TOKEN, relayCredentials.token);
                 if (Build.VERSION.SDK_INT >= 26) startForegroundService(relay);
                 else startService(relay);
             } catch (Throwable t) {

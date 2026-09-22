@@ -20,6 +20,7 @@ SESSION_DAYS = 30
 TRIAL_HOURS = 24
 VIP_PRESETS = (1, 7, 30, 90, 180, 365)
 TARGET_PACKAGE = "com.tepaylink.tamgioiphantranhmobile"
+RELAY_TOKEN = os.environ.get("RYLUX_RELAY_TOKEN", "").strip()
 
 
 class RegisterPayload(BaseModel):
@@ -563,6 +564,24 @@ def authorize_module(
         "allowed": True,
         "module": dict(module),
         "expires_at": m["expires_at"],
+    }
+
+
+@router.get("/api/v1/modules/{module_code}/relay-token")
+def relay_token(
+    module_code: str,
+    authorization: str | None = Header(default=None),
+):
+    auth, _ = require_user(authorization)
+    if module_code != "sg_localization":
+        raise HTTPException(status_code=404, detail="模块不存在")
+    if not RELAY_TOKEN:
+        raise HTTPException(status_code=503, detail="relay 尚未配置")
+    if not membership(auth)["active"]:
+        raise HTTPException(status_code=403, detail="体验或 VIP 已到期，请续费后使用")
+    return {
+        "relay_url": "wss://relay.lovenom.eu.org/rylux-game",
+        "relay_token": RELAY_TOKEN,
     }
 
 
