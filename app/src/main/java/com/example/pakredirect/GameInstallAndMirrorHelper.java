@@ -112,7 +112,7 @@ public final class GameInstallAndMirrorHelper {
     }
 
     private static void decorate(Activity activity) {
-        Button mirrorButton = findButton(activity.getWindow().getDecorView(), "选择镜像包");
+        Button mirrorButton = findMirrorButton(activity.getWindow().getDecorView());
         if (mirrorButton == null) return;
         if (!(mirrorButton.getParent() instanceof LinearLayout)) return;
 
@@ -162,6 +162,11 @@ public final class GameInstallAndMirrorHelper {
             }
         }
         return null;
+    }
+
+    private static Button findMirrorButton(View root) {
+        Button button = findButton(root, "选择镜像包（可选）");
+        return button != null ? button : findButton(root, "选择镜像包");
     }
 
     private static void styleInstallButton(Activity activity, Button button) {
