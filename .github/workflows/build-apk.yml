@@ -6,11 +6,11 @@ on:
       version_name:
         description: 'Version name, for example 2.3.0'
         required: true
-        default: '2.3.0'
+        default: '2.5.0'
       version_code:
         description: 'Monotonically increasing Android versionCode'
         required: true
-        default: '12'
+        default: '16'
 
 jobs:
   build-release:
