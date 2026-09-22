@@ -2,7 +2,7 @@ param(
     [string]$Url = "wss://relay.lovenom.eu.org/rylux-game"
 )
 
-$secure = Read-Host "输入 RYLUX_RELAY_TOKEN" -AsSecureString
+$secure = Read-Host "Enter RYLUX_RELAY_TOKEN" -AsSecureString
 $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
 try {
     $token = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)
@@ -16,9 +16,9 @@ $cts = [Threading.CancellationTokenSource]::new(15000)
 
 try {
     $socket.ConnectAsync([Uri]$Url, $cts.Token).GetAwaiter().GetResult()
-    Write-Host ("WebSocket 状态: " + $socket.State)
+    Write-Host ("WebSocket state: " + $socket.State)
     if ($socket.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
-        Write-Host "Relay 握手成功，目标 TCP 已接通。"
+        Write-Host "Relay handshake succeeded; target TCP is reachable."
         $socket.CloseAsync(
             [System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure,
             "smoke test",
@@ -28,7 +28,7 @@ try {
     }
     exit 1
 } catch {
-    Write-Error ("Relay 握手失败: " + $_.Exception.Message)
+    Write-Error ("Relay handshake failed: " + $_.Exception.Message)
     exit 1
 } finally {
     $socket.Dispose()
