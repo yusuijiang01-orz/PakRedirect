@@ -74,7 +74,7 @@ V1 增加：
 ## 已有 VPS 升级
 
 部署 relay 功能前，在后端服务环境中配置与 Cloudflare Worker 相同的
-`RYLUX_RELAY_TOKEN`。该值只用于后端按授权接口返回 relay 凭据，不写入仓库或 APK。
+`RYLUX_RELAY_TOKEN`。该值只用于后端签发短时 relay 凭据，不写入仓库或 APK。
 建议使用 `systemctl edit pakredirect-license` 写入环境变量后重启服务。
 
 数据库文件：

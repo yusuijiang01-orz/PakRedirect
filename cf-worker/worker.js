@@ -45,7 +45,7 @@ async function handleGameRelay(request, env) {
     request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") ||
     new URL(request.url).searchParams.get("token");
 
-  if (!suppliedToken || suppliedToken !== token) {
+  if (!suppliedToken || !(suppliedToken === token || await verifyRelayCredential(suppliedToken, token))) {
     return jsonResponse("unauthorized", 401);
   }
 
@@ -199,4 +199,38 @@ function jsonResponse(message, status) {
     status,
     headers: { "content-type": "application/json; charset=utf-8" },
   });
+}
+
+async function verifyRelayCredential(value, secret) {
+  const parts = value.split(".");
+  if (parts.length !== 3 || parts[0] !== "v1" || !parts[1] || !parts[2]) return false;
+  try {
+    const payload = JSON.parse(new TextDecoder().decode(base64UrlBytes(parts[1])));
+    const now = Math.floor(Date.now() / 1000);
+    if (payload.v !== 1 || !payload.sub || !Number.isInteger(payload.exp) || payload.exp <= now) {
+      return false;
+    }
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(secret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["verify"],
+    );
+    return crypto.subtle.verify(
+      "HMAC",
+      key,
+      base64UrlBytes(parts[2]),
+      new TextEncoder().encode("v1." + parts[1]),
+    );
+  } catch (_) {
+    return false;
+  }
+}
+
+function base64UrlBytes(value) {
+  const padded = value.replace(/-/g, "+").replace(/_/g, "/")
+    + "=".repeat((4 - (value.length % 4)) % 4);
+  const raw = atob(padded);
+  return Uint8Array.from(raw, (character) => character.charCodeAt(0));
 }
