@@ -51,13 +51,14 @@ public final class GameInstallAndMirrorHelper {
     private static final int REQUEST_MIRROR_PACK = 4107;
 
     private static final String GAME_APK_NAME = "TamGioiPhanTranhMobile-587.apk";
+    // 游戏 APK 本体迁移到 GitHub Release（tag=game-apk）分发，避开 Git LFS 每月 1GB 带宽配额。
     private static final String GAME_APK_URL =
-            "https://media.githubusercontent.com/media/yusuijiang01-orz/PakRedirect/main/apk/"
+            "https://github.com/yusuijiang01-orz/PakRedirect/releases/download/game-apk/"
                     + GAME_APK_NAME;
     private static final long GAME_APK_SIZE = 101_938_646L;
-    // Git LFS object id from apk/TamGioiPhanTranhMobile-587.apk.
+    // Git LFS object id from apk/TamGioiPhanTranhMobile-587.apk（上传到 Release 的 APK 必须与此一致）。
     private static final String GAME_APK_SHA256 =
-            "a6afbc3da4d887b70f2a3801e9160a052e103be795c86835a4398e2ad7f56cde";
+            "48b5037202bedfcdbe3bf37d5447af6f71a8b5fddc6e79cc57efb6c304fdec6c";
 
     private static final String MIRROR_FILE_NAME = "RYLUX-Official-v1.rmp";
     private static final String QQ_RELATIVE_DIR =
@@ -389,58 +390,76 @@ public final class GameInstallAndMirrorHelper {
         File part = new File(target.getParentFile(), target.getName() + ".part");
         if (part.exists() && !part.delete()) throw new IllegalStateException("无法清理旧下载缓存");
 
+        String[] sources = CnDownloadRouter.largeGithubFileUrls(GAME_APK_URL);
+        Throwable last = null;
         HttpURLConnection connection = null;
-        try {
-            updateButton(activity, button, "正在下载游戏… 0%");
-            connection = (HttpURLConnection) new URL(GAME_APK_URL).openConnection();
-            connection.setConnectTimeout(15_000);
-            connection.setReadTimeout(30_000);
-            connection.setUseCaches(false);
-            connection.setInstanceFollowRedirects(true);
-            connection.setRequestProperty("User-Agent", "RYLUX/2.3");
-            connection.setRequestProperty("Accept", "application/octet-stream,*/*");
-            int code = connection.getResponseCode();
-            if (code < 200 || code >= 300) {
-                throw new IllegalStateException("下载服务器返回 HTTP " + code);
+        for (int sourceIndex = 0; sourceIndex < sources.length; sourceIndex++) {
+            if (part.exists() && !part.delete()) {
+                throw new IllegalStateException("无法清理旧下载缓存");
             }
-
-            long total = connection.getContentLengthLong();
-            long read = 0L;
-            int lastPercent = -1;
-            try (BufferedInputStream in = new BufferedInputStream(connection.getInputStream(), 64 * 1024);
-                 FileOutputStream out = new FileOutputStream(part)) {
-                byte[] buffer = new byte[64 * 1024];
-                int n;
-                while ((n = in.read(buffer)) != -1) {
-                    out.write(buffer, 0, n);
-                    read += n;
-                    long denominator = total > 0 ? total : GAME_APK_SIZE;
-                    int percent = denominator > 0
-                            ? (int) Math.min(99L, (read * 100L) / denominator)
-                            : 0;
-                    if (percent != lastPercent) {
-                        lastPercent = percent;
-                        updateButton(activity, button, "正在下载游戏… " + percent + "%");
-                    }
+            try {
+                updateButton(activity, button, "正在下载游戏（线路 " + (sourceIndex + 1)
+                        + "/" + sources.length + "）… 0%");
+                connection = (HttpURLConnection) new URL(sources[sourceIndex]).openConnection();
+                connection.setConnectTimeout(sourceIndex == 0 ? 15_000 : 20_000);
+                connection.setReadTimeout(30_000);
+                connection.setUseCaches(false);
+                connection.setInstanceFollowRedirects(true);
+                connection.setRequestProperty("User-Agent", "RYLUX/2.3");
+                connection.setRequestProperty("Accept", "application/octet-stream,*/*");
+                int code = connection.getResponseCode();
+                if (code < 200 || code >= 300) {
+                    throw new IllegalStateException("下载服务器返回 HTTP " + code);
                 }
-                out.getFD().sync();
-            }
 
-            if (read != GAME_APK_SIZE) {
-                throw new IllegalStateException("下载文件大小不正确：" + read + " 字节");
+                long total = connection.getContentLengthLong();
+                long read = 0L;
+                int lastPercent = -1;
+                try (BufferedInputStream in = new BufferedInputStream(connection.getInputStream(), 64 * 1024);
+                     FileOutputStream out = new FileOutputStream(part)) {
+                    byte[] buffer = new byte[64 * 1024];
+                    int n;
+                    while ((n = in.read(buffer)) != -1) {
+                        out.write(buffer, 0, n);
+                        read += n;
+                        long denominator = total > 0 ? total : GAME_APK_SIZE;
+                        int percent = denominator > 0
+                                ? (int) Math.min(99L, (read * 100L) / denominator)
+                                : 0;
+                        if (percent != lastPercent) {
+                            lastPercent = percent;
+                            updateButton(activity, button, "正在下载游戏… " + percent + "%");
+                        }
+                    }
+                    out.getFD().sync();
+                }
+
+                if (read != GAME_APK_SIZE) {
+                    throw new IllegalStateException("下载文件大小不正确：" + read + " 字节");
+                }
+                if (target.exists() && !target.delete()) {
+                    throw new IllegalStateException("无法替换旧 APK");
+                }
+                if (!part.renameTo(target)) {
+                    copyFile(part, target);
+                    if (!part.delete()) part.deleteOnExit();
+                }
+                updateButton(activity, button, "正在校验 APK（MD5）…");
+                return;
+            } catch (Throwable t) {
+                last = t;
+                if (part.exists()) part.delete();
+                if (sourceIndex + 1 < sources.length) {
+                    updateButton(activity, button, "当前线路不可用，正在切换备用线路…");
+                }
+            } finally {
+                if (connection != null) connection.disconnect();
+                connection = null;
             }
-            if (target.exists() && !target.delete()) {
-                throw new IllegalStateException("无法替换旧 APK");
-            }
-            if (!part.renameTo(target)) {
-                copyFile(part, target);
-                if (!part.delete()) part.deleteOnExit();
-            }
-            updateButton(activity, button, "正在校验 APK（MD5）…");
-        } finally {
-            if (connection != null) connection.disconnect();
-            if (part.exists() && !target.exists()) part.delete();
         }
+        if (part.exists() && !target.exists()) part.delete();
+        throw new IllegalStateException("所有 APK 下载线路均不可用"
+                + (last == null ? "" : "：" + safeMessage(last)));
     }
 
     private static void copyFile(File source, File target) throws Exception {

@@ -49,8 +49,10 @@ public final class GameApkCloudInstaller {
     private static final String META_URL =
             "https://api.github.com/repos/yusuijiang01-orz/PakRedirect/contents/apk/"
                     + GAME_APK_NAME + "?ref=main";
+    // 游戏 APK 本体迁移到 GitHub Release（tag=game-apk）分发，避开 Git LFS 每月 1GB 带宽配额；
+    // 校验元数据（sha256/size）仍来自仓库内 LFS 指针，上传到 Release 的文件必须与指针一致。
     private static final String MEDIA_URL =
-            "https://media.githubusercontent.com/media/yusuijiang01-orz/PakRedirect/main/apk/"
+            "https://github.com/yusuijiang01-orz/PakRedirect/releases/download/game-apk/"
                     + GAME_APK_NAME;
 
     private static final String PREFS = "rylux_game_installer_cloud_v2";

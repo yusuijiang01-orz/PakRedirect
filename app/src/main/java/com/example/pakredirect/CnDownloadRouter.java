@@ -8,25 +8,53 @@ import java.util.List;
  * unavailable. Only public repository/API URLs are sent through the proxy/CDN;
  * authentication tokens are never attached to these requests.
  *
+ * Download candidate order: 自建 Cloudflare Worker 反代 → 公共 gh-proxy → 原始直连。
+ * 小文件（≤20MB）额外保留 jsDelivr 作为补充；大文件 jsDelivr 会失败，自动落到下一候选。
+ *
  * Every caller must still validate the downloaded bytes with its authoritative
  * SHA-256/size/signature metadata before accepting them.
  */
 public final class CnDownloadRouter {
     private static final String OWNER_REPO = "yusuijiang01-orz/PakRedirect";
     private static final String BRANCH = "main";
+
+    /**
+     * 自建 Cloudflare Worker 反代。
+     * 部署 worker.js 后把下面的占位符替换为真实地址，例如
+     * https://rylux-cdn.你的子域名.workers.dev/
+     */
+    private static final String CF_WORKER = "https://rylux-cdn.<你的子域名>.workers.dev/";
+    /** 公共加速，作为自建 Worker 的兜底。 */
     private static final String GH_PROXY = "https://gh-proxy.com/";
+
+    private static final String[] GITHUB_HOSTS = {
+            "raw.githubusercontent.com",
+            "media.githubusercontent.com",
+            "api.github.com",
+            "github.com",
+            "objects.githubusercontent.com",
+    };
 
     private CnDownloadRouter() {}
 
-    public static String accelerated(String githubUrl) {
-        if (githubUrl == null || githubUrl.trim().isEmpty()) return githubUrl;
+    /** 加速候选列表：CF Worker → gh-proxy → 原始直连；非 GitHub 域名原样返回。 */
+    public static String[] acceleratedCandidates(String githubUrl) {
+        if (githubUrl == null || githubUrl.trim().isEmpty()) return new String[0];
         String value = githubUrl.trim();
-        if (value.startsWith(GH_PROXY)) return value;
-        return GH_PROXY + value;
+        if (value.startsWith(CF_WORKER) || value.startsWith(GH_PROXY)) {
+            return new String[]{value};
+        }
+        if (!isGithubUrl(value)) return new String[]{value};
+        return unique(CF_WORKER + value, GH_PROXY + value, value);
+    }
+
+    public static String accelerated(String githubUrl) {
+        String[] candidates = acceleratedCandidates(githubUrl);
+        return candidates.length > 0 ? candidates[0] : githubUrl;
     }
 
     public static String[] githubApiUrls(String directApiUrl) {
-        return unique(accelerated(directApiUrl), directApiUrl);
+        return acceleratedCandidates(directApiUrl);
     }
 
     public static String[] publicRepoFileUrls(String path) {
@@ -43,11 +71,21 @@ public final class CnDownloadRouter {
         String safeName = normalizeRepoPath(fileName);
         String raw = base + safeName;
         String jsdelivr = jsdelivrUrl(base, safeName);
-        return unique(accelerated(raw), jsdelivr, raw);
+        return unique(CF_WORKER + raw, GH_PROXY + raw, jsdelivr, raw);
     }
 
     public static String[] largeGithubFileUrls(String directUrl) {
-        return unique(accelerated(directUrl), directUrl);
+        return acceleratedCandidates(directUrl);
+    }
+
+    private static boolean isGithubUrl(String value) {
+        String lower = value.toLowerCase();
+        for (String host : GITHUB_HOSTS) {
+            if (lower.startsWith("https://" + host) || lower.startsWith("http://" + host)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static String normalizeRepoPath(String path) {
