@@ -122,7 +122,7 @@ public final class GameApkCloudInstaller {
         return null;
     }
 
-    private static void startInstall(Activity activity, Button button) {
+    static void startInstall(Activity activity, Button button) {
         synchronized (INSTALL_LOCK) {
             if (installBusy) {
                 toast(activity, "游戏安装任务正在进行中");

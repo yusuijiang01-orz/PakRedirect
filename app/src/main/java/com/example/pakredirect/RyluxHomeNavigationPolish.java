@@ -217,7 +217,7 @@ public final class RyluxHomeNavigationPolish {
 
         TextView flowTitle = label(activity, "操作流程", 14, TEXT, true);
         flowCard.addView(flowTitle, new LinearLayout.LayoutParams(-1, -2));
-        TextView flow = label(activity, "① 安装游戏   →   ② 选择镜像包   →   ③ 启动游戏", widthDp <= 360 ? 11.5f : 12.5f, MUTED, false);
+        TextView flow = label(activity, "① 安装游戏   →   ② 设置汉化/加速   →   ③ 启动游戏", widthDp <= 360 ? 11.5f : 12.5f, MUTED, false);
         flow.setLineSpacing(0f, 1.15f);
         LinearLayout.LayoutParams flowLp = new LinearLayout.LayoutParams(-1, -2);
         flowLp.topMargin = dp(activity, 6);
@@ -233,7 +233,7 @@ public final class RyluxHomeNavigationPolish {
         enterLp.bottomMargin = dp(activity, 8);
         root.addView(enter, enterLp);
 
-        TextView enterHint = label(activity, "安装、镜像包和启动入口都在游戏详情中", 11.5f, MUTED, false);
+        TextView enterHint = label(activity, "安装、汉化/加速设置和启动入口都在游戏详情中", 11.5f, MUTED, false);
         enterHint.setGravity(Gravity.CENTER);
         root.addView(enterHint, new LinearLayout.LayoutParams(-1, -2));
 

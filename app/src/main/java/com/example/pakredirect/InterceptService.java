@@ -94,19 +94,24 @@ public class InterceptService extends Service implements BundledPakServer.Listen
                 throw new IllegalStateException("登录状态无效，请重新登录");
             }
 
-            updateLaunchStatus("正在验证加密汉化资源…", -1);
-            ProtectedContentManager.UpdateResult update = ProtectedContentManager.checkAndApply(
-                    this,
-                    token,
-                    (message, percent, indeterminate) ->
-                            updateLaunchStatus(message, indeterminate ? -1 : percent)
-            );
-            if (update.updated) {
-                updateLaunchStatus("加密汉化资源已更新 " + update.changedFiles + " 个文件", 100);
+            boolean localizationEnabled = LocalizationSettings.isEnabled(this);
+            if (localizationEnabled) {
+                updateLaunchStatus("正在验证加密汉化资源…", -1);
+                ProtectedContentManager.UpdateResult update = ProtectedContentManager.checkAndApply(
+                        this,
+                        token,
+                        (message, percent, indeterminate) ->
+                                updateLaunchStatus(message, indeterminate ? -1 : percent)
+                );
+                if (update.updated) {
+                    updateLaunchStatus("加密汉化资源已更新 " + update.changedFiles + " 个文件", 100);
+                }
+            } else {
+                updateLaunchStatus("汉化已关闭，保留官方资源下载源…", 100);
             }
 
             updateLaunchStatus("正在启动本地 PAK 服务…", 100);
-            next = new BundledPakServer(this, this);
+            next = new BundledPakServer(this, this, localizationEnabled);
             next.prepare();
             next.start();
             server = next;

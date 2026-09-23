@@ -18,6 +18,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.Space;
+import android.widget.Switch;
 import android.widget.TextView;
 
 import java.util.ArrayList;
@@ -28,8 +29,8 @@ import java.util.WeakHashMap;
 /**
  * Presentation-only layer for the programmatic MainActivity.
  *
- * MainActivity still owns authentication, membership, mirror import,
- * protected-content preparation and game launch. This class only rearranges
+ * MainActivity still owns authentication, membership, game installation,
+ * localization selection, protected-content preparation and game launch. This class only rearranges
  * and styles existing views so those behaviors keep their original listeners
  * and references.
  */
@@ -457,8 +458,8 @@ public final class RyluxUiPolish {
         TextView description = asText(children.get(2));
         View updateRow = children.get(3);
         View progressRow = children.get(4);
-        TextView mirrorStatus = asText(children.get(5));
-        Button mirrorButton = asButton(children.get(6));
+        Button installButton = asButton(children.get(5));
+        View localizationControl = children.get(6);
         Button startButton = asButton(children.get(7));
         TextView moduleProgressText = asText(children.get(8));
         View moduleProgress = children.get(9);
@@ -557,22 +558,21 @@ public final class RyluxUiPolish {
         infoCard.addView(progressRow, new LinearLayout.LayoutParams(-1, dp(activity, 43)));
         infoCard.addView(separator(activity), new LinearLayout.LayoutParams(-1, dp(activity, 1)));
 
-        mirrorStatus.setTextSize(13);
-        mirrorStatus.setTextColor(MUTED);
-        mirrorStatus.setGravity(Gravity.CENTER_VERTICAL);
-        mirrorStatus.setPadding(dp(activity, 2), 0, dp(activity, 2), 0);
-        infoCard.addView(mirrorStatus, new LinearLayout.LayoutParams(-1, dp(activity, 43)));
-
         LinearLayout.LayoutParams infoLp = new LinearLayout.LayoutParams(-1, -2);
         infoLp.topMargin = dp(activity, 2);
         panel.addView(infoCard, infoLp);
 
-        styleOutlineButton(activity, mirrorButton, false);
-        mirrorButton.setText("选择镜像包（可选）");
-        LinearLayout.LayoutParams mirrorLp =
-                new LinearLayout.LayoutParams(-1, dp(activity, 46));
-        mirrorLp.topMargin = dp(activity, 12);
-        panel.addView(mirrorButton, mirrorLp);
+        stylePrimaryButton(activity, installButton);
+        installButton.setText("安装游戏");
+        LinearLayout.LayoutParams installLp = new LinearLayout.LayoutParams(-1, dp(activity, 46));
+        installLp.topMargin = dp(activity, 12);
+        panel.addView(installButton, installLp);
+
+        styleFeatureControls(activity, localizationControl);
+        LinearLayout.LayoutParams localizationLp =
+                new LinearLayout.LayoutParams(-1, -2);
+        localizationLp.topMargin = dp(activity, 10);
+        panel.addView(localizationControl, localizationLp);
 
         stylePrimaryButton(activity, startButton);
         startButton.setText(startButton.isEnabled() ? "▶  启动游戏" : startButton.getText());
@@ -598,6 +598,47 @@ public final class RyluxUiPolish {
                 new LinearLayout.LayoutParams(-1, dp(activity, 5));
         progressLp.topMargin = dp(activity, 1);
         panel.addView(moduleProgress, progressLp);
+    }
+
+    private static void styleFeatureControls(Activity activity, View raw) {
+        if (!(raw instanceof LinearLayout)) return;
+        LinearLayout controls = (LinearLayout) raw;
+        for (int i = 0; i < controls.getChildCount(); i++) {
+            View child = controls.getChildAt(i);
+            if (!(child instanceof LinearLayout)) continue;
+            LinearLayout control = (LinearLayout) child;
+            control.setBackground(round(activity, SURFACE_2, 12, BORDER, 1));
+            if (control.getChildCount() < 2 || !(control.getChildAt(0) instanceof LinearLayout)) continue;
+
+            LinearLayout row = (LinearLayout) control.getChildAt(0);
+            if (row.getChildCount() < 2) continue;
+            View titleRaw = row.getChildAt(0);
+            if (titleRaw instanceof TextView) {
+                TextView title = (TextView) titleRaw;
+                title.setTextColor(TEXT);
+                title.setTextSize(13);
+                title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+            }
+            View toggleRaw = row.getChildAt(1);
+            if (toggleRaw instanceof Switch) {
+                Switch toggle = (Switch) toggleRaw;
+                toggle.setTextColor(TEXT);
+                toggle.setThumbTintList(new android.content.res.ColorStateList(
+                        new int[][]{new int[]{android.R.attr.state_checked}, new int[]{}},
+                        new int[]{Color.rgb(245, 248, 255), Color.rgb(190, 202, 219)}
+                ));
+                toggle.setTrackTintList(new android.content.res.ColorStateList(
+                        new int[][]{new int[]{android.R.attr.state_checked}, new int[]{}},
+                        new int[]{BLUE, Color.rgb(52, 65, 84)}
+                ));
+            }
+            View noteRaw = control.getChildAt(1);
+            if (noteRaw instanceof TextView) {
+                TextView note = (TextView) noteRaw;
+                note.setTextColor(MUTED);
+                note.setTextSize(10);
+            }
+        }
     }
 
     private static void styleHeader(Activity activity, View headerRaw, boolean gamePanel) {

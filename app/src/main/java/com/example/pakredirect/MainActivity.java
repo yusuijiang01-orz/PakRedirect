@@ -9,7 +9,6 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
-import android.net.Uri;
 import android.net.VpnService;
 import android.os.Build;
 import android.os.Bundle;
@@ -32,6 +31,7 @@ import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.Space;
+import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -43,7 +43,6 @@ import java.util.Locale;
 public class MainActivity extends Activity {
     private static final String TARGET_PACKAGE = "com.tepaylink.tamgioiphantranhmobile";
     private static final String MODULE_CODE = "sg_localization";
-    private static final int REQUEST_MIRROR_PACK = 4107;
     private static final int REQUEST_VPN_PERMISSION = 4108;
     private static final String GAME_NAME = "封神榜(越南版)";
     private static final String GAME_DESCRIPTION = "越南版封神榜，RYLUX 提供本地汉化、资源校验与本地 PAK 接管。";
@@ -89,8 +88,6 @@ public class MainActivity extends Activity {
 
     private ProgressBar moduleProgress;
     private TextView moduleProgressText;
-    private TextView mirrorStatusView;
-    private Button mirrorSelectButton;
     private volatile String launchWaitError = "";
     private Button pendingVpnButton;
 
@@ -132,10 +129,6 @@ public class MainActivity extends Activity {
             beginModuleLaunch(button);
             return;
         }
-        if (requestCode != REQUEST_MIRROR_PACK || resultCode != RESULT_OK || data == null) return;
-        Uri uri = data.getData();
-        if (uri == null) return;
-        importMirrorPack(uri);
     }
 
     private void showSessionLoading() {
@@ -410,16 +403,6 @@ public class MainActivity extends Activity {
         supportedLp.topMargin = dp(22);
         canvas.addView(supported, supportedLp);
 
-        MirrorPackManager.MirrorStatus mirror = MirrorPackManager.status(this);
-        if (mirror.ready) {
-            TextView mirrorBadge = pill("镜像已就绪", PRIMARY, Color.WHITE);
-            FrameLayout.LayoutParams mirrorLp = new FrameLayout.LayoutParams(-2, dp(28));
-            mirrorLp.gravity = Gravity.TOP | Gravity.END;
-            mirrorLp.rightMargin = dp(22);
-            mirrorLp.topMargin = dp(22);
-            canvas.addView(mirrorBadge, mirrorLp);
-        }
-
         ImageView icon = new ImageView(this);
         icon.setScaleType(ImageView.ScaleType.CENTER_CROP);
         Drawable gameIcon = loadTargetIcon();
@@ -560,15 +543,17 @@ public class MainActivity extends Activity {
         panel.addView(infoRow("最近更新时间", GAME_LAST_UPDATED));
         panel.addView(infoRow("汉化完成度", LOCALIZATION_PROGRESS));
 
-        MirrorPackManager.MirrorStatus mirror = MirrorPackManager.status(this);
-        mirrorStatusView = text(mirrorStatusText(mirror), 13, mirror.ready ? GREEN : MUTED, false);
-        mirrorStatusView.setPadding(0, dp(14), 0, dp(8));
-        panel.addView(mirrorStatusView);
+        Button installGame = button("安装游戏", PRIMARY, Color.WHITE);
+        installGame.setTag("rylux_install_game_button");
+        installGame.setOnClickListener(v -> GameApkCloudInstaller.startInstall(this, installGame));
+        LinearLayout.LayoutParams installGameLp = new LinearLayout.LayoutParams(-1, dp(46));
+        installGameLp.topMargin = dp(14);
+        panel.addView(installGame, installGameLp);
 
-        mirrorSelectButton = button("选择镜像包（可选）", CARD_SOFT, TEXT);
-        mirrorSelectButton.setOnClickListener(v -> selectMirrorPack());
-        LinearLayout.LayoutParams mirrorButtonLp = new LinearLayout.LayoutParams(dp(128), dp(40));
-        panel.addView(mirrorSelectButton, mirrorButtonLp);
+        LinearLayout featureControls = featureControls();
+        LinearLayout.LayoutParams featureControlsLp = new LinearLayout.LayoutParams(-1, -2);
+        featureControlsLp.topMargin = dp(10);
+        panel.addView(featureControls, featureControlsLp);
 
         boolean canLaunch = profile.membershipActive;
         Button start = button(
@@ -653,59 +638,6 @@ public class MainActivity extends Activity {
         }, "RYLUX-Redeem").start();
     }
 
-    private void selectMirrorPack() {
-        GameInstallAndMirrorHelper.showMirrorChoiceDialog(this);
-    }
-
-    private void importMirrorPack(Uri uri) {
-        if (mirrorSelectButton != null) {
-            mirrorSelectButton.setEnabled(false);
-            mirrorSelectButton.setText("导入中…");
-        }
-        if (mirrorStatusView != null) {
-            mirrorStatusView.setText("正在导入镜像包，请保持 RYLUX 在前台…");
-            mirrorStatusView.setTextColor(MUTED);
-        }
-        showLaunchProgress("正在读取镜像包…", 0);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-
-        new Thread(() -> {
-            try {
-                MirrorPackManager.ImportResult result = MirrorPackManager.importPack(this, uri, (message, percent) ->
-                        runOnUiThread(() -> showLaunchProgress(message, percent))
-                );
-                runOnUiThread(() -> {
-                    getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-                    hideLaunchProgress();
-                    if (mirrorSelectButton != null) {
-                        mirrorSelectButton.setEnabled(true);
-                        mirrorSelectButton.setText("选择镜像包（可选）");
-                    }
-                    MirrorPackManager.MirrorStatus status = MirrorPackManager.status(this);
-                    if (mirrorStatusView != null) {
-                        mirrorStatusView.setText(mirrorStatusText(status));
-                        mirrorStatusView.setTextColor(status.ready ? GREEN : MUTED);
-                    }
-                    toast(result.name + " 已导入，共 " + result.fileCount + " 个 PAK");
-                });
-            } catch (Throwable t) {
-                runOnUiThread(() -> {
-                    getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-                    hideLaunchProgress();
-                    if (mirrorSelectButton != null) {
-                        mirrorSelectButton.setEnabled(true);
-                        mirrorSelectButton.setText("选择镜像包（可选）");
-                    }
-                    if (mirrorStatusView != null) {
-                        mirrorStatusView.setText("镜像包导入失败");
-                        mirrorStatusView.setTextColor(RED);
-                    }
-                    toast("镜像包导入失败：" + safeMessage(t));
-                });
-            }
-        }, "RYLUX-Mirror-Import").start();
-    }
-
     private void activateModule(Button button) {
         if (!currentMembershipActive) return;
         if (currentToken == null || currentToken.trim().isEmpty()) {
@@ -741,6 +673,11 @@ public class MainActivity extends Activity {
     }
 
     private void requestRelayVpn(Button button) {
+        if (!AccelerationSettings.isEnabled(this)) {
+            stopRelayVpn();
+            beginModuleLaunch(button);
+            return;
+        }
         try {
             Intent prepare = VpnService.prepare(this);
             if (prepare != null) {
@@ -755,45 +692,55 @@ public class MainActivity extends Activity {
     }
 
     private void beginModuleLaunch(Button button) {
-        LaunchProgress.begin("正在获取 relay 凭据…");
-        button.setText("正在获取 relay 凭据…");
-        showLaunchProgress("正在获取 relay 凭据…", -1);
+        final boolean accelerationEnabled = AccelerationSettings.isEnabled(this);
+        String initialMessage = accelerationEnabled ? "正在获取 relay 凭据…" : "正在准备本地游戏资源…";
+        LaunchProgress.begin(initialMessage);
+        button.setText(initialMessage);
+        showLaunchProgress(initialMessage, -1);
 
         new Thread(() -> {
-            AuthClient.RelayTokenResult relayCredentials = AuthClient.relayToken(currentToken, MODULE_CODE);
-            if (!relayCredentials.requestOk || !relayCredentials.success) {
-                resetStartButton(button, relayCredentials.message);
-                return;
-            }
+            if (accelerationEnabled) {
+                AuthClient.RelayTokenResult relayCredentials = AuthClient.relayToken(currentToken, MODULE_CODE);
+                if (!relayCredentials.requestOk || !relayCredentials.success) {
+                    resetStartButton(button, relayCredentials.message);
+                    return;
+                }
 
-            runOnUiThread(() -> {
-                button.setText("正在建立游戏 VPN…");
-                showLaunchProgress("正在建立游戏 VPN…", -1);
-            });
-            try {
-                Intent relay = new Intent(this, RelayVpnService.class)
-                        .setAction(RelayVpnService.ACTION_START)
-                        .putExtra(RelayVpnService.EXTRA_RELAY_TOKEN, relayCredentials.token);
-                if (Build.VERSION.SDK_INT >= 26) startForegroundService(relay);
-                else startService(relay);
-            } catch (Throwable t) {
+                runOnUiThread(() -> {
+                    button.setText("正在建立游戏 VPN…");
+                    showLaunchProgress("正在建立游戏 VPN…", -1);
+                });
+                try {
+                    Intent relay = new Intent(this, RelayVpnService.class)
+                            .setAction(RelayVpnService.ACTION_START)
+                            .putExtra(RelayVpnService.EXTRA_RELAY_TOKEN, relayCredentials.token);
+                    if (Build.VERSION.SDK_INT >= 26) startForegroundService(relay);
+                    else startService(relay);
+                } catch (Throwable t) {
+                    stopRelayVpn();
+                    resetStartButton(button, "relay VPN 服务启动失败：" + safeMessage(t));
+                    return;
+                }
+
+                if (!waitForVpnReady()) {
+                    String message = RelayVpnService.error();
+                    if (message == null || message.trim().isEmpty()) message = "游戏 VPN 接口未能建立";
+                    stopRelayVpn();
+                    resetStartButton(button, message);
+                    return;
+                }
+
+                runOnUiThread(() -> {
+                    button.setText("VPN 已建立，正在准备游戏资源…");
+                    showLaunchProgress("VPN 已建立，正在准备游戏资源…", -1);
+                });
+            } else {
                 stopRelayVpn();
-                resetStartButton(button, "relay VPN 服务启动失败：" + safeMessage(t));
-                return;
+                runOnUiThread(() -> {
+                    button.setText("正在准备本地游戏资源…");
+                    showLaunchProgress("正在准备本地游戏资源…", -1);
+                });
             }
-
-            if (!waitForVpnReady()) {
-                String message = RelayVpnService.error();
-                if (message == null || message.trim().isEmpty()) message = "游戏 VPN 接口未能建立";
-                stopRelayVpn();
-                resetStartButton(button, message);
-                return;
-            }
-
-            runOnUiThread(() -> {
-                button.setText("VPN 已建立，正在准备游戏资源…");
-                showLaunchProgress("VPN 已建立，正在准备游戏资源…", -1);
-            });
 
             try {
                 Intent service = new Intent(this, InterceptService.class)
@@ -801,17 +748,18 @@ public class MainActivity extends Activity {
                 if (Build.VERSION.SDK_INT >= 26) startForegroundService(service);
                 else startService(service);
             } catch (Throwable t) {
-                stopRelayVpn();
-                resetStartButton(button, "VPN 已清理；本地游戏模块启动失败：" + safeMessage(t));
+                if (accelerationEnabled) stopRelayVpn();
+                resetStartButton(button, (accelerationEnabled ? "VPN 已清理；" : "")
+                        + "本地游戏模块启动失败：" + safeMessage(t));
                 return;
             }
 
             if (!waitForModuleReady()) {
                 String message = launchWaitError;
                 if (message == null || message.trim().isEmpty()) message = "资源准备失败，请重试";
-                stopRelayVpn();
+                if (accelerationEnabled) stopRelayVpn();
                 stopInterceptModule();
-                resetStartButton(button, "VPN 已清理；" + message);
+                resetStartButton(button, (accelerationEnabled ? "VPN 已清理；" : "") + message);
                 return;
             }
 
@@ -820,11 +768,15 @@ public class MainActivity extends Activity {
                 button.setEnabled(true);
                 button.setText(isAdminRole(currentRole) ? "▶ 启动内测游戏" : "启动游戏");
                 if (!launchGame()) {
-                    stopRelayVpn();
+                    if (accelerationEnabled) stopRelayVpn();
                     stopInterceptModule();
-                    toast("未能打开封神榜游戏；VPN 与本地模块已停止");
+                    toast(accelerationEnabled
+                            ? "未能打开封神榜游戏；VPN 与本地模块已停止"
+                            : "未能打开封神榜游戏；本地模块已停止");
                 } else {
-                    toast("VPN 已建立；relay 将在游戏发起连接后启动");
+                    toast(accelerationEnabled
+                            ? "RYLUX 加速已建立；relay 将在游戏发起连接后启动"
+                            : "本地 PAK 服务已启动；网络加速由系统或第三方应用负责");
                 }
             });
         }, "RYLUX-Module-Launch").start();
@@ -859,6 +811,75 @@ public class MainActivity extends Activity {
             stopService(new Intent(this, InterceptService.class));
         } catch (Throwable ignored) {
         }
+    }
+
+    private LinearLayout featureControls() {
+        LinearLayout controls = new LinearLayout(this);
+        controls.setOrientation(LinearLayout.HORIZONTAL);
+        controls.setTag("rylux_feature_controls");
+        LinearLayout localization = featureControl(
+                "汉化开关",
+                "关闭后使用官方资源",
+                LocalizationSettings.isEnabled(this),
+                enabled -> {
+                    LocalizationSettings.setEnabled(this, enabled);
+                    toast(enabled ? "汉化已开启" : "汉化已关闭，将使用官方资源");
+                }
+        );
+        LinearLayout.LayoutParams localizationLp = new LinearLayout.LayoutParams(0, -2, 1f);
+        localizationLp.rightMargin = dp(5);
+        controls.addView(localization, localizationLp);
+
+        LinearLayout acceleration = featureControl(
+                "加速模块",
+                "关闭后可使用奇游等加速器",
+                AccelerationSettings.isEnabled(this),
+                enabled -> {
+                    AccelerationSettings.setEnabled(this, enabled);
+                    if (!enabled) stopRelayVpn();
+                    toast(enabled
+                            ? "RYLUX 加速已开启，启动游戏时将建立 VPN"
+                            : "RYLUX 加速已关闭，可改用第三方加速器");
+                }
+        );
+        LinearLayout.LayoutParams accelerationLp = new LinearLayout.LayoutParams(0, -2, 1f);
+        accelerationLp.leftMargin = dp(5);
+        controls.addView(acceleration, accelerationLp);
+        return controls;
+    }
+
+    private LinearLayout featureControl(
+            String titleText,
+            String noteText,
+            boolean checked,
+            android.widget.CompoundButton.OnCheckedChangeListener listener
+    ) {
+        LinearLayout control = new LinearLayout(this);
+        control.setOrientation(LinearLayout.VERTICAL);
+        control.setPadding(dp(9), dp(8), dp(7), dp(7));
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView title = text(titleText, 13, TEXT, true);
+        row.addView(title, new LinearLayout.LayoutParams(0, -2, 1f));
+
+        Switch toggle = new Switch(this);
+        toggle.setShowText(true);
+        toggle.setTextOn("开");
+        toggle.setTextOff("关");
+        toggle.setContentDescription(titleText);
+        toggle.setChecked(checked);
+        toggle.setOnCheckedChangeListener(listener);
+        row.addView(toggle, new LinearLayout.LayoutParams(-2, dp(40)));
+        control.addView(row, new LinearLayout.LayoutParams(-1, -2));
+
+        TextView note = text(noteText, 10, MUTED, false);
+        note.setLineSpacing(0f, 1.1f);
+        note.setPadding(0, dp(2), dp(2), 0);
+        control.addView(note, new LinearLayout.LayoutParams(-1, -2));
+        return control;
     }
 
     private boolean waitForModuleReady() {
@@ -1083,8 +1104,6 @@ public class MainActivity extends Activity {
     private void clearTransientViews() {
         moduleProgress = null;
         moduleProgressText = null;
-        mirrorStatusView = null;
-        mirrorSelectButton = null;
     }
 
     private LinearLayout baseContent() {
@@ -1296,20 +1315,6 @@ public class MainActivity extends Activity {
         if (username == null || username.trim().isEmpty()) return "U";
         String value = username.trim();
         return value.substring(0, 1).toUpperCase(Locale.getDefault());
-    }
-
-    private String mirrorStatusText(MirrorPackManager.MirrorStatus status) {
-        if (status == null || !status.ready) return "镜像包：未选择";
-        return "镜像包：" + status.name + " · " + status.fileCount + " 个 PAK · " + humanBytes(status.totalBytes);
-    }
-
-    private String humanBytes(long bytes) {
-        if (bytes < 1024) return bytes + " B";
-        double kb = bytes / 1024.0;
-        if (kb < 1024) return String.format(Locale.US, "%.1f KB", kb);
-        double mb = kb / 1024.0;
-        if (mb < 1024) return String.format(Locale.US, "%.1f MB", mb);
-        return String.format(Locale.US, "%.2f GB", mb / 1024.0);
     }
 
     private String safeMessage(Throwable t) {

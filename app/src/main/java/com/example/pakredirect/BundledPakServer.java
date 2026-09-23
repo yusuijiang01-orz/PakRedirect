@@ -22,7 +22,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Serves encrypted localization PAKs, optional official-resource mirrors and
+ * Serves encrypted localization PAKs, official on-demand cache entries and
  * legacy fallback resources over localhost. The game writes the resulting PAK
  * bytes with its own UID, so no root or cross-app sandbox write is required.
  */
@@ -38,6 +38,7 @@ public final class BundledPakServer {
 
     private final Context context;
     private final Listener listener;
+    private final boolean localizationEnabled;
     private final Map<String, PakSource> pakAssets = new HashMap<>();
     private final AtomicInteger hits = new AtomicInteger();
     private final ExecutorService workers = Executors.newFixedThreadPool(4);
@@ -47,9 +48,10 @@ public final class BundledPakServer {
     private Thread acceptThread;
     private byte[] manifestBytes;
 
-    public BundledPakServer(Context context, Listener listener) {
+    public BundledPakServer(Context context, Listener listener, boolean localizationEnabled) {
         this.context = context.getApplicationContext();
         this.listener = listener;
+        this.localizationEnabled = localizationEnabled;
     }
 
     public void prepare() throws Exception {
@@ -69,7 +71,7 @@ public final class BundledPakServer {
         }
 
         File hotDir = ContentUpdateManager.moduleDir(context);
-        File[] hotFiles = hotDir.listFiles();
+        File[] hotFiles = localizationEnabled ? hotDir.listFiles() : null;
         int legacyHotCount = 0;
         if (hotFiles != null) {
             for (File file : hotFiles) {
@@ -83,37 +85,49 @@ public final class BundledPakServer {
         }
 
         int protectedCount = 0;
-        Map<String, ProtectedContentManager.ProtectedEntry> protectedEntries =
-                ProtectedContentManager.entries(context);
+        Map<String, ProtectedContentManager.ProtectedEntry> protectedEntries = localizationEnabled
+                ? ProtectedContentManager.entries(context)
+                : new HashMap<>();
         for (ProtectedContentManager.ProtectedEntry entry : protectedEntries.values()) {
             if (entry == null || entry.plainSize <= 0 || entry.revision <= 0) continue;
             pakAssets.put(entry.name.toLowerCase(Locale.US), PakSource.protectedPak(entry));
             protectedCount++;
         }
 
-        int mirrorCount = 0;
-        Map<String, MirrorPackManager.MirrorEntry> mirrorEntries = MirrorPackManager.entries(context);
-        for (MirrorPackManager.MirrorEntry entry : mirrorEntries.values()) {
-            if (entry == null || entry.uri == null || entry.size <= 0 || entry.revision <= 0) continue;
-            String key = entry.name.toLowerCase(Locale.US);
-            if ("settings.pak".equals(key) || "ui.pak".equals(key) || "updatefs.pak".equals(key)) continue;
-            pakAssets.put(key, PakSource.mirror(entry));
-            mirrorCount++;
+        int officialCacheCount = 0;
+        String manifest;
+        if (!localizationEnabled) {
+            String officialManifest = OfficialPakCacheManager.loadOfficialManifest(context);
+            if (officialManifest == null) officialManifest = readManifestText(hotDir, false);
+            manifest = officialManifest;
+            for (OfficialPakCacheManager.Entry entry :
+                    OfficialPakCacheManager.localizedEntries(officialManifest)) {
+                pakAssets.put(entry.name.toLowerCase(Locale.US), PakSource.official(entry));
+                officialCacheCount++;
+            }
+        } else {
+            manifest = readManifestText(hotDir, true);
         }
 
-        if (pakAssets.isEmpty()) throw new IllegalStateException("未发现可用 PAK 文件");
+        if (pakAssets.isEmpty() && localizationEnabled) {
+            throw new IllegalStateException("未发现可用 PAK 文件");
+        }
 
-        String manifest = readManifestText(hotDir);
         PatchResult patched = patchManifest(manifest);
-        if (patched.changed == 0) throw new IllegalStateException("linkspak.txt 未匹配到任何 PAK");
+        if (patched.changed == 0 && localizationEnabled) {
+            throw new IllegalStateException("linkspak.txt 未匹配到任何 PAK");
+        }
         manifestBytes = patched.text.getBytes(StandardCharsets.UTF_8);
         log("已加载 PAK " + pakAssets.size() + " 个：加密汉化 " + protectedCount
-                + "、镜像 " + mirrorCount + "、旧热更新 " + legacyHotCount
-                + "、内置 " + bundledCount + "；清单已改写 " + patched.changed + " 项");
+                + "、旧热更新 " + legacyHotCount
+                + "、内置 " + bundledCount + "；汉化 " + (localizationEnabled ? "开启" : "关闭")
+                + "、官方按需缓存 " + officialCacheCount + "；清单已改写 " + patched.changed + " 项");
     }
 
     public void start() throws Exception {
-        if (manifestBytes == null || pakAssets.isEmpty()) throw new IllegalStateException("尚未 prepare");
+        if (manifestBytes == null || (pakAssets.isEmpty() && localizationEnabled)) {
+            throw new IllegalStateException("尚未 prepare");
+        }
         serverSocket = new ServerSocket(PORT, 16, InetAddress.getByName("127.0.0.1"));
         running = true;
         acceptThread = new Thread(this::acceptLoop, "RYLUX-Pak-Accept");
@@ -210,6 +224,12 @@ public final class BundledPakServer {
     }
 
     private void servePak(OutputStream out, PakSource asset, boolean headOnly, String rangeHeader) throws Exception {
+        if (asset.officialEntry != null && !headOnly && rangeHeader == null
+                && !OfficialPakCacheManager.hasCache(context, asset.officialEntry)) {
+            OfficialPakCacheManager.streamAndCache(context, asset.officialEntry, out,
+                    message -> { if (listener != null) listener.onLog(message); });
+            return;
+        }
         long total = asset.size;
         long start = 0;
         long end = total - 1;
@@ -241,6 +261,12 @@ public final class BundledPakServer {
         }
 
         long length = end - start + 1;
+        InputStream opened = null;
+        if (!headOnly) {
+            // Resolve/download the source before committing HTTP headers, so a failed
+            // official download can never look like a successful but truncated PAK.
+            opened = asset.open(context, start);
+        }
         StringBuilder response = new StringBuilder();
         response.append(partial ? "HTTP/1.1 206 Partial Content\r\n" : "HTTP/1.1 200 OK\r\n");
         response.append("Content-Type: application/octet-stream\r\n");
@@ -251,7 +277,7 @@ public final class BundledPakServer {
         out.write(response.toString().getBytes(StandardCharsets.US_ASCII));
 
         if (!headOnly) {
-            try (InputStream assetIn = asset.open(context, start)) {
+            try (InputStream assetIn = opened) {
                 byte[] buffer = new byte[64 * 1024];
                 long remaining = length;
                 while (remaining > 0) {
@@ -308,14 +334,16 @@ public final class BundledPakServer {
         }
     }
 
-    private String readManifestText(File hotDir) throws Exception {
+    private String readManifestText(File hotDir, boolean includeLocalization) throws Exception {
         File protectedManifest = ProtectedContentManager.linkspakFile(context);
         if (protectedManifest.isFile() && protectedManifest.length() > 0) {
             try (InputStream in = new FileInputStream(protectedManifest)) { return readText(in); }
         }
-        File hot = new File(hotDir, "linkspak.txt");
-        if (hot.isFile() && hot.length() > 0) {
-            try (InputStream in = new FileInputStream(hot)) { return readText(in); }
+        if (includeLocalization) {
+            File hot = new File(hotDir, "linkspak.txt");
+            if (hot.isFile() && hot.length() > 0) {
+                try (InputStream in = new FileInputStream(hot)) { return readText(in); }
+            }
         }
         try (InputStream in = context.getAssets().open("linkspak.txt")) { return readText(in); }
     }
@@ -396,8 +424,8 @@ public final class BundledPakServer {
         final String name;
         final long size;
         final File file;
-        final MirrorPackManager.MirrorEntry mirrorEntry;
         final ProtectedContentManager.ProtectedEntry protectedEntry;
+        final OfficialPakCacheManager.Entry officialEntry;
         final boolean requiresRevisionMatch;
         final long revision;
         final String label;
@@ -406,8 +434,8 @@ public final class BundledPakServer {
                 String name,
                 long size,
                 File file,
-                MirrorPackManager.MirrorEntry mirrorEntry,
                 ProtectedContentManager.ProtectedEntry protectedEntry,
+                OfficialPakCacheManager.Entry officialEntry,
                 boolean requiresRevisionMatch,
                 long revision,
                 String label
@@ -415,8 +443,8 @@ public final class BundledPakServer {
             this.name = name;
             this.size = size;
             this.file = file;
-            this.mirrorEntry = mirrorEntry;
             this.protectedEntry = protectedEntry;
+            this.officialEntry = officialEntry;
             this.requiresRevisionMatch = requiresRevisionMatch;
             this.revision = revision;
             this.label = label;
@@ -430,17 +458,28 @@ public final class BundledPakServer {
             return new PakSource(name, file.length(), file, null, null, false, 0L, "旧热更新");
         }
 
-        static PakSource mirror(MirrorPackManager.MirrorEntry entry) {
-            return new PakSource(entry.name, entry.size, null, entry, null, true, entry.revision, "镜像");
+        static PakSource protectedPak(ProtectedContentManager.ProtectedEntry entry) {
+            return new PakSource(entry.name, entry.plainSize, null, entry, null, true, entry.revision, "加密汉化");
         }
 
-        static PakSource protectedPak(ProtectedContentManager.ProtectedEntry entry) {
-            return new PakSource(entry.name, entry.plainSize, null, null, entry, true, entry.revision, "加密汉化");
+        static PakSource official(OfficialPakCacheManager.Entry entry) {
+            return new PakSource(entry.name, entry.size, null, null, entry, true, entry.revision, "官方缓存");
         }
 
         InputStream open(Context context, long start) throws Exception {
             if (protectedEntry != null) return ProtectedContentManager.openEntry(protectedEntry, start);
-            if (mirrorEntry != null) return MirrorPackManager.openEntry(context, mirrorEntry, start);
+            if (officialEntry != null) {
+                InputStream in = OfficialPakCacheManager.open(context, officialEntry,
+                        message -> { if (listener != null) listener.onLog(message); });
+                try {
+                    skipFully(in, start);
+                    return in;
+                } catch (Throwable t) {
+                    try { in.close(); } catch (Throwable ignored) {}
+                    if (t instanceof Exception) throw (Exception) t;
+                    throw new IllegalStateException("官方 PAK 定位失败: " + officialEntry.name, t);
+                }
+            }
             InputStream in = file == null ? context.getAssets().open(name) : new FileInputStream(file);
             try {
                 skipFully(in, start);
