@@ -28,6 +28,7 @@ jobs:
           wranglerVersion: "4"
           workingDirectory: cf-worker
           command: deploy worker.js --name rylux-cdn --compatibility-date=2026-09-24
+          preCommands: npx wrangler whoami
           postCommands: |
             printf '%s' "$RYLUX_RELAY_TOKEN" | npx wrangler secret put RYLUX_RELAY_TOKEN --name rylux-cdn
         env:
