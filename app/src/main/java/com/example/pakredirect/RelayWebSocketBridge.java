@@ -129,7 +129,12 @@ public final class RelayWebSocketBridge {
                 } else if (t instanceof java.net.SocketTimeoutException) {
                     failure.set("连接 relay 超时，请检查手机网络后重试");
                 } else if (t instanceof IOException) {
-                    failure.set("relay 网络连接失败（" + t.getClass().getSimpleName() + "）");
+                    String detail = safeIoFailureDetail(t, token);
+                    if ("unable to protect relay socket from VPN".equalsIgnoreCase(detail)) {
+                        failure.set("Android 未能保护 relay 连接免受 VPN 路由影响（protect=false）");
+                    } else {
+                        failure.set("relay 网络连接失败：" + detail);
+                    }
                 } else {
                     failure.set("relay 连接失败（" + t.getClass().getSimpleName() + "）");
                 }
@@ -151,6 +156,28 @@ public final class RelayWebSocketBridge {
             client.connectionPool().evictAll();
             client.dispatcher().executorService().shutdown();
         }
+    }
+
+    private static String safeIoFailureDetail(Throwable error, String token) {
+        Throwable detailError = error;
+        while (detailError.getCause() != null && detailError.getCause() != detailError) {
+            detailError = detailError.getCause();
+        }
+        String detail = detailError.getMessage();
+        if (detail == null || detail.trim().isEmpty()) {
+            detail = error.getMessage();
+        }
+        if (detail == null || detail.trim().isEmpty()) {
+            detail = error.getClass().getSimpleName();
+        }
+        if (token != null && !token.isEmpty()) {
+            detail = detail.replace(token, "[已隐藏]");
+        }
+        detail = detail.replaceAll("(?i)Bearer\\s+[^\\s,;]+", "Bearer [已隐藏]")
+                .replaceAll("[\\r\\n\\t]+", " ")
+                .trim();
+        if (detail.length() > 110) detail = detail.substring(0, 107) + "…";
+        return detail;
     }
 
     private static final class ProtectedSocketFactory extends SocketFactory {
