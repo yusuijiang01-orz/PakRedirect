@@ -265,7 +265,8 @@ public final class BundledPakServer {
         if (!headOnly) {
             // Resolve/download the source before committing HTTP headers, so a failed
             // official download can never look like a successful but truncated PAK.
-            opened = asset.open(context, start);
+            opened = asset.open(context, start,
+                    message -> { if (listener != null) listener.onLog(message); });
         }
         StringBuilder response = new StringBuilder();
         response.append(partial ? "HTTP/1.1 206 Partial Content\r\n" : "HTTP/1.1 200 OK\r\n");
@@ -466,11 +467,14 @@ public final class BundledPakServer {
             return new PakSource(entry.name, entry.size, null, null, entry, true, entry.revision, "官方缓存");
         }
 
-        InputStream open(Context context, long start) throws Exception {
+        InputStream open(
+                Context context,
+                long start,
+                OfficialPakCacheManager.ProgressListener progressListener
+        ) throws Exception {
             if (protectedEntry != null) return ProtectedContentManager.openEntry(protectedEntry, start);
             if (officialEntry != null) {
-                InputStream in = OfficialPakCacheManager.open(context, officialEntry,
-                        message -> { if (listener != null) listener.onLog(message); });
+                InputStream in = OfficialPakCacheManager.open(context, officialEntry, progressListener);
                 try {
                     skipFully(in, start);
                     return in;

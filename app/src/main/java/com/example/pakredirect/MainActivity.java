@@ -821,7 +821,7 @@ public class MainActivity extends Activity {
                 "汉化开关",
                 "关闭后使用官方资源",
                 LocalizationSettings.isEnabled(this),
-                enabled -> {
+                (button, enabled) -> {
                     LocalizationSettings.setEnabled(this, enabled);
                     toast(enabled ? "汉化已开启" : "汉化已关闭，将使用官方资源");
                 }
@@ -834,7 +834,7 @@ public class MainActivity extends Activity {
                 "加速模块",
                 "关闭后可使用奇游等加速器",
                 AccelerationSettings.isEnabled(this),
-                enabled -> {
+                (button, enabled) -> {
                     AccelerationSettings.setEnabled(this, enabled);
                     if (!enabled) stopRelayVpn();
                     toast(enabled
