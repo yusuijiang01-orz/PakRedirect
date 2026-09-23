@@ -40,6 +40,8 @@ jobs:
           RELAY_TOKEN: ${{ secrets.RYLUX_RELAY_TOKEN }}
         run: |
           set -euo pipefail
+          # Allow the newly uploaded Worker secret to propagate to edge locations.
+          sleep 10
           unknown_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
             https://relay.lovenom.eu.org/rylux-game/not-a-real-target)"
           if [[ "$unknown_status" != "404" ]]; then
