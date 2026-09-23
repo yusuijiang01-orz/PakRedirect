@@ -20,7 +20,7 @@ import okio.ByteString;
 
 /** Bridges one local SOCKS5 TCP stream to the fixed RYLUX WebSocket relay. */
 public final class RelayWebSocketBridge {
-    public static final String RELAY_URL = "wss://relay.lovenom.eu.org/rylux-game";
+    public static final String RELAY_URL = "wss://relay.lovenom.eu.org/rylux-game/target-3";
 
     public interface Listener {
         void onOpen();

@@ -17,7 +17,7 @@ const BLOCKED_HEADERS = [
 ];
 
 const GAME_PATH = "/rylux-game";
-const GAME_TARGET = { hostname: "103.206.217.41", port: 6664 };
+const GAME_TARGET = { hostname: "103.206.217.28", port: 5622 };
 
 export default {
   async fetch(request, env, ctx) {

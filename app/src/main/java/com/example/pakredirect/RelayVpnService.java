@@ -35,7 +35,7 @@ public final class RelayVpnService extends VpnService {
 
     private static final String TAG = "RYLUX-Relay";
     private static final String TARGET_PACKAGE = "com.tepaylink.tamgioiphantranhmobile";
-    private static final String GAME_HOST = "103.206.217.41";
+    private static final String GAME_HOST = "103.206.217.28";
     private static final int IDLE_STOP_SECONDS = 90;
 
     private static volatile boolean running;

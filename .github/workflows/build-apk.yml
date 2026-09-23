@@ -6,11 +6,11 @@ on:
       version_name:
         description: 'Version name, for example 2.3.0'
         required: true
-        default: '2.4.3'
+        default: '2.4.4'
       version_code:
         description: 'Monotonically increasing Android versionCode'
         required: true
-        default: '18'
+        default: '27'
       publish_release:
         description: 'Create a public GitHub Release (leave false for private smoke-test builds)'
         type: boolean

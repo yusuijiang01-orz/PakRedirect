@@ -29,8 +29,8 @@ import java.util.concurrent.atomic.AtomicReference;
 /** Minimal loopback SOCKS5 server restricted to the game endpoint. */
 public final class RelaySocks5Server implements Closeable {
     public static final int PORT = 18481;
-    private static final String GAME_HOST = "103.206.217.41";
-    private static final int GAME_PORT = 6664;
+    private static final String GAME_HOST = "103.206.217.28";
+    private static final int GAME_PORT = 5622;
 
     public interface Listener {
         void onSessionOpened();
