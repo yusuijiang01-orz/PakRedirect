@@ -2,6 +2,9 @@ name: Deploy RYLUX Relay Worker
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - feature/rylux-game-relay
 
 permissions:
   contents: read
