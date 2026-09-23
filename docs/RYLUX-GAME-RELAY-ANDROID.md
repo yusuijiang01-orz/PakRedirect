@@ -8,14 +8,14 @@ game package
   -> Android VpnService (only com.tepaylink.tamgioiphantranhmobile)
   -> Hev tun2socks
   -> loopback SOCKS5 bridge (TCP CONNECT only)
-  -> wss://relay.lovenom.eu.org/rylux-game
+  -> wss://relay.lovenom.eu.org/rylux-game[/target-N]
   -> Cloudflare Worker
-  -> 103.206.217.41:6664
+  -> fixed allowlist: 103.206.217.28:5622 / :6662, 103.206.217.41:6664
 ```
 
-The Android bridge deliberately rejects destinations other than
-`103.206.217.41:6664`. The relay token is loaded from `AuthStorage` at runtime
-and is never put in an Intent, resource, log, or repository file.
+The Android bridge deliberately rejects destinations outside the fixed target
+allowlist. The relay token is loaded from `AuthStorage` at runtime and is never
+put in an Intent, resource, log, or repository file.
 
 The tun2socks layer is provided by the pinned Maven AAR
 `com.zaneschepke:hevtunnel:1.0.0`, which bundles the Hev SOCKS5 tunnel native

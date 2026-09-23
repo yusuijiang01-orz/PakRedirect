@@ -23,6 +23,7 @@ public final class RelayWebSocketBridge {
     private static final String RELAY_BASE_URL = "wss://relay.lovenom.eu.org";
     public static final String LEGACY_GAME_PATH = "/rylux-game";
     public static final String CURRENT_GAME_PATH = "/rylux-game/target-2";
+    public static final String ALTERNATE_GAME_PATH = "/rylux-game/target-3";
 
     public interface Listener {
         void onOpen();
@@ -49,7 +50,9 @@ public final class RelayWebSocketBridge {
             listener.onFailure("relay 凭据为空，请重新登录");
             return;
         }
-        if (!LEGACY_GAME_PATH.equals(relayPath) && !CURRENT_GAME_PATH.equals(relayPath)) {
+        if (!LEGACY_GAME_PATH.equals(relayPath)
+                && !CURRENT_GAME_PATH.equals(relayPath)
+                && !ALTERNATE_GAME_PATH.equals(relayPath)) {
             listener.onFailure("relay 目标不在本地安全白名单中");
             return;
         }

@@ -18,6 +18,7 @@ arbitrary destination and must not be changed into an open proxy:
 
 - `/rylux-game` → `103.206.217.41:6664` (legacy endpoint)
 - `/rylux-game/target-2` → `103.206.217.28:6662` (ADB-observed endpoint)
+- `/rylux-game/target-3` → `103.206.217.28:5622` (ADB-observed game login endpoint)
 
 ## Smoke test
 

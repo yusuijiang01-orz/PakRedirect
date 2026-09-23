@@ -34,6 +34,7 @@ public final class RelaySocks5Server implements Closeable {
     private static final int LEGACY_GAME_PORT = 6664;
     private static final String CURRENT_GAME_HOST = "103.206.217.28";
     private static final int CURRENT_GAME_PORT = 6662;
+    private static final int ALTERNATE_GAME_PORT = 5622;
 
     public interface Listener {
         void onSessionOpened();
@@ -210,6 +211,7 @@ public final class RelaySocks5Server implements Closeable {
     private static String relayPathFor(String host, int port) {
         if (LEGACY_GAME_HOST.equals(host) && LEGACY_GAME_PORT == port) return RelayWebSocketBridge.LEGACY_GAME_PATH;
         if (CURRENT_GAME_HOST.equals(host) && CURRENT_GAME_PORT == port) return RelayWebSocketBridge.CURRENT_GAME_PATH;
+        if (CURRENT_GAME_HOST.equals(host) && ALTERNATE_GAME_PORT == port) return RelayWebSocketBridge.ALTERNATE_GAME_PATH;
         return null;
     }
 

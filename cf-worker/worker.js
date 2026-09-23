@@ -20,6 +20,7 @@ const GAME_PATH = "/rylux-game";
 const GAME_TARGETS = new Map([
   ["/rylux-game", { hostname: "103.206.217.41", port: 6664 }],
   ["/rylux-game/target-2", { hostname: "103.206.217.28", port: 6662 }],
+  ["/rylux-game/target-3", { hostname: "103.206.217.28", port: 5622 }],
 ]);
 
 export default {
