@@ -17,21 +17,29 @@ const BLOCKED_HEADERS = [
 ];
 
 const GAME_PATH = "/rylux-game";
-const GAME_TARGET = { hostname: "103.206.217.41", port: 6664 };
+const GAME_TARGETS = new Map([
+  ["/rylux-game", { hostname: "103.206.217.41", port: 6664 }],
+  ["/rylux-game/target-2", { hostname: "103.206.217.28", port: 6662 }],
+]);
 
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
     if (url.pathname === GAME_PATH || url.pathname.startsWith(GAME_PATH + "/")) {
-      return handleGameRelay(request, env);
+      return handleGameRelay(request, env, url.pathname);
     }
 
     return handleCdnProxy(request);
   },
 };
 
-async function handleGameRelay(request, env) {
+async function handleGameRelay(request, env, path) {
+  const target = GAME_TARGETS.get(path);
+  if (!target) {
+    return jsonResponse("relay target not allowed", 404);
+  }
+
   if (request.method !== "GET") {
     return jsonResponse("method not allowed", 405);
   }
@@ -59,7 +67,7 @@ async function handleGameRelay(request, env) {
 
   let socket;
   try {
-    socket = connect(GAME_TARGET);
+    socket = connect(target);
     await socket.opened;
   } catch (_) {
     return jsonResponse("target connection failed", 502);

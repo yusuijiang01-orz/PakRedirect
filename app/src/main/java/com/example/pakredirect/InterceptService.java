@@ -25,6 +25,7 @@ public class InterceptService extends Service implements BundledPakServer.Listen
 
     private static volatile boolean currentRunning;
     private static volatile int currentHits;
+    private static volatile boolean currentLocalizationEnabled;
 
     private final Object lifecycleLock = new Object();
     private BundledPakServer server;
@@ -63,8 +64,13 @@ public class InterceptService extends Service implements BundledPakServer.Listen
 
         synchronized (lifecycleLock) {
             if (currentRunning) {
-                broadcast("本地游戏模块已启动", currentHits, true, 100);
-                return START_STICKY;
+                boolean requestedLocalization = LocalizationSettings.isEnabled(this);
+                if (requestedLocalization == currentLocalizationEnabled) {
+                    LaunchProgress.ready("本地游戏模块已启动");
+                    broadcast("本地游戏模块已启动", currentHits, true, 100);
+                    return START_STICKY;
+                }
+                stopServerLocked(null);
             }
             if (starting) {
                 String message = LaunchProgress.message();
@@ -117,6 +123,7 @@ public class InterceptService extends Service implements BundledPakServer.Listen
             server = next;
             currentHits = 0;
             currentRunning = true;
+            currentLocalizationEnabled = localizationEnabled;
             String ready = "本地游戏模块已启动";
             LaunchProgress.ready(ready);
             updateNotification("本地游戏模块运行中 · 127.0.0.1:" + LOCAL_HTTP_PORT);
@@ -126,6 +133,7 @@ public class InterceptService extends Service implements BundledPakServer.Listen
             if (next != null) try { next.stop(); } catch (Throwable ignored) {}
             server = null;
             currentRunning = false;
+            currentLocalizationEnabled = false;
             String message = "启动失败: " + startupFailureMessage(t);
             LaunchProgress.fail(message);
             broadcast(message, 0, false, -1);
@@ -141,6 +149,7 @@ public class InterceptService extends Service implements BundledPakServer.Listen
 
     private void stopServerLocked(String message) {
         currentRunning = false;
+        currentLocalizationEnabled = false;
         BundledPakServer old = server;
         server = null;
         if (old != null) try { old.stop(); } catch (Throwable ignored) {}

@@ -166,12 +166,17 @@ curl -sS \
 3. 同意 Android VPN 权限。
 
 APK 会自动调用授权和 relay-token 接口。游戏退出或 relay 断开后，VPN 服务应停止，游戏恢复直连。
+VPN 按目标游戏连接的精确 IP 路由；当前已观测并纳入固定白名单的 TCP 目标为
+`103.206.217.28:6662` 和旧目标 `103.206.217.41:6664`。客户端会把两者映射到
+Worker 上各自固定的 relay 路径。未知 IP、端口和 Worker 路径仍会被拒绝。
 
 ## 9. 安全要求
 
 - 不要把原始 `RYLUX_RELAY_TOKEN` 写进 Java、Gradle、Worker 代码或 APK；
 - 不要把登录 session token 和 relay 凭证提交到 Git；
-- relay 目标固定为 `103.206.217.41:6664`，不要改成任意目标代理；
+- relay 目标只能是 Worker 白名单中的 `103.206.217.28:6662` 或旧目标
+  `103.206.217.41:6664`；新增目标必须同时经过实测确认并加入客户端与 Worker
+  的精确白名单，绝不能改成任意目标代理；
 - 只有 `/api/v1/modules/sg_localization/relay-token` 需要签发 relay 凭证；
 - 部署完成后检查服务日志，确认没有打印 secret 或完整 relay 凭证。
 

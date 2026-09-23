@@ -1,6 +1,7 @@
 package com.example.pakredirect;
 
 import android.net.VpnService;
+import android.util.Log;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
@@ -26,11 +27,13 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
-/** Minimal loopback SOCKS5 server restricted to the game endpoint. */
+/** Minimal loopback SOCKS5 server restricted to explicitly approved game endpoints. */
 public final class RelaySocks5Server implements Closeable {
     public static final int PORT = 18481;
-    private static final String GAME_HOST = "103.206.217.41";
-    private static final int GAME_PORT = 6664;
+    private static final String LEGACY_GAME_HOST = "103.206.217.41";
+    private static final int LEGACY_GAME_PORT = 6664;
+    private static final String CURRENT_GAME_HOST = "103.206.217.28";
+    private static final int CURRENT_GAME_PORT = 6662;
 
     public interface Listener {
         void onSessionOpened();
@@ -61,8 +64,12 @@ public final class RelaySocks5Server implements Closeable {
     public void start() throws IOException {
         ServerSocket next = new ServerSocket();
         next.setReuseAddress(true);
-        next.bind(new InetSocketAddress(InetAddress.getLoopbackAddress(), PORT));
+        // hev is configured with 127.0.0.1. Android may resolve
+        // getLoopbackAddress() to ::1, which leaves the IPv4 SOCKS endpoint
+        // unreachable and silently blackholes every packet routed through TUN.
+        next.bind(new InetSocketAddress(InetAddress.getByName("127.0.0.1"), PORT));
         serverSocket = next;
+        Log.i("RYLUX-Relay", "SOCKS5 listener bound to 127.0.0.1:" + PORT);
         workers.execute(() -> acceptLoop(next));
     }
 
@@ -100,10 +107,14 @@ public final class RelaySocks5Server implements Closeable {
             int addressType = readByte(input);
             String destination = readDestination(input, addressType);
             int destinationPort = (readByte(input) << 8) | readByte(input);
-            if (command != 1 || !GAME_HOST.equals(destination) || destinationPort != GAME_PORT) {
+            String relayPath = command == 1 ? relayPathFor(destination, destinationPort) : null;
+            if (relayPath == null) {
+                Log.w("RYLUX-Relay", "Rejected SOCKS request command=" + command
+                        + " destination=" + destination + ":" + destinationPort);
                 sendReply(output, 2);
                 return;
             }
+            Log.i("RYLUX-Relay", "Opening game TCP relay for " + destination + ":" + destinationPort);
 
             AtomicBoolean relayClosed = new AtomicBoolean(false);
             AtomicBoolean localReady = new AtomicBoolean(false);
@@ -113,7 +124,7 @@ public final class RelaySocks5Server implements Closeable {
             ByteArrayOutputStream pending = new ByteArrayOutputStream();
             final RelayWebSocketBridge relay = new RelayWebSocketBridge(vpnService);
             bridge = relay;
-            relay.connect(relayToken, new RelayWebSocketBridge.Listener() {
+            relay.connect(relayToken, relayPath, new RelayWebSocketBridge.Listener() {
                 @Override public void onOpen() {
                     listener.onRelayConnected();
                     relayOpened.countDown();
@@ -156,10 +167,13 @@ public final class RelaySocks5Server implements Closeable {
             });
 
             if (!relayOpened.await(18, TimeUnit.SECONDS) || relayFailure.get() != null || relayClosed.get()) {
+                Log.e("RYLUX-Relay", "Game relay did not open for " + destination + ":" + destinationPort
+                        + (relayFailure.get() == null ? " (timeout/closed)" : ": " + relayFailure.get()));
                 sendReply(output, 1);
                 return;
             }
 
+            Log.i("RYLUX-Relay", "Game relay WebSocket opened for " + destination + ":" + destinationPort);
             sendReply(output, 0);
             synchronized (outputLock) {
                 localReady.set(true);
@@ -191,6 +205,12 @@ public final class RelaySocks5Server implements Closeable {
             clients.remove(client);
             listener.onSessionClosed();
         }
+    }
+
+    private static String relayPathFor(String host, int port) {
+        if (LEGACY_GAME_HOST.equals(host) && LEGACY_GAME_PORT == port) return RelayWebSocketBridge.LEGACY_GAME_PATH;
+        if (CURRENT_GAME_HOST.equals(host) && CURRENT_GAME_PORT == port) return RelayWebSocketBridge.CURRENT_GAME_PATH;
+        return null;
     }
 
     private static String readDestination(InputStream input, int addressType) throws IOException {

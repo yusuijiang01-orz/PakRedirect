@@ -20,7 +20,9 @@ import okio.ByteString;
 
 /** Bridges one local SOCKS5 TCP stream to the fixed RYLUX WebSocket relay. */
 public final class RelayWebSocketBridge {
-    public static final String RELAY_URL = "wss://relay.lovenom.eu.org/rylux-game";
+    private static final String RELAY_BASE_URL = "wss://relay.lovenom.eu.org";
+    public static final String LEGACY_GAME_PATH = "/rylux-game";
+    public static final String CURRENT_GAME_PATH = "/rylux-game/target-2";
 
     public interface Listener {
         void onOpen();
@@ -42,13 +44,17 @@ public final class RelayWebSocketBridge {
                 .build();
     }
 
-    public void connect(String token, Listener listener) {
+    public void connect(String token, String relayPath, Listener listener) {
         if (token == null || token.trim().isEmpty()) {
             listener.onFailure("relay 凭据为空，请重新登录");
             return;
         }
+        if (!LEGACY_GAME_PATH.equals(relayPath) && !CURRENT_GAME_PATH.equals(relayPath)) {
+            listener.onFailure("relay 目标不在本地安全白名单中");
+            return;
+        }
         Request request = new Request.Builder()
-                .url(RELAY_URL)
+                .url(RELAY_BASE_URL + relayPath)
                 .header("Authorization", "Bearer " + token.trim())
                 .build();
         webSocket = client.newWebSocket(request, new WebSocketListener() {
@@ -88,7 +94,9 @@ public final class RelayWebSocketBridge {
     private static String failureMessage(Throwable error, Response response, String token) {
         if (response != null) {
             int code = response.code();
-            if (code == 401) return "relay 凭据被拒绝（HTTP 401），请重新登录后重试";
+            if (code == 401) {
+                return "relay 返回 HTTP 401：先确认 Cloudflare 的 rylux-cdn 已部署当前目标白名单代码且路由正确；若版本和路由无误，再核对 VPS 与 Worker 的 RYLUX_RELAY_TOKEN";
+            }
             if (code == 502) return "relay Worker 无法连接游戏服务器（HTTP 502）";
             return "relay 握手失败（HTTP " + code + "）";
         }
@@ -165,6 +173,11 @@ public final class RelayWebSocketBridge {
         }
 
         private Socket prepare(Socket socket) throws IOException {
+            // Android cannot mark an uncreated SocketImpl fd as protected.
+            // A freshly constructed Socket has no file descriptor until it is
+            // bound or connected; bind an ephemeral local port first so
+            // VpnService.protect() receives a valid fd before connect().
+            if (!socket.isBound()) socket.bind(new InetSocketAddress(0));
             if (!vpnService.protect(socket)) {
                 try { socket.close(); } catch (IOException ignored) {}
                 throw new IOException("unable to protect relay socket from VPN");

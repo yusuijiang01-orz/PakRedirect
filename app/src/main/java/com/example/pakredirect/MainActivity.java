@@ -88,6 +88,8 @@ public class MainActivity extends Activity {
 
     private ProgressBar moduleProgress;
     private TextView moduleProgressText;
+    private Switch localizationSwitch;
+    private Switch accelerationSwitch;
     private volatile String launchWaitError = "";
     private Button pendingVpnButton;
 
@@ -646,6 +648,7 @@ public class MainActivity extends Activity {
         }
 
         button.setEnabled(false);
+        setFeatureSwitchesEnabled(false);
         button.setText("正在验证账号…");
         showLaunchProgress("正在验证账号…", -1);
         final String token = currentToken;
@@ -654,6 +657,7 @@ public class MainActivity extends Activity {
             AuthClient.ActionResult result = AuthClient.authorize(token, MODULE_CODE);
             if (!result.requestOk || !result.success) {
                 runOnUiThread(() -> {
+                    setFeatureSwitchesEnabled(true);
                     hideLaunchProgress();
                     button.setEnabled(true);
                     button.setText(isAdminRole(currentRole) ? "▶ 启动内测游戏" : "启动游戏");
@@ -707,6 +711,7 @@ public class MainActivity extends Activity {
                 }
 
                 runOnUiThread(() -> {
+                    LaunchProgress.update("正在建立游戏 VPN…", -1);
                     button.setText("正在建立游戏 VPN…");
                     showLaunchProgress("正在建立游戏 VPN…", -1);
                 });
@@ -731,12 +736,14 @@ public class MainActivity extends Activity {
                 }
 
                 runOnUiThread(() -> {
+                    LaunchProgress.update("VPN 已建立，正在准备游戏资源…", -1);
                     button.setText("VPN 已建立，正在准备游戏资源…");
                     showLaunchProgress("VPN 已建立，正在准备游戏资源…", -1);
                 });
             } else {
                 stopRelayVpn();
                 runOnUiThread(() -> {
+                    LaunchProgress.update("正在准备本地游戏资源…", -1);
                     button.setText("正在准备本地游戏资源…");
                     showLaunchProgress("正在准备本地游戏资源…", -1);
                 });
@@ -765,6 +772,7 @@ public class MainActivity extends Activity {
 
             runOnUiThread(() -> {
                 hideLaunchProgress();
+                setFeatureSwitchesEnabled(true);
                 button.setEnabled(true);
                 button.setText(isAdminRole(currentRole) ? "▶ 启动内测游戏" : "启动游戏");
                 if (!launchGame()) {
@@ -788,7 +796,10 @@ public class MainActivity extends Activity {
             if (RelayVpnService.isRunning()) return true;
             String error = RelayVpnService.error();
             if (!RelayVpnService.isStarting() && error != null && !error.trim().isEmpty()) return false;
-            runOnUiThread(() -> showLaunchProgress("正在建立游戏 VPN 接口…", -1));
+            runOnUiThread(() -> {
+                LaunchProgress.update("正在建立游戏 VPN 接口…", -1);
+                showLaunchProgress("正在建立游戏 VPN 接口…", -1);
+            });
             try {
                 Thread.sleep(150L);
             } catch (InterruptedException e) {
@@ -801,8 +812,15 @@ public class MainActivity extends Activity {
 
     private void stopRelayVpn() {
         try {
-            stopService(new Intent(this, RelayVpnService.class));
-        } catch (Throwable ignored) {
+            Intent stop = new Intent(this, RelayVpnService.class)
+                    .setAction(RelayVpnService.ACTION_STOP);
+            startService(stop);
+        } catch (Throwable startError) {
+            // Keep a fallback for cases where Android blocks a background start.
+            try {
+                stopService(new Intent(this, RelayVpnService.class));
+            } catch (Throwable ignored) {
+            }
         }
     }
 
@@ -823,7 +841,9 @@ public class MainActivity extends Activity {
                 LocalizationSettings.isEnabled(this),
                 (button, enabled) -> {
                     LocalizationSettings.setEnabled(this, enabled);
-                    toast(enabled ? "汉化已开启" : "汉化已关闭，将使用官方资源");
+                    toast(enabled
+                            ? "汉化已开启，将在下次启动游戏时生效"
+                            : "汉化已关闭，下次启动游戏时使用官方资源");
                 }
         );
         LinearLayout.LayoutParams localizationLp = new LinearLayout.LayoutParams(0, -2, 1f);
@@ -845,7 +865,24 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams accelerationLp = new LinearLayout.LayoutParams(0, -2, 1f);
         accelerationLp.leftMargin = dp(5);
         controls.addView(acceleration, accelerationLp);
+        localizationSwitch = findFeatureSwitch(localization);
+        accelerationSwitch = findFeatureSwitch(acceleration);
+        setFeatureSwitchesEnabled(!LaunchProgress.isStarting());
         return controls;
+    }
+
+    private Switch findFeatureSwitch(LinearLayout control) {
+        if (control.getChildCount() == 0 || !(control.getChildAt(0) instanceof LinearLayout)) return null;
+        LinearLayout row = (LinearLayout) control.getChildAt(0);
+        for (int i = 0; i < row.getChildCount(); i++) {
+            if (row.getChildAt(i) instanceof Switch) return (Switch) row.getChildAt(i);
+        }
+        return null;
+    }
+
+    private void setFeatureSwitchesEnabled(boolean enabled) {
+        if (localizationSwitch != null) localizationSwitch.setEnabled(enabled);
+        if (accelerationSwitch != null) accelerationSwitch.setEnabled(enabled);
     }
 
     private LinearLayout featureControl(
@@ -884,12 +921,18 @@ public class MainActivity extends Activity {
 
     private boolean waitForModuleReady() {
         launchWaitError = "";
-        long deadline = System.currentTimeMillis() + 5L * 60L * 1000L;
+        final long stalledTimeoutMs = 5L * 60L * 1000L;
         String lastMessage = null;
         int lastProgress = Integer.MIN_VALUE;
 
-        while (System.currentTimeMillis() < deadline) {
+        while (true) {
             if (LaunchProgress.isRunning()) return true;
+
+            long lastUpdatedAt = LaunchProgress.lastUpdatedAt();
+            if (lastUpdatedAt > 0L && System.currentTimeMillis() - lastUpdatedAt > stalledTimeoutMs) {
+                launchWaitError = "准备过程连续 5 分钟没有进展，已停止本次启动；请检查网络/资源后重试";
+                return false;
+            }
 
             String message = LaunchProgress.message();
             int progress = LaunchProgress.progress();
@@ -923,8 +966,6 @@ public class MainActivity extends Activity {
             }
         }
 
-        launchWaitError = "资源准备超时，请检查网络后重试";
-        return false;
     }
 
     private void showLaunchProgress(String message, int progress) {
@@ -999,6 +1040,7 @@ public class MainActivity extends Activity {
     private void resetStartButton(Button button, String message) {
         LaunchProgress.fail(message);
         runOnUiThread(() -> {
+            setFeatureSwitchesEnabled(true);
             hideLaunchProgress();
             button.setEnabled(currentMembershipActive);
             button.setText(currentMembershipActive ? (isAdminRole(currentRole) ? "▶ 启动内测游戏" : "启动游戏") : "暂时无法使用");

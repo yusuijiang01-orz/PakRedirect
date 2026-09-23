@@ -24,7 +24,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import org.amnezia.awg.hevtunnel.TProxyService;
 
-/** Per-game VPN that routes only the target package and target TCP address. */
+/** Per-game VPN that routes only approved game-server addresses for the target package. */
 public final class RelayVpnService extends VpnService {
     public static final String ACTION_START = "com.example.pakredirect.RELAY_START";
     public static final String ACTION_STOP = "com.example.pakredirect.RELAY_STOP";
@@ -35,7 +35,8 @@ public final class RelayVpnService extends VpnService {
 
     private static final String TAG = "RYLUX-Relay";
     private static final String TARGET_PACKAGE = "com.tepaylink.tamgioiphantranhmobile";
-    private static final String GAME_HOST = "103.206.217.41";
+    private static final String LEGACY_GAME_HOST = "103.206.217.41";
+    private static final String CURRENT_GAME_HOST = "103.206.217.28";
     private static final int IDLE_STOP_SECONDS = 90;
 
     private static volatile boolean running;
@@ -67,9 +68,6 @@ public final class RelayVpnService extends VpnService {
         }
         if (!ACTION_START.equals(action)) return START_NOT_STICKY;
         String requestedToken = intent.getStringExtra(EXTRA_RELAY_TOKEN);
-        if (requestedToken != null && !requestedToken.trim().isEmpty()) {
-            relayToken = requestedToken.trim();
-        }
 
         try {
             if (Build.VERSION.SDK_INT >= 29) {
@@ -87,7 +85,13 @@ public final class RelayVpnService extends VpnService {
         }
 
         synchronized (lifecycleLock) {
-            if (starting || running) return START_STICKY;
+            if (starting) return START_STICKY;
+            String cleanRequestedToken = requestedToken == null ? "" : requestedToken.trim();
+            if (running && (cleanRequestedToken.isEmpty() || cleanRequestedToken.equals(relayToken))) {
+                return START_STICKY;
+            }
+            if (running) stopRelay();
+            if (!cleanRequestedToken.isEmpty()) relayToken = cleanRequestedToken;
             starting = true;
             lastError = "";
         }
@@ -146,7 +150,8 @@ public final class RelayVpnService extends VpnService {
                     .setSession("RYLUX 游戏 relay")
                     .setMtu(1500)
                     .addAddress("198.18.0.1", 15)
-                    .addRoute(GAME_HOST, 32)
+                    .addRoute(LEGACY_GAME_HOST, 32)
+                    .addRoute(CURRENT_GAME_HOST, 32)
                     .addAllowedApplication(TARGET_PACKAGE)
                     .establish();
             if (nextTun == null) throw new IllegalStateException("VPN 接口创建失败");
