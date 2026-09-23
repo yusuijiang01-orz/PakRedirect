@@ -30,14 +30,55 @@ jobs:
         env:
           RYLUX_RELAY_TOKEN: ${{ secrets.RYLUX_RELAY_TOKEN }}
 
-      - name: Verify relay target whitelist is live
+      - name: Verify relay routes and upstream TCP handshake
         shell: bash
+        env:
+          RELAY_TOKEN: ${{ secrets.RYLUX_RELAY_TOKEN }}
         run: |
           set -euo pipefail
-          status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+          unknown_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
             https://relay.lovenom.eu.org/rylux-game/not-a-real-target)"
-          if [[ "$status" != "404" ]]; then
-            echo "Expected unknown relay target to return 404, got $status"
+          if [[ "$unknown_status" != "404" ]]; then
+            echo "Expected unknown relay target to return 404, got $unknown_status"
             exit 1
           fi
-          echo "Relay Worker whitelist is live (unknown target returns 404)."
+          unauthorized_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            https://relay.lovenom.eu.org/rylux-game/target-2)"
+          if [[ "$unauthorized_status" != "401" ]]; then
+            echo "Expected protected relay target to return 401 without credentials, got $unauthorized_status"
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import os
+          import socket
+          import ssl
+
+          host = "relay.lovenom.eu.org"
+          path = "/rylux-game/target-2"
+          request = (
+              f"GET {path} HTTP/1.1\r\n"
+              f"Host: {host}\r\n"
+              "Upgrade: websocket\r\n"
+              "Connection: Upgrade\r\n"
+              "Sec-WebSocket-Version: 13\r\n"
+              "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+              f"Authorization: Bearer {os.environ['RELAY_TOKEN']}\r\n\r\n"
+          ).encode("ascii")
+          context = ssl.create_default_context()
+          with socket.create_connection((host, 443), timeout=10) as raw:
+              with context.wrap_socket(raw, server_hostname=host) as connection:
+                  connection.settimeout(12)
+                  connection.sendall(request)
+                  response = bytearray()
+                  while b"\r\n\r\n" not in response and len(response) < 65536:
+                      chunk = connection.recv(4096)
+                      if not chunk:
+                          break
+                      response.extend(chunk)
+          status_line = bytes(response).split(b"\r\n", 1)[0].decode("ascii", "replace")
+          if not status_line.startswith("HTTP/1.1 101 "):
+              print(f"Expected WebSocket 101 from approved target, got {status_line or 'no response'}")
+              raise SystemExit(1)
+          print("Approved relay target accepted WebSocket handshake (101).")
+          PY
