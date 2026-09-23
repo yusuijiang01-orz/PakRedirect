@@ -108,7 +108,7 @@ public final class RelaySocks5Server implements Closeable {
             AtomicBoolean relayClosed = new AtomicBoolean(false);
             AtomicBoolean localReady = new AtomicBoolean(false);
             CountDownLatch relayOpened = new CountDownLatch(1);
-            AtomicReference<Throwable> relayFailure = new AtomicReference<>();
+            AtomicReference<String> relayFailure = new AtomicReference<>();
             Object outputLock = new Object();
             ByteArrayOutputStream pending = new ByteArrayOutputStream();
             final RelayWebSocketBridge relay = new RelayWebSocketBridge(vpnService);
