@@ -1,0 +1,43 @@
+name: Deploy RYLUX Relay Worker
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rylux-relay-worker-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Deploy Worker and sync relay secret
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: 258e12e0f01539eb1f83919b3f97b5c8
+          wranglerVersion: "4"
+          workingDirectory: cf-worker
+          command: deploy worker.js --name rylux-cdn --compatibility-date=2026-09-24
+          secrets: |
+            RYLUX_RELAY_TOKEN
+        env:
+          RYLUX_RELAY_TOKEN: ${{ secrets.RYLUX_RELAY_TOKEN }}
+
+      - name: Verify relay target whitelist is live
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            https://relay.lovenom.eu.org/rylux-game/not-a-real-target)"
+          if [[ "$status" != "404" ]]; then
+            echo "Expected unknown relay target to return 404, got $status"
+            exit 1
+          fi
+          echo "Relay Worker whitelist is live (unknown target returns 404)."
