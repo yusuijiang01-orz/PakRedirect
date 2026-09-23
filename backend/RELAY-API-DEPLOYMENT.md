@@ -174,3 +174,63 @@ APK 会自动调用授权和 relay-token 接口。游戏退出或 relay 断开�
 - relay 目标固定为 `103.206.217.41:6664`，不要改成任意目标代理；
 - 只有 `/api/v1/modules/sg_localization/relay-token` 需要签发 relay 凭证；
 - 部署完成后检查服务日志，确认没有打印 secret 或完整 relay 凭证。
+
+## 10. 工作交接
+
+### 当前仓库
+
+- 仓库：`https://github.com/yusuijiang01-orz/PakRedirect`
+- 工作分支：`feature/rylux-game-relay`
+- 当前 HEAD：`8d3c984`（新增本部署与交接文档）
+- 继续工作前同步：
+
+```bash
+git fetch origin
+git switch feature/rylux-game-relay
+git pull --ff-only origin feature/rylux-game-relay
+```
+
+### 已完成内容
+
+- Cloudflare Worker 已增加固定目标 `103.206.217.41:6664` 的 WebSocket relay；
+- relay 支持长期 secret 校验和短期签名凭证校验；
+- Android 已加入 per-app `VpnService`、本地 SOCKS5 bridge 和 WebSocket relay bridge；
+- RYLUX 启动流程已接入 VPN 授权、模块授权和短期 relay-token 获取；
+- 后端已增加 `GET /api/v1/modules/{module_code}/relay-token`；
+- systemd 服务已支持读取 `/etc/pakredirect-license/relay.env`；
+- relay 测试脚本已修复 WebSocket 关闭阶段的误报；
+- `Validate RYLUX` 已在当前分支 HEAD 上成功运行。
+
+### 当前外部状态
+
+以下状态是交接时必须重新确认的事实，不要只根据代码推测：
+
+- GitHub 正式 Release 当前仍是 `v2.4.0`，版本号为 `15`；
+- `v2.4.1` / `versionCode 16` 尚未生成正式 APK；
+- MuMu 当前安装的仍是旧版正式 APK；
+- `https://verify.lovenom.eu.org/api/v1/modules/sg_localization/relay-token` 当前若返回 `404`，说明 VPS 尚未部署本分支后端；
+- GitHub Repository Secrets 已由项目维护者配置，但 GitHub secret 不会自动同步到 VPS；
+- 不要读取、复制、打印或提交任何 secret 的真实值。
+
+### 接手后的执行顺序
+
+1. 按本文第 3 至第 5 节，把本分支后端部署到 VPS，并配置与 Cloudflare Worker 相同的 `RYLUX_RELAY_TOKEN`。
+2. 使用有效账号验证登录、模块授权和 relay-token 接口；成功标准是 relay-token 返回 HTTP `200`，且只确认 `relay_token` 存在，不打印其值。
+3. 打开 GitHub Actions 的 `Build and Release RYLUX APK`，分支选择 `feature/rylux-game-relay`，输入：
+   - Version name：`2.4.1`
+   - Version code：`16`
+4. 等待签名校验成功并下载 `RYLUX-v2.4.1.apk`。
+5. 将 APK 安装到 MuMu。由于旧版是正式签名 `versionCode 15`，应先尝试覆盖升级；只有确认签名不一致且接受数据风险时，才考虑卸载旧版。
+6. 登录 RYLUX、授权模块、同意 VPN 权限并启动游戏。
+7. 记录直连与 relay 两组结果：游戏 UID 的连接路径、RTT、丢包、重传、断线恢复和游戏内延迟。
+
+### 完成判定
+
+只有同时满足以下条件，才可以把加速器标记为完成：
+
+- 后端 relay-token 接口部署并返回有效短期凭证；
+- GitHub Actions 生成并验证正式签名的 `v2.4.1 / 16` APK；
+- APK 能覆盖安装并启动 VPN relay；
+- MuMu 中目标游戏实际走 relay，而不是继续直连 `103.206.217.41:6664`；
+- 游戏能够登录、进入战斗，并完成断线/退出后的 VPN 清理；
+- A/B 测试结果已记录，且 relay 路径确实优于直连或至少达到可接受稳定性。
