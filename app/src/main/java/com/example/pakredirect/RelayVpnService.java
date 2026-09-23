@@ -139,14 +139,6 @@ public final class RelayVpnService extends VpnService {
                     }
                 }
             });
-            nextSocks.start();
-            synchronized (lifecycleLock) {
-                if (!starting) {
-                    nextSocks.close();
-                    return;
-                }
-                socksServer = nextSocks;
-            }
 
             File nextConfig = new File(getFilesDir(), "rylux-relay/hev.yml");
             writeConfig(nextConfig);
@@ -166,8 +158,20 @@ public final class RelayVpnService extends VpnService {
                 }
                 configFile = nextConfig;
                 tunInterface = nextTun;
-                nativeStarted = true;
                 relayConnected = false;
+            }
+
+            // Establish the Android VPN interface before opening the local
+            // SOCKS listener or starting tun2socks. A stale relay listener
+            // must not prevent the VPN from being created first.
+            synchronized (lifecycleLock) {
+                if (!starting) {
+                    nextSocks.close();
+                    return;
+                }
+                nextSocks.start();
+                socksServer = nextSocks;
+                nativeStarted = true;
             }
 
             Thread nativeThread = new Thread(() -> {
