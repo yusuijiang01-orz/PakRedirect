@@ -61,14 +61,20 @@ public class InterceptService extends Service implements BundledPakServer.Listen
             return START_NOT_STICKY;
         }
 
-        if (starting) {
-            String message = LaunchProgress.message();
-            if (message == null || message.trim().isEmpty()) message = "本地模块正在启动…";
-            broadcast(message, -1, currentRunning, LaunchProgress.progress());
-            return START_STICKY;
+        synchronized (lifecycleLock) {
+            if (currentRunning) {
+                broadcast("本地游戏模块已启动", currentHits, true, 100);
+                return START_STICKY;
+            }
+            if (starting) {
+                String message = LaunchProgress.message();
+                if (message == null || message.trim().isEmpty()) message = "本地模块正在启动…";
+                broadcast(message, -1, false, LaunchProgress.progress());
+                return START_STICKY;
+            }
+            starting = true;
         }
 
-        starting = true;
         LaunchProgress.begin("正在验证加密汉化资源…");
         new Thread(() -> {
             synchronized (lifecycleLock) {
