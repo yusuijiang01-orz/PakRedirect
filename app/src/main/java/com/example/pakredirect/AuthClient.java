@@ -98,6 +98,15 @@ public final class AuthClient {
         );
     }
 
+    public static RelayTokenResult relayToken(String token, String moduleCode) {
+        HttpResult http = request("GET", "/modules/" + moduleCode + "/relay-token", token, null);
+        if (!http.requestOk) return RelayTokenResult.networkError(http.message);
+        if (!http.success) return RelayTokenResult.failure(http.message);
+        String relayToken = nullable(http.json.optString("relay_token", null));
+        if (relayToken == null) return RelayTokenResult.failure("relay 凭据为空");
+        return new RelayTokenResult(true, true, relayToken, "");
+    }
+
     public static void logout(String token) {
         request("POST", "/auth/logout", token, new JSONObject());
     }
@@ -289,6 +298,28 @@ public final class AuthClient {
 
         static ActionResult failure(String message) {
             return new ActionResult(true, false, null, message);
+        }
+    }
+
+    public static final class RelayTokenResult {
+        public final boolean requestOk;
+        public final boolean success;
+        public final String token;
+        public final String message;
+
+        RelayTokenResult(boolean requestOk, boolean success, String token, String message) {
+            this.requestOk = requestOk;
+            this.success = success;
+            this.token = token;
+            this.message = message;
+        }
+
+        static RelayTokenResult networkError(String message) {
+            return new RelayTokenResult(false, false, null, message);
+        }
+
+        static RelayTokenResult failure(String message) {
+            return new RelayTokenResult(true, false, null, message);
         }
     }
 }
