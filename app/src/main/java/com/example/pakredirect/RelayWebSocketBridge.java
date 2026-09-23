@@ -7,10 +7,7 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketAddress;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 
 import javax.net.SocketFactory;
 
@@ -29,7 +26,7 @@ public final class RelayWebSocketBridge {
         void onOpen();
         void onBinary(byte[] data);
         void onClosed();
-        void onFailure(Throwable error);
+        void onFailure(String userMessage);
     }
 
     private final OkHttpClient client;
@@ -47,7 +44,7 @@ public final class RelayWebSocketBridge {
 
     public void connect(String token, Listener listener) {
         if (token == null || token.trim().isEmpty()) {
-            listener.onFailure(new IllegalArgumentException("relay token is empty"));
+            listener.onFailure("relay 凭据为空，请重新登录");
             return;
         }
         Request request = new Request.Builder()
@@ -72,7 +69,7 @@ public final class RelayWebSocketBridge {
             }
 
             @Override public void onFailure(WebSocket socket, Throwable error, Response response) {
-                listener.onFailure(error);
+                listener.onFailure(failureMessage(error, response, token));
             }
         });
     }
@@ -87,75 +84,35 @@ public final class RelayWebSocketBridge {
         if (socket != null) socket.close(1000, "relay session closed");
     }
 
-    /** Returns null on success, otherwise a user-safe explanation without exposing the token. */
-    public static String probeFailure(VpnService vpnService, String token) {
-        if (token == null || token.trim().isEmpty()) return "relay 凭据为空，请重新登录";
-
-        OkHttpClient client = new OkHttpClient.Builder()
-                .socketFactory(new ProtectedSocketFactory(vpnService))
-                .connectTimeout(15, TimeUnit.SECONDS)
-                .writeTimeout(15, TimeUnit.SECONDS)
-                .readTimeout(0, TimeUnit.MILLISECONDS)
-                .build();
-        CountDownLatch completed = new CountDownLatch(1);
-        AtomicBoolean opened = new AtomicBoolean(false);
-        AtomicReference<String> failure = new AtomicReference<>();
-        Request request = new Request.Builder()
-                .url(RELAY_URL)
-                .header("Authorization", "Bearer " + token.trim())
-                .build();
-
-        WebSocket socket = client.newWebSocket(request, new WebSocketListener() {
-            @Override public void onOpen(WebSocket webSocket, Response response) {
-                opened.set(true);
-                completed.countDown();
-                webSocket.close(1000, "relay probe");
-            }
-
-            @Override public void onFailure(WebSocket webSocket, Throwable t, Response response) {
-                if (response != null) {
-                    int code = response.code();
-                    if (code == 401) {
-                        failure.set("relay 凭据被拒绝（HTTP 401），请检查服务端密钥配置");
-                    } else if (code == 502) {
-                        failure.set("relay Worker 无法连接游戏服务器（HTTP 502）");
-                    } else {
-                        failure.set("relay 握手失败（HTTP " + code + "）");
-                    }
-                } else if (t instanceof java.net.UnknownHostException) {
-                    failure.set("无法解析 relay 域名，请检查手机 DNS 或网络");
-                } else if (t instanceof javax.net.ssl.SSLException) {
-                    failure.set("relay TLS 安全连接失败，请检查手机时间和网络");
-                } else if (t instanceof java.net.SocketTimeoutException) {
-                    failure.set("连接 relay 超时，请检查手机网络后重试");
-                } else if (t instanceof IOException) {
-                    String detail = safeIoFailureDetail(t, token);
-                    if ("unable to protect relay socket from VPN".equalsIgnoreCase(detail)) {
-                        failure.set("Android 未能保护 relay 连接免受 VPN 路由影响（protect=false）");
-                    } else {
-                        failure.set("relay 网络连接失败：" + detail);
-                    }
-                } else {
-                    failure.set("relay 连接失败（" + t.getClass().getSimpleName() + "）");
-                }
-                completed.countDown();
-            }
-        });
-
-        try {
-            boolean finished = completed.await(18, TimeUnit.SECONDS);
-            if (opened.get()) return null;
-            if (!finished) return "连接 relay 超时（18 秒），请检查手机网络";
-            String message = failure.get();
-            return message == null ? "relay 握手失败，请重试" : message;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return "relay 检查已中断，请重试";
-        } finally {
-            if (!opened.get()) socket.cancel();
-            client.connectionPool().evictAll();
-            client.dispatcher().executorService().shutdown();
+    /** Formats a relay transport/handshake failure without exposing the short-lived token. */
+    private static String failureMessage(Throwable error, Response response, String token) {
+        if (response != null) {
+            int code = response.code();
+            if (code == 401) return "relay 凭据被拒绝（HTTP 401），请重新登录后重试";
+            if (code == 502) return "relay Worker 无法连接游戏服务器（HTTP 502）";
+            return "relay 握手失败（HTTP " + code + "）";
         }
+        if (error instanceof java.net.UnknownHostException) {
+            return "relay DNS 解析失败，请检查手机 DNS 或网络";
+        }
+        if (error instanceof javax.net.ssl.SSLException) {
+            return "relay TLS 安全连接失败，请检查手机时间和网络";
+        }
+        if (error instanceof java.net.SocketTimeoutException) {
+            return "relay TCP 连接超时，请检查手机网络后重试";
+        }
+        if (error instanceof IOException) {
+            String detail = safeIoFailureDetail(error, token);
+            if ("unable to protect relay socket from VPN".equalsIgnoreCase(detail)) {
+                return "Android 未能保护 relay 连接免受 VPN 路由影响（protect=false）";
+            }
+            if (error instanceof java.net.ConnectException
+                    || error instanceof java.net.NoRouteToHostException) {
+                return "relay TCP 连接失败：" + detail;
+            }
+            return "relay 网络连接失败：" + detail;
+        }
+        return "relay 连接失败（" + error.getClass().getSimpleName() + "）";
     }
 
     private static String safeIoFailureDetail(Throwable error, String token) {

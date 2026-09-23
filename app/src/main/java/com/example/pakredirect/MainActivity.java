@@ -779,8 +779,8 @@ public class MainActivity extends Activity {
             }
 
             runOnUiThread(() -> {
-                button.setText("正在启动游戏 relay…");
-                showLaunchProgress("正在启动游戏 relay…", -1);
+                button.setText("正在建立游戏 VPN…");
+                showLaunchProgress("正在建立游戏 VPN…", -1);
             });
             AuthClient.RelayTokenResult relayCredentials = AuthClient.relayToken(currentToken, MODULE_CODE);
             if (!relayCredentials.requestOk || !relayCredentials.success) {
@@ -799,9 +799,9 @@ public class MainActivity extends Activity {
                 return;
             }
 
-            if (!waitForRelayReady()) {
+            if (!waitForVpnReady()) {
                 String message = RelayVpnService.error();
-                if (message == null || message.trim().isEmpty()) message = "游戏 relay 健康检查失败";
+                if (message == null || message.trim().isEmpty()) message = "游戏 VPN 接口未能建立";
                 stopRelayVpn();
                 resetStartButton(button, message);
                 return;
@@ -811,18 +811,22 @@ public class MainActivity extends Activity {
                 hideLaunchProgress();
                 button.setEnabled(true);
                 button.setText(isAdminRole(currentRole) ? "▶ 启动内测游戏" : "启动游戏");
-                if (!launchGame()) toast("服务已启动，但未找到封神榜游戏启动入口");
+                if (!launchGame()) {
+                    toast("VPN 已建立，但未找到封神榜游戏启动入口");
+                } else {
+                    toast("VPN 已建立；relay 将在游戏发起连接后启动");
+                }
             });
         }, "RYLUX-Module-Launch").start();
     }
 
-    private boolean waitForRelayReady() {
+    private boolean waitForVpnReady() {
         long deadline = System.currentTimeMillis() + 30_000L;
         while (System.currentTimeMillis() < deadline) {
             if (RelayVpnService.isRunning()) return true;
             String error = RelayVpnService.error();
             if (!RelayVpnService.isStarting() && error != null && !error.trim().isEmpty()) return false;
-            runOnUiThread(() -> showLaunchProgress("正在等待 relay 健康检查…", -1));
+            runOnUiThread(() -> showLaunchProgress("正在建立游戏 VPN 接口…", -1));
             try {
                 Thread.sleep(150L);
             } catch (InterruptedException e) {

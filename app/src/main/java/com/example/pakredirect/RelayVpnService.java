@@ -40,6 +40,7 @@ public final class RelayVpnService extends VpnService {
 
     private static volatile boolean running;
     private static volatile boolean starting;
+    private static volatile boolean relayConnected;
     private static volatile String lastError = "";
 
     private final Object lifecycleLock = new Object();
@@ -74,11 +75,11 @@ public final class RelayVpnService extends VpnService {
             if (Build.VERSION.SDK_INT >= 29) {
                 startForeground(
                         NOTIFICATION_ID,
-                        notification("正在启动游戏 relay…"),
+                        notification("正在建立游戏 VPN…"),
                         ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
                 );
             } else {
-                startForeground(NOTIFICATION_ID, notification("正在启动游戏 relay…"));
+                startForeground(NOTIFICATION_ID, notification("正在建立游戏 VPN…"));
             }
         } catch (Throwable t) {
             fail("前台 relay 服务启动失败：" + safeMessage(t));
@@ -101,11 +102,7 @@ public final class RelayVpnService extends VpnService {
                 throw new IllegalStateException("relay 凭据无效，请重新授权");
             }
 
-            updateNotification("正在检查 relay 到游戏服务器的连接…");
-            String probeFailure = RelayWebSocketBridge.probeFailure(this, token);
-            if (probeFailure != null) {
-                throw new IllegalStateException(probeFailure);
-            }
+            updateNotification("正在建立游戏 VPN 接口…");
 
             RelaySocks5Server nextSocks = new RelaySocks5Server(this, token, new RelaySocks5Server.Listener() {
                 @Override public void onSessionOpened() {
@@ -119,8 +116,37 @@ public final class RelayVpnService extends VpnService {
                         scheduleIdleStop();
                     }
                 }
+
+                @Override public void onRelayConnected() {
+                    relayConnected = true;
+                    lastError = "";
+                    updateNotification("VPN 已建立 · relay 已连接");
+                    broadcast("游戏 VPN 已建立，relay 已连接");
+                }
+
+                @Override public void onRelayClosed() {
+                    relayConnected = false;
+                    if (running) updateNotification("VPN 已建立 · relay 会话已结束");
+                }
+
+                @Override public void onRelayUnavailable(String userMessage) {
+                    relayConnected = false;
+                    lastError = "VPN 已建立，但 relay 不可用：" + userMessage;
+                    Log.e(TAG, lastError);
+                    if (running) {
+                        updateNotification(lastError);
+                        broadcast(lastError);
+                    }
+                }
             });
             nextSocks.start();
+            synchronized (lifecycleLock) {
+                if (!starting) {
+                    nextSocks.close();
+                    return;
+                }
+                socksServer = nextSocks;
+            }
 
             File nextConfig = new File(getFilesDir(), "rylux-relay/hev.yml");
             writeConfig(nextConfig);
@@ -134,10 +160,14 @@ public final class RelayVpnService extends VpnService {
             if (nextTun == null) throw new IllegalStateException("VPN 接口创建失败");
 
             synchronized (lifecycleLock) {
-                socksServer = nextSocks;
+                if (!starting) {
+                    nextTun.close();
+                    return;
+                }
                 configFile = nextConfig;
                 tunInterface = nextTun;
                 nativeStarted = true;
+                relayConnected = false;
             }
 
             Thread nativeThread = new Thread(() -> {
@@ -156,8 +186,8 @@ public final class RelayVpnService extends VpnService {
                 starting = false;
                 running = true;
             }
-            updateNotification("游戏 relay 运行中 · 仅接管封神榜");
-            broadcast("游戏 relay 已启动");
+            updateNotification("VPN 已建立 · 等待游戏连接 relay");
+            broadcast("游戏 VPN 已建立，等待游戏连接 relay");
         } catch (Throwable t) {
             fail("relay 启动失败：" + safeMessage(t));
         }
@@ -210,6 +240,7 @@ public final class RelayVpnService extends VpnService {
         synchronized (lifecycleLock) {
             starting = false;
             running = false;
+            relayConnected = false;
             ScheduledExecutorService scheduler = idleScheduler;
             idleScheduler = null;
             if (scheduler != null) scheduler.shutdownNow();
@@ -262,6 +293,7 @@ public final class RelayVpnService extends VpnService {
 
     public static boolean isRunning() { return running; }
     public static boolean isStarting() { return starting; }
+    public static boolean isRelayConnected() { return relayConnected; }
     public static String error() { return lastError; }
 
     private void createChannel() {

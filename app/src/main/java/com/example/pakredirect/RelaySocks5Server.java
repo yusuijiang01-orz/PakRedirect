@@ -35,6 +35,9 @@ public final class RelaySocks5Server implements Closeable {
     public interface Listener {
         void onSessionOpened();
         void onSessionClosed();
+        void onRelayConnected();
+        void onRelayClosed();
+        void onRelayUnavailable(String userMessage);
     }
 
     private final VpnService vpnService;
@@ -112,6 +115,7 @@ public final class RelaySocks5Server implements Closeable {
             bridge = relay;
             relay.connect(relayToken, new RelayWebSocketBridge.Listener() {
                 @Override public void onOpen() {
+                    listener.onRelayConnected();
                     relayOpened.countDown();
                 }
 
@@ -139,12 +143,14 @@ public final class RelaySocks5Server implements Closeable {
 
                 @Override public void onClosed() {
                     relayClosed.set(true);
+                    listener.onRelayClosed();
                     relayOpened.countDown();
                 }
 
-                @Override public void onFailure(Throwable error) {
-                    relayFailure.compareAndSet(null, error);
+                @Override public void onFailure(String userMessage) {
+                    relayFailure.compareAndSet(null, userMessage);
                     relayClosed.set(true);
+                    listener.onRelayUnavailable(userMessage);
                     relayOpened.countDown();
                 }
             });
