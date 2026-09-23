@@ -35,6 +35,10 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Keep emulator smoke-test builds side-by-side with the installed release app.
+            applicationIdSuffix '.debug'
+        }
         release {
             signingConfig signingConfigs.release
             minifyEnabled true
