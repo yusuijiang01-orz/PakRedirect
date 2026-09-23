@@ -92,27 +92,47 @@ public final class RelayWebSocketBridge {
             if (code == 502) return "relay Worker 无法连接游戏服务器（HTTP 502）";
             return "relay 握手失败（HTTP " + code + "）";
         }
-        if (error instanceof java.net.UnknownHostException) {
+        if (findCause(error, java.net.UnknownHostException.class) != null) {
             return "relay DNS 解析失败，请检查手机 DNS 或网络";
         }
-        if (error instanceof javax.net.ssl.SSLException) {
+        if (findCause(error, javax.net.ssl.SSLException.class) != null) {
             return "relay TLS 安全连接失败，请检查手机时间和网络";
         }
-        if (error instanceof java.net.SocketTimeoutException) {
-            return "relay TCP 连接超时，请检查手机网络后重试";
+        if (findCause(error, java.net.SocketTimeoutException.class) != null) {
+            return "relay TCP/443 连接超时，请检查手机网络后重试";
         }
         if (error instanceof IOException) {
             String detail = safeIoFailureDetail(error, token);
-            if ("unable to protect relay socket from VPN".equalsIgnoreCase(detail)) {
+            if (hasCauseMessage(error, "unable to protect relay socket from VPN")) {
                 return "Android 未能保护 relay 连接免受 VPN 路由影响（protect=false）";
             }
-            if (error instanceof java.net.ConnectException
-                    || error instanceof java.net.NoRouteToHostException) {
-                return "relay TCP 连接失败：" + detail;
+            if (findCause(error, java.net.ConnectException.class) != null
+                    || findCause(error, java.net.NoRouteToHostException.class) != null) {
+                return "relay TCP/443 连接失败：" + detail;
             }
             return "relay 网络连接失败：" + detail;
         }
         return "relay 连接失败（" + error.getClass().getSimpleName() + "）";
+    }
+
+    private static <T extends Throwable> T findCause(Throwable error, Class<T> type) {
+        Throwable cause = error;
+        while (cause != null) {
+            if (type.isInstance(cause)) return type.cast(cause);
+            if (cause.getCause() == cause) break;
+            cause = cause.getCause();
+        }
+        return null;
+    }
+
+    private static boolean hasCauseMessage(Throwable error, String expected) {
+        Throwable cause = error;
+        while (cause != null) {
+            if (expected.equalsIgnoreCase(cause.getMessage())) return true;
+            if (cause.getCause() == cause) break;
+            cause = cause.getCause();
+        }
+        return false;
     }
 
     private static String safeIoFailureDetail(Throwable error, String token) {

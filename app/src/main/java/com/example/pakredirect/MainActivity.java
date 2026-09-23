@@ -755,26 +755,14 @@ public class MainActivity extends Activity {
     }
 
     private void beginModuleLaunch(Button button) {
-        LaunchProgress.begin("正在检查封神榜资源更新…");
-        button.setText("正在准备资源…");
-        showLaunchProgress("正在检查封神榜资源更新…", -1);
+        LaunchProgress.begin("正在获取 relay 凭据…");
+        button.setText("正在获取 relay 凭据…");
+        showLaunchProgress("正在获取 relay 凭据…", -1);
 
         new Thread(() -> {
-            try {
-                Intent service = new Intent(this, InterceptService.class)
-                        .setAction(InterceptService.ACTION_START);
-                if (Build.VERSION.SDK_INT >= 26) startForegroundService(service);
-                else startService(service);
-            } catch (Throwable t) {
-                LaunchProgress.fail("启动失败：" + safeMessage(t));
-                resetStartButton(button, LaunchProgress.error());
-                return;
-            }
-
-            if (!waitForModuleReady()) {
-                String message = launchWaitError;
-                if (message == null || message.trim().isEmpty()) message = "资源准备失败，请重试";
-                resetStartButton(button, message);
+            AuthClient.RelayTokenResult relayCredentials = AuthClient.relayToken(currentToken, MODULE_CODE);
+            if (!relayCredentials.requestOk || !relayCredentials.success) {
+                resetStartButton(button, relayCredentials.message);
                 return;
             }
 
@@ -782,11 +770,6 @@ public class MainActivity extends Activity {
                 button.setText("正在建立游戏 VPN…");
                 showLaunchProgress("正在建立游戏 VPN…", -1);
             });
-            AuthClient.RelayTokenResult relayCredentials = AuthClient.relayToken(currentToken, MODULE_CODE);
-            if (!relayCredentials.requestOk || !relayCredentials.success) {
-                resetStartButton(button, relayCredentials.message);
-                return;
-            }
             try {
                 Intent relay = new Intent(this, RelayVpnService.class)
                         .setAction(RelayVpnService.ACTION_START)
@@ -795,7 +778,7 @@ public class MainActivity extends Activity {
                 else startService(relay);
             } catch (Throwable t) {
                 stopRelayVpn();
-                resetStartButton(button, "relay 启动失败：" + safeMessage(t));
+                resetStartButton(button, "relay VPN 服务启动失败：" + safeMessage(t));
                 return;
             }
 
@@ -808,11 +791,38 @@ public class MainActivity extends Activity {
             }
 
             runOnUiThread(() -> {
+                button.setText("VPN 已建立，正在准备游戏资源…");
+                showLaunchProgress("VPN 已建立，正在准备游戏资源…", -1);
+            });
+
+            try {
+                Intent service = new Intent(this, InterceptService.class)
+                        .setAction(InterceptService.ACTION_START);
+                if (Build.VERSION.SDK_INT >= 26) startForegroundService(service);
+                else startService(service);
+            } catch (Throwable t) {
+                stopRelayVpn();
+                resetStartButton(button, "VPN 已清理；本地游戏模块启动失败：" + safeMessage(t));
+                return;
+            }
+
+            if (!waitForModuleReady()) {
+                String message = launchWaitError;
+                if (message == null || message.trim().isEmpty()) message = "资源准备失败，请重试";
+                stopRelayVpn();
+                stopInterceptModule();
+                resetStartButton(button, "VPN 已清理；" + message);
+                return;
+            }
+
+            runOnUiThread(() -> {
                 hideLaunchProgress();
                 button.setEnabled(true);
                 button.setText(isAdminRole(currentRole) ? "▶ 启动内测游戏" : "启动游戏");
                 if (!launchGame()) {
-                    toast("VPN 已建立，但未找到封神榜游戏启动入口");
+                    stopRelayVpn();
+                    stopInterceptModule();
+                    toast("未能打开封神榜游戏；VPN 与本地模块已停止");
                 } else {
                     toast("VPN 已建立；relay 将在游戏发起连接后启动");
                 }
@@ -840,6 +850,13 @@ public class MainActivity extends Activity {
     private void stopRelayVpn() {
         try {
             stopService(new Intent(this, RelayVpnService.class));
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private void stopInterceptModule() {
+        try {
+            stopService(new Intent(this, InterceptService.class));
         } catch (Throwable ignored) {
         }
     }
@@ -959,6 +976,7 @@ public class MainActivity extends Activity {
     }
 
     private void resetStartButton(Button button, String message) {
+        LaunchProgress.fail(message);
         runOnUiThread(() -> {
             hideLaunchProgress();
             button.setEnabled(currentMembershipActive);

@@ -11,6 +11,8 @@ import android.os.Build;
 import android.os.IBinder;
 import android.util.Log;
 
+import java.net.BindException;
+
 public class InterceptService extends Service implements BundledPakServer.Listener {
     public static final String ACTION_START = "com.example.pakredirect.START";
     public static final String ACTION_STOP = "com.example.pakredirect.STOP";
@@ -52,7 +54,7 @@ public class InterceptService extends Service implements BundledPakServer.Listen
             }
         } catch (Throwable t) {
             Log.e("RYLUX", "startForeground failed", t);
-            String message = "启动失败: " + safeMessage(t);
+            String message = "启动失败: " + startupFailureMessage(t);
             LaunchProgress.fail(message);
             broadcast(message, 0, false, -1);
             stopSelf();
@@ -113,7 +115,7 @@ public class InterceptService extends Service implements BundledPakServer.Listen
             if (next != null) try { next.stop(); } catch (Throwable ignored) {}
             server = null;
             currentRunning = false;
-            String message = "启动失败: " + safeMessage(t);
+            String message = "启动失败: " + startupFailureMessage(t);
             LaunchProgress.fail(message);
             broadcast(message, 0, false, -1);
             stopSelf();
@@ -204,5 +206,18 @@ public class InterceptService extends Service implements BundledPakServer.Listen
     private static String safeMessage(Throwable t) {
         String message = t.getMessage();
         return message == null || message.trim().isEmpty() ? t.getClass().getSimpleName() : message;
+    }
+
+    private static String startupFailureMessage(Throwable error) {
+        Throwable cause = error;
+        while (cause != null) {
+            String message = cause.getMessage();
+            if (cause instanceof BindException
+                    || (message != null && message.contains("EADDRINUSE"))) {
+                return "本地 PAK 服务端口 18480 已被占用。请完全退出封神榜游戏（不要只切回桌面）后，再返回 RYLUX 重试";
+            }
+            cause = cause.getCause();
+        }
+        return safeMessage(error);
     }
 }
