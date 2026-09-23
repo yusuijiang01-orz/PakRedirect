@@ -35,7 +35,8 @@ public final class RelayVpnService extends VpnService {
 
     private static final String TAG = "RYLUX-Relay";
     private static final String TARGET_PACKAGE = "com.tepaylink.tamgioiphantranhmobile";
-    private static final String GAME_HOST = "103.206.217.28";
+    private static final String GAME_SUBNET = "103.206.217.0";
+    private static final int GAME_PREFIX_LENGTH = 24;
     private static final int IDLE_STOP_SECONDS = 90;
 
     private static volatile boolean running;
@@ -146,7 +147,7 @@ public final class RelayVpnService extends VpnService {
                     .setSession("RYLUX 游戏 relay")
                     .setMtu(1500)
                     .addAddress("198.18.0.1", 15)
-                    .addRoute(GAME_HOST, 32)
+                    .addRoute(GAME_SUBNET, GAME_PREFIX_LENGTH)
                     .addAllowedApplication(TARGET_PACKAGE)
                     .establish();
             if (nextTun == null) throw new IllegalStateException("VPN 接口创建失败");

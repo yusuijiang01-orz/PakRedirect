@@ -29,8 +29,6 @@ import java.util.concurrent.atomic.AtomicReference;
 /** Minimal loopback SOCKS5 server restricted to the game endpoint. */
 public final class RelaySocks5Server implements Closeable {
     public static final int PORT = 18481;
-    private static final String GAME_HOST = "103.206.217.28";
-    private static final int GAME_PORT = 5622;
 
     public interface Listener {
         void onSessionOpened();
@@ -100,7 +98,8 @@ public final class RelaySocks5Server implements Closeable {
             int addressType = readByte(input);
             String destination = readDestination(input, addressType);
             int destinationPort = (readByte(input) << 8) | readByte(input);
-            if (command != 1 || !GAME_HOST.equals(destination) || destinationPort != GAME_PORT) {
+            if (command != 1 || !isAllowedGameDestination(destination)
+                    || destinationPort < 1 || destinationPort > 65535) {
                 sendReply(output, 2);
                 return;
             }
@@ -113,7 +112,7 @@ public final class RelaySocks5Server implements Closeable {
             ByteArrayOutputStream pending = new ByteArrayOutputStream();
             final RelayWebSocketBridge relay = new RelayWebSocketBridge(vpnService);
             bridge = relay;
-            relay.connect(relayToken, new RelayWebSocketBridge.Listener() {
+            relay.connect(relayToken, destination, destinationPort, new RelayWebSocketBridge.Listener() {
                 @Override public void onOpen() {
                     listener.onRelayConnected();
                     relayOpened.countDown();
@@ -190,6 +189,21 @@ public final class RelaySocks5Server implements Closeable {
             if (bridge != null) bridge.close();
             clients.remove(client);
             listener.onSessionClosed();
+        }
+    }
+
+    private static boolean isAllowedGameDestination(String destination) {
+        if (destination == null) return false;
+        String[] octets = destination.split("\\.", -1);
+        if (octets.length != 4
+                || !"103".equals(octets[0])
+                || !"206".equals(octets[1])
+                || !"217".equals(octets[2])) return false;
+        try {
+            int last = Integer.parseInt(octets[3]);
+            return last >= 0 && last <= 255 && Integer.toString(last).equals(octets[3]);
+        } catch (NumberFormatException ignored) {
+            return false;
         }
     }
 

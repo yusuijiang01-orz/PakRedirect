@@ -20,7 +20,7 @@ import okio.ByteString;
 
 /** Bridges one local SOCKS5 TCP stream to the fixed RYLUX WebSocket relay. */
 public final class RelayWebSocketBridge {
-    public static final String RELAY_URL = "wss://relay.lovenom.eu.org/rylux-game/target-3";
+    private static final String RELAY_BASE_URL = "wss://relay.lovenom.eu.org/rylux-game";
 
     public interface Listener {
         void onOpen();
@@ -42,13 +42,18 @@ public final class RelayWebSocketBridge {
                 .build();
     }
 
-    public void connect(String token, Listener listener) {
+    public void connect(String token, String destinationHost, int destinationPort, Listener listener) {
         if (token == null || token.trim().isEmpty()) {
             listener.onFailure("relay 凭据为空，请重新登录");
             return;
         }
+        String relayUrl = buildRelayUrl(destinationHost, destinationPort);
+        if (relayUrl == null) {
+            listener.onFailure("relay 目标超出 103.206.217.0/24 或端口范围");
+            return;
+        }
         Request request = new Request.Builder()
-                .url(RELAY_URL)
+                .url(relayUrl)
                 .header("Authorization", "Bearer " + token.trim())
                 .build();
         webSocket = client.newWebSocket(request, new WebSocketListener() {
@@ -72,6 +77,22 @@ public final class RelayWebSocketBridge {
                 listener.onFailure(failureMessage(error, response, token));
             }
         });
+    }
+
+    private static String buildRelayUrl(String host, int port) {
+        if (port < 1 || port > 65535 || host == null) return null;
+        String[] octets = host.split("\\.", -1);
+        if (octets.length != 4
+                || !"103".equals(octets[0])
+                || !"206".equals(octets[1])
+                || !"217".equals(octets[2])) return null;
+        try {
+            int last = Integer.parseInt(octets[3]);
+            if (last < 0 || last > 255 || !Integer.toString(last).equals(octets[3])) return null;
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+        return RELAY_BASE_URL + "/" + host + "/" + port;
     }
 
     public boolean send(byte[] data) {

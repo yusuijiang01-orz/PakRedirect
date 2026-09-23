@@ -17,21 +17,42 @@ const BLOCKED_HEADERS = [
 ];
 
 const GAME_PATH = "/rylux-game";
-const GAME_TARGET = { hostname: "103.206.217.28", port: 5622 };
+const LEGACY_GAME_TARGETS = new Map([
+  [GAME_PATH, { hostname: "103.206.217.28", port: 5622 }],
+  [GAME_PATH + "/target-2", { hostname: "103.206.217.28", port: 6662 }],
+  [GAME_PATH + "/target-3", { hostname: "103.206.217.28", port: 5622 }],
+]);
 
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
     if (url.pathname === GAME_PATH || url.pathname.startsWith(GAME_PATH + "/")) {
-      return handleGameRelay(request, env);
+      const target = resolveGameTarget(url.pathname);
+      if (!target) return jsonResponse("game target not allowed", 404);
+      return handleGameRelay(request, env, target);
     }
 
     return handleCdnProxy(request);
   },
 };
 
-async function handleGameRelay(request, env) {
+function resolveGameTarget(path) {
+  const legacy = LEGACY_GAME_TARGETS.get(path);
+  if (legacy) return legacy;
+
+  const segments = path.split("/");
+  if (segments.length !== 4 || segments[1] !== "rylux-game") return null;
+  const octets = segments[2].split(".");
+  if (octets.length !== 4 || octets[0] !== "103" || octets[1] !== "206" || octets[2] !== "217") return null;
+  const last = Number(octets[3]);
+  const port = Number(segments[3]);
+  if (String(last) !== octets[3] || last < 0 || last > 255) return null;
+  if (String(port) !== segments[3] || port < 1 || port > 65535) return null;
+  return { hostname: "103.206.217." + last, port };
+}
+
+async function handleGameRelay(request, env, target) {
   if (request.method !== "GET") {
     return jsonResponse("method not allowed", 405);
   }
@@ -59,7 +80,7 @@ async function handleGameRelay(request, env) {
 
   let socket;
   try {
-    socket = connect(GAME_TARGET);
+    socket = connect(target);
     await socket.opened;
   } catch (_) {
     return jsonResponse("target connection failed", 502);
