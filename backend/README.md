@@ -90,7 +90,7 @@ V1 增加：
 set -e
 
 rm -rf /tmp/RYLUX-v1
-git clone --depth 1 https://github.com/yusuijiang01-orz/PakRedirect.git /tmp/RYLUX-v1
+git clone --depth 1 --branch feature/rylux-game-relay https://github.com/yusuijiang01-orz/PakRedirect.git /tmp/RYLUX-v1
 
 cp /tmp/RYLUX-v1/backend/app.py /opt/pakredirect-license/
 cp /tmp/RYLUX-v1/backend/admin_v2.py /opt/pakredirect-license/
