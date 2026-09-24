@@ -673,7 +673,7 @@ public class MainActivity extends Activity {
     }
 
     private void requestRelayVpn(Button button) {
-        if (!AccelerationSettings.isEnabled(this)) {
+        if (!isAccelerationEnabledForCurrentUser()) {
             stopRelayVpn();
             beginModuleLaunch(button);
             return;
@@ -692,7 +692,7 @@ public class MainActivity extends Activity {
     }
 
     private void beginModuleLaunch(Button button) {
-        final boolean accelerationEnabled = AccelerationSettings.isEnabled(this);
+        final boolean accelerationEnabled = isAccelerationEnabledForCurrentUser();
         String initialMessage = accelerationEnabled ? "正在获取 relay 凭据…" : "正在准备本地游戏资源…";
         LaunchProgress.begin(initialMessage);
         button.setText(initialMessage);
@@ -817,6 +817,8 @@ public class MainActivity extends Activity {
         LinearLayout controls = new LinearLayout(this);
         controls.setOrientation(LinearLayout.HORIZONTAL);
         controls.setTag("rylux_feature_controls");
+        boolean showAcceleration = isAdminRole(currentRole);
+
         LinearLayout localization = featureControl(
                 "汉化开关",
                 "关闭后使用官方资源",
@@ -826,26 +828,34 @@ public class MainActivity extends Activity {
                     toast(enabled ? "汉化已开启" : "汉化已关闭，将使用官方资源");
                 }
         );
-        LinearLayout.LayoutParams localizationLp = new LinearLayout.LayoutParams(0, -2, 1f);
-        localizationLp.rightMargin = dp(5);
+        LinearLayout.LayoutParams localizationLp = showAcceleration
+                ? new LinearLayout.LayoutParams(0, -2, 1f)
+                : new LinearLayout.LayoutParams(-1, -2);
+        if (showAcceleration) localizationLp.rightMargin = dp(5);
         controls.addView(localization, localizationLp);
 
-        LinearLayout acceleration = featureControl(
-                "加速模块",
-                "关闭后可使用奇游等加速器",
-                AccelerationSettings.isEnabled(this),
-                (button, enabled) -> {
-                    AccelerationSettings.setEnabled(this, enabled);
-                    if (!enabled) stopRelayVpn();
-                    toast(enabled
-                            ? "RYLUX 加速已开启，启动游戏时将建立 VPN"
-                            : "RYLUX 加速已关闭，可改用第三方加速器");
-                }
-        );
-        LinearLayout.LayoutParams accelerationLp = new LinearLayout.LayoutParams(0, -2, 1f);
-        accelerationLp.leftMargin = dp(5);
-        controls.addView(acceleration, accelerationLp);
+        if (showAcceleration) {
+            LinearLayout acceleration = featureControl(
+                    "加速模块",
+                    "关闭后可使用奇游等加速器",
+                    AccelerationSettings.isEnabled(this),
+                    (button, enabled) -> {
+                        AccelerationSettings.setEnabled(this, enabled);
+                        if (!enabled) stopRelayVpn();
+                        toast(enabled
+                                ? "RYLUX 加速已开启，启动游戏时将建立 VPN"
+                                : "RYLUX 加速已关闭，可改用第三方加速器");
+                    }
+            );
+            LinearLayout.LayoutParams accelerationLp = new LinearLayout.LayoutParams(0, -2, 1f);
+            accelerationLp.leftMargin = dp(5);
+            controls.addView(acceleration, accelerationLp);
+        }
         return controls;
+    }
+
+    private boolean isAccelerationEnabledForCurrentUser() {
+        return isAdminRole(currentRole) && AccelerationSettings.isEnabled(this);
     }
 
     private LinearLayout featureControl(
