@@ -9,6 +9,7 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.net.VpnService;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
@@ -41,6 +42,7 @@ import java.util.Locale;
 public class MainActivity extends Activity {
     private static final String TARGET_PACKAGE = "com.tepaylink.tamgioiphantranhmobile";
     private static final String MODULE_CODE = "sg_localization";
+    private static final int REQUEST_VPN_PERMISSION = 4108;
     private static final String GAME_NAME = "封神榜(越南版)";
     private static final String GAME_DESCRIPTION = "越南版封神榜，RYLUX 提供本地汉化、资源校验与本地 PAK 接管。";
     private static final String GAME_LAST_UPDATED = "2026-09-01";
@@ -86,7 +88,10 @@ public class MainActivity extends Activity {
     private ProgressBar moduleProgress;
     private TextView moduleProgressText;
     private Switch localizationSwitch;
+    private Switch accelerationSwitch;
     private volatile String launchWaitError = "";
+    private Button pendingVpnButton;
+    private boolean pendingVpnLocalization;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -110,6 +115,22 @@ public class MainActivity extends Activity {
             return;
         }
         super.onBackPressed();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_VPN_PERMISSION) return;
+        Button button = pendingVpnButton;
+        boolean useLocalization = pendingVpnLocalization;
+        pendingVpnButton = null;
+        pendingVpnLocalization = false;
+        if (button == null) return;
+        if (resultCode != RESULT_OK) {
+            resetStartButton(button, "未获得 VPN 权限，未启动游戏 relay");
+            return;
+        }
+        beginModuleLaunch(button, useLocalization);
     }
 
     private void showSessionLoading() {
@@ -314,6 +335,7 @@ public class MainActivity extends Activity {
         currentExpiresAt = profile.expiresAt;
         currentUsername = profile.username;
         if (!currentMembershipActive) LocalizationSettings.setEnabled(this, false);
+        if (!isAdminRole(currentRole)) stopRelayVpn();
         clearTransientViews();
 
         LinearLayout root = baseContent();
@@ -525,10 +547,10 @@ public class MainActivity extends Activity {
         panel.addView(infoRow("最近更新时间", GAME_LAST_UPDATED));
         panel.addView(infoRow("汉化完成度", LOCALIZATION_PROGRESS));
 
-        LinearLayout localizationControl = localizationControl(profile.membershipActive);
-        LinearLayout.LayoutParams localizationLp = new LinearLayout.LayoutParams(-1, -2);
-        localizationLp.topMargin = dp(10);
-        panel.addView(localizationControl, localizationLp);
+        LinearLayout featureControls = featureControls(profile);
+        LinearLayout.LayoutParams featureControlsLp = new LinearLayout.LayoutParams(-1, -2);
+        featureControlsLp.topMargin = dp(10);
+        panel.addView(featureControls, featureControlsLp);
 
         boolean gameInstalled = getPackageManager().getLaunchIntentForPackage(TARGET_PACKAGE) != null;
         Button start = button(
@@ -611,6 +633,64 @@ public class MainActivity extends Activity {
         return control;
     }
 
+    private LinearLayout featureControls(AuthClient.ProfileResult profile) {
+        LinearLayout controls = new LinearLayout(this);
+        controls.setOrientation(LinearLayout.HORIZONTAL);
+        controls.setTag("rylux_feature_controls");
+
+        boolean admin = isAdminRole(profile.role);
+        LinearLayout localization = localizationControl(profile.membershipActive);
+        LinearLayout.LayoutParams localizationLp = admin
+                ? new LinearLayout.LayoutParams(0, -2, 1f)
+                : new LinearLayout.LayoutParams(-1, -2);
+        if (admin) localizationLp.rightMargin = dp(5);
+        controls.addView(localization, localizationLp);
+
+        if (admin) {
+            LinearLayout acceleration = accelerationControl();
+            LinearLayout.LayoutParams accelerationLp = new LinearLayout.LayoutParams(0, -2, 1f);
+            accelerationLp.leftMargin = dp(5);
+            controls.addView(acceleration, accelerationLp);
+        }
+        return controls;
+    }
+
+    private LinearLayout accelerationControl() {
+        LinearLayout control = new LinearLayout(this);
+        control.setTag("rylux_acceleration_control");
+        control.setOrientation(LinearLayout.VERTICAL);
+        control.setPadding(dp(10), dp(7), dp(9), dp(6));
+        control.setBackground(round(CARD_SOFT, 12));
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.addView(text("加速模块", 13, TEXT, true), new LinearLayout.LayoutParams(0, -2, 1f));
+
+        Switch toggle = new Switch(this);
+        toggle.setShowText(true);
+        toggle.setTextOn("开");
+        toggle.setTextOff("关");
+        toggle.setChecked(isAdminRole(currentRole) && AccelerationSettings.isEnabled(this));
+        toggle.setContentDescription("加速模块开关（仅管理员）");
+        toggle.setOnCheckedChangeListener((button, checked) -> {
+            if (!isAdminRole(currentRole)) {
+                AccelerationSettings.setEnabled(this, false);
+                button.setChecked(false);
+                return;
+            }
+            AccelerationSettings.setEnabled(this, checked);
+            if (!checked) stopRelayVpn();
+            toast(checked ? "RYLUX 加速已开启，启动游戏时将建立 VPN" : "RYLUX 加速已关闭");
+        });
+        accelerationSwitch = toggle;
+        row.addView(toggle, new LinearLayout.LayoutParams(-2, dp(40)));
+        control.addView(row, new LinearLayout.LayoutParams(-1, -2));
+        control.addView(text("仅 Admin 内测；开启后游戏流量经 RYLUX relay", 10, MUTED, false),
+                new LinearLayout.LayoutParams(-1, -2));
+        return control;
+    }
+
     private void refreshMembershipFromPanel(Button button) {
         final String token = currentToken;
         if (token == null || token.trim().isEmpty()) return;
@@ -656,7 +736,12 @@ public class MainActivity extends Activity {
     }
 
     private void activateModule(Button button) {
+        boolean accelerationEnabled = isAccelerationEnabledForCurrentUser();
         boolean useLocalization = currentMembershipActive && LocalizationSettings.isEnabled(this);
+        if (accelerationEnabled) {
+            startAdminAcceleration(button, useLocalization);
+            return;
+        }
         if (!currentMembershipActive) {
             LocalizationSettings.setEnabled(this, false);
             if (localizationSwitch != null) {
@@ -748,6 +833,170 @@ public class MainActivity extends Activity {
                 if (!launchGame()) toast("服务已启动，但未找到封神榜游戏启动入口");
             });
         }, "RYLUX-Module-Authorize").start();
+    }
+
+    private void startAdminAcceleration(Button button, boolean useLocalization) {
+        if (!isAdminRole(currentRole)) {
+            AccelerationSettings.setEnabled(this, false);
+            launchOfficialGame(button, !currentMembershipActive);
+            return;
+        }
+        if (currentToken == null || currentToken.trim().isEmpty()) {
+            showAuthUi(false);
+            return;
+        }
+        if (getPackageManager().getLaunchIntentForPackage(TARGET_PACKAGE) == null) {
+            resetStartButton(button, "未检测到封神榜游戏");
+            return;
+        }
+
+        button.setEnabled(false);
+        button.setText(useLocalization ? "正在验证账号…" : "正在获取 relay 凭据…");
+        showLaunchProgress(button.getText().toString(), -1);
+        final String token = currentToken;
+        new Thread(() -> {
+            if (useLocalization) {
+                AuthClient.ActionResult authorization = AuthClient.authorize(token, MODULE_CODE);
+                if (!authorization.requestOk || !authorization.success) {
+                    runOnUiThread(() -> {
+                        hideLaunchProgress();
+                        button.setEnabled(true);
+                        button.setText("▶ 启动内测游戏");
+                        toast(authorization.message);
+                    });
+                    return;
+                }
+            }
+            runOnUiThread(() -> requestAdminVpnPermission(button, useLocalization));
+        }, "RYLUX-Admin-Acceleration-Authorize").start();
+    }
+
+    private void requestAdminVpnPermission(Button button, boolean useLocalization) {
+        if (!isAdminRole(currentRole) || !isAccelerationEnabledForCurrentUser()) {
+            resetStartButton(button, "加速功能仅限管理员使用");
+            return;
+        }
+        try {
+            Intent prepare = VpnService.prepare(this);
+            if (prepare != null) {
+                pendingVpnButton = button;
+                pendingVpnLocalization = useLocalization;
+                startActivityForResult(prepare, REQUEST_VPN_PERMISSION);
+                return;
+            }
+            beginModuleLaunch(button, useLocalization);
+        } catch (Throwable t) {
+            resetStartButton(button, "无法请求 VPN 权限：" + safeMessage(t));
+        }
+    }
+
+    private void beginModuleLaunch(Button button, boolean useLocalization) {
+        if (!isAdminRole(currentRole) || !isAccelerationEnabledForCurrentUser()) {
+            resetStartButton(button, "加速功能仅限管理员使用");
+            return;
+        }
+        LaunchProgress.begin("正在获取 relay 凭据…");
+        runOnUiThread(() -> {
+            button.setText("正在获取 relay 凭据…");
+            showLaunchProgress("正在获取 relay 凭据…", -1);
+        });
+        new Thread(() -> {
+            boolean localModuleStarted = false;
+            try {
+                AuthClient.RelayTokenResult credentials = AuthClient.relayToken(currentToken, MODULE_CODE);
+                if (!credentials.requestOk || !credentials.success) {
+                    resetStartButton(button, credentials.message);
+                    return;
+                }
+
+                runOnUiThread(() -> {
+                    button.setText("正在建立游戏 VPN…");
+                    showLaunchProgress("正在建立游戏 VPN…", -1);
+                });
+                Intent relay = new Intent(this, RelayVpnService.class)
+                        .setAction(RelayVpnService.ACTION_START)
+                        .putExtra(RelayVpnService.EXTRA_RELAY_TOKEN, credentials.token);
+                if (Build.VERSION.SDK_INT >= 26) startForegroundService(relay);
+                else startService(relay);
+                if (!waitForVpnReady()) {
+                    String error = RelayVpnService.error();
+                    throw new IllegalStateException(error == null || error.trim().isEmpty()
+                            ? "游戏 VPN 接口未能建立" : error);
+                }
+
+                if (useLocalization) {
+                    runOnUiThread(() -> {
+                        button.setText("VPN 已建立，正在准备汉化资源…");
+                        showLaunchProgress("正在准备汉化资源…", -1);
+                    });
+                    Intent service = new Intent(this, InterceptService.class)
+                            .setAction(InterceptService.ACTION_START);
+                    if (Build.VERSION.SDK_INT >= 26) startForegroundService(service);
+                    else startService(service);
+                    localModuleStarted = true;
+                    if (!waitForModuleReady()) {
+                        String error = launchWaitError;
+                        throw new IllegalStateException(error == null || error.trim().isEmpty()
+                                ? "本地汉化模块启动失败" : error);
+                    }
+                }
+
+                final boolean shouldStopLocalModule = localModuleStarted;
+                runOnUiThread(() -> {
+                    hideLaunchProgress();
+                    button.setEnabled(true);
+                    button.setText("▶ 启动内测游戏");
+                    if (!launchGame()) {
+                        stopRelayVpn();
+                        if (shouldStopLocalModule) stopInterceptModule();
+                        toast("未能打开封神榜游戏；VPN 与本地模块已停止");
+                    } else {
+                        toast(useLocalization
+                                ? "RYLUX 加速已建立，汉化资源已就绪"
+                                : "RYLUX 游戏 VPN 已建立");
+                    }
+                });
+            } catch (Throwable error) {
+                stopRelayVpn();
+                if (localModuleStarted) stopInterceptModule();
+                resetStartButton(button, "加速启动失败：" + safeMessage(error));
+            }
+        }, "RYLUX-Admin-Acceleration-Launch").start();
+    }
+
+    private boolean waitForVpnReady() {
+        long deadline = System.currentTimeMillis() + 30_000L;
+        while (System.currentTimeMillis() < deadline) {
+            if (RelayVpnService.isRunning()) return true;
+            String error = RelayVpnService.error();
+            if (!RelayVpnService.isStarting() && error != null && !error.trim().isEmpty()) return false;
+            runOnUiThread(() -> showLaunchProgress("正在建立游戏 VPN 接口…", -1));
+            try {
+                Thread.sleep(150L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private boolean isAccelerationEnabledForCurrentUser() {
+        return isAdminRole(currentRole) && AccelerationSettings.isEnabled(this);
+    }
+
+    private void stopRelayVpn() {
+        try {
+            stopService(new Intent(this, RelayVpnService.class));
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private void stopInterceptModule() {
+        try {
+            stopService(new Intent(this, InterceptService.class));
+        } catch (Throwable ignored) {
+        }
     }
 
     private void launchOfficialGame(Button button, boolean membershipExpired) {
@@ -860,8 +1109,10 @@ public class MainActivity extends Activity {
 
     private void performLogout() {
         final String token = currentToken;
+        stopRelayVpn();
         currentToken = null;
         currentUsername = null;
+        currentRole = "user";
         currentMembershipActive = false;
         currentMembershipKind = "expired";
         currentExpiresAt = null;
@@ -1021,6 +1272,7 @@ public class MainActivity extends Activity {
         moduleProgress = null;
         moduleProgressText = null;
         localizationSwitch = null;
+        accelerationSwitch = null;
     }
 
     private LinearLayout baseContent() {

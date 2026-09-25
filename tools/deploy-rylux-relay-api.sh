@@ -3,7 +3,7 @@ set -Eeuo pipefail
 umask 077
 
 readonly REPOSITORY="https://github.com/yusuijiang01-orz/PakRedirect.git"
-readonly SOURCE_BRANCH="feature/rylux-game-relay"
+readonly SOURCE_BRANCH="main"
 readonly APP_DIR="/opt/pakredirect-license"
 readonly ENV_DIR="/etc/pakredirect-license"
 readonly ENV_FILE="${ENV_DIR}/relay.env"

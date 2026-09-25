@@ -10,8 +10,8 @@ android {
         applicationId 'com.example.pakredirect'
         minSdk 26
         targetSdk 35
-        versionCode = (project.findProperty('ryluxVersionCode') ?: '28').toInteger()
-        versionName = (project.findProperty('ryluxVersionName') ?: '2.4.6').toString()
+        versionCode = (project.findProperty('ryluxVersionCode') ?: '29').toInteger()
+        versionName = (project.findProperty('ryluxVersionName') ?: '2.4.7').toString()
     }
 
     sourceSets {
@@ -51,4 +51,11 @@ android {
 
 dependencies {
     implementation 'androidx.core:core:1.13.1'
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    implementation('com.zaneschepke:hevtunnel:1.0.0') {
+        // TProxyService is a JNI-only entry point; exclude unrelated UI AndroidX metadata.
+        exclude group: 'androidx.core'
+        exclude group: 'androidx.appcompat'
+        exclude group: 'com.google.android.material'
+    }
 }
