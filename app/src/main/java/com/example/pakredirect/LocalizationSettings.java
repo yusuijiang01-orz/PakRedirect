@@ -3,7 +3,7 @@ package com.example.pakredirect;
 import android.content.Context;
 import android.content.SharedPreferences;
 
-/** Persistent user choice for applying localized PAK resources. */
+/** Stores the user's localization choice; changing it never performs network or file work. */
 public final class LocalizationSettings {
     private static final String PREFS = "rylux_localization_settings";
     private static final String KEY_ENABLED = "localization_enabled";

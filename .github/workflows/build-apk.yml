@@ -4,18 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       version_name:
-        description: 'Version name, for example 2.4.4'
+        description: 'Version name, for example 2.4.6'
         required: true
-        default: '2.4.4'
+        default: '2.4.6'
       version_code:
         description: 'Monotonically increasing Android versionCode'
         required: true
-        default: '27'
-      publish_release:
-        description: 'Create a public GitHub Release (leave false for private smoke-test builds)'
-        type: boolean
-        required: true
-        default: false
+        default: '28'
 
 jobs:
   build-release:
@@ -83,16 +78,7 @@ jobs:
           "$APKSIGNER" verify --verbose --print-certs "$APK"
           cp "$APK" "RYLUX-v${{ inputs.version_name }}.apk"
 
-      - name: Upload signed APK for emulator smoke test
-        uses: actions/upload-artifact@v4
-        with:
-          name: RYLUX-signed-${{ inputs.version_name }}-${{ github.sha }}
-          path: RYLUX-v${{ inputs.version_name }}.apk
-          if-no-files-found: error
-          retention-days: 7
-
       - name: Create GitHub Release
-        if: ${{ inputs.publish_release }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ inputs.version_name }}

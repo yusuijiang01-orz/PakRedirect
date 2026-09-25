@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - main
-      - feature/rylux-game-relay
 
 jobs:
   validate:
@@ -42,11 +41,3 @@ jobs:
       - name: Build Android debug APK
         run: |
           gradle assembleDebug --stacktrace
-
-      - name: Upload debug APK for device smoke test
-        uses: actions/upload-artifact@v4
-        with:
-          name: RYLUX-debug-${{ github.sha }}
-          path: app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-          retention-days: 7

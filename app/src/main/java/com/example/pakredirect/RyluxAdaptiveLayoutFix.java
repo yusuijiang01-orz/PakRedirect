@@ -16,7 +16,7 @@ import java.util.WeakHashMap;
 /** Runtime fixes for emulator resolutions, landscape panels and short viewports. */
 public final class RyluxAdaptiveLayoutFix {
     private static final String HOME_TAG = "rylux_home_navigation_v3";
-    private static final String GAME_SCROLL_TAG = "rylux_game_panel_scroll_v1";
+    static final String GAME_SCROLL_TAG = "rylux_game_panel_scroll_v1";
 
     private static final WeakHashMap<Activity, ViewTreeObserver.OnGlobalLayoutListener> LISTENERS =
             new WeakHashMap<>();
@@ -63,7 +63,7 @@ public final class RyluxAdaptiveLayoutFix {
             tuneHome(activity, (LinearLayout) home, widthDp, heightDp, landscape);
         }
 
-        TextView gameHeading = findTextContaining(activity.getWindow().getDecorView(), "游戏详情");
+        TextView gameHeading = findGameDetailHeading(activity.getWindow().getDecorView());
         LinearLayout gamePanel = gameHeading == null ? null : findPanel(gameHeading);
         if (gamePanel != null && !key.equals(LAST_PANEL_KEY.get(gamePanel))) {
             LAST_PANEL_KEY.put(gamePanel, key);
@@ -78,8 +78,14 @@ public final class RyluxAdaptiveLayoutFix {
             int heightDp,
             boolean landscape
     ) {
+        float scale = RyluxHomeNavigationPolish.homeScale(activity);
         int side = widthDp <= 360 ? 10 : (landscape ? 20 : 16);
-        root.setPadding(dp(activity, side), dp(activity, 14), dp(activity, side), dp(activity, 28));
+        root.setPadding(
+                dp(activity, Math.round(side * scale)),
+                dp(activity, Math.round(14 * scale)),
+                dp(activity, Math.round(side * scale)),
+                dp(activity, Math.round(28 * scale))
+        );
 
         FrameLayout heroShell = findHeroShell(root);
         if (heroShell == null) return;
@@ -88,19 +94,7 @@ public final class RyluxAdaptiveLayoutFix {
         if (!(raw instanceof LinearLayout.LayoutParams)) return;
         LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) raw;
 
-        int desiredDp;
-        if (landscape) {
-            desiredDp = clamp(Math.round(heightDp * 0.50f), 220, 300);
-        } else if (widthDp <= 360 || heightDp <= 640) {
-            desiredDp = 290;
-        } else if (widthDp <= 420 || heightDp <= 720) {
-            desiredDp = 320;
-        } else if (widthDp >= 600) {
-            desiredDp = 360;
-        } else {
-            desiredDp = 340;
-        }
-        lp.height = dp(activity, desiredDp);
+        lp.height = RyluxHomeNavigationPolish.homeHeroHeight(activity);
         heroShell.setLayoutParams(lp);
     }
 
@@ -111,7 +105,7 @@ public final class RyluxAdaptiveLayoutFix {
             int heightDp,
             boolean landscape
     ) {
-        boolean needsScroll = landscape || heightDp <= 760;
+        boolean needsScroll = shouldScrollGamePanel(activity);
         View parent = panel.getParent() instanceof View ? (View) panel.getParent() : null;
 
         if (needsScroll && parent instanceof FrameLayout) {
@@ -143,10 +137,10 @@ public final class RyluxAdaptiveLayoutFix {
                 panel.setLayoutParams(raw);
             }
             panel.setPadding(
-                    dp(activity, landscape ? 16 : 14),
-                    dp(activity, 12),
-                    dp(activity, landscape ? 16 : 14),
-                    dp(activity, 16)
+                    dp(activity, Math.round((landscape ? 16 : 14) * gameDetailScale(activity))),
+                    dp(activity, Math.round(12 * gameDetailScale(activity))),
+                    dp(activity, Math.round((landscape ? 16 : 14) * gameDetailScale(activity))),
+                    dp(activity, Math.round(16 * gameDetailScale(activity)))
             );
         }
     }
@@ -164,6 +158,45 @@ public final class RyluxAdaptiveLayoutFix {
         lp.topMargin = margin;
         lp.bottomMargin = margin;
         return lp;
+    }
+
+    static boolean shouldScrollGamePanel(Activity activity) {
+        Configuration c = activity.getResources().getConfiguration();
+        return c.screenWidthDp <= 380 || c.screenHeightDp <= 760 || c.screenWidthDp > c.screenHeightDp;
+    }
+
+    static float gameDetailScale(Activity activity) {
+        Configuration c = activity.getResources().getConfiguration();
+        float width = c.screenWidthDp / 380f;
+        float height = c.screenHeightDp / 760f;
+        return Math.max(0.72f, Math.min(1f, Math.min(width, height)));
+    }
+
+    static ScrollView makeGamePanelScrollable(Activity activity, LinearLayout panel) {
+        ScrollView scroll = new ScrollView(activity);
+        scroll.setTag(GAME_SCROLL_TAG);
+        scroll.setFillViewport(false);
+        scroll.setClipToPadding(false);
+        scroll.setFocusableInTouchMode(true);
+        scroll.setDescendantFocusability(ViewGroup.FOCUS_BEFORE_DESCENDANTS);
+        scroll.setVerticalScrollBarEnabled(true);
+        scroll.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+        scroll.setPadding(0, dp(activity, 8), 0, dp(activity, 8));
+        panel.setLayoutParams(new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        ));
+        scroll.addView(panel);
+        scroll.post(() -> {
+            scroll.requestFocus();
+            scroll.scrollTo(0, 0);
+        });
+        return scroll;
+    }
+
+    static FrameLayout.LayoutParams gamePanelScrollParams(Activity activity) {
+        Configuration c = activity.getResources().getConfiguration();
+        return scrollParams(activity, c.screenWidthDp, c.screenWidthDp > c.screenHeightDp);
     }
 
     private static FrameLayout findHeroShell(LinearLayout root) {
@@ -200,15 +233,21 @@ public final class RyluxAdaptiveLayoutFix {
         return null;
     }
 
-    private static TextView findTextContaining(View view, String needle) {
+    private static TextView findGameDetailHeading(View view) {
         if (view instanceof TextView) {
             CharSequence text = ((TextView) view).getText();
-            if (text != null && text.toString().contains(needle)) return (TextView) view;
+            if (text != null) {
+                String value = text.toString().trim();
+                if ("游戏详情".equals(value)
+                        || (value.contains("游戏详情") && !"进入游戏详情".equals(value))) {
+                    return (TextView) view;
+                }
+            }
         }
         if (view instanceof ViewGroup) {
             ViewGroup group = (ViewGroup) view;
             for (int i = 0; i < group.getChildCount(); i++) {
-                TextView found = findTextContaining(group.getChildAt(i), needle);
+                TextView found = findGameDetailHeading(group.getChildAt(i));
                 if (found != null) return found;
             }
         }
@@ -225,10 +264,6 @@ public final class RyluxAdaptiveLayoutFix {
             if (found != null) return found;
         }
         return null;
-    }
-
-    private static int clamp(int value, int min, int max) {
-        return Math.max(min, Math.min(max, value));
     }
 
     private static int dp(Activity activity, int value) {

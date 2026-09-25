@@ -10,7 +10,6 @@ public final class LaunchProgress {
     private static volatile int progress = -1;
     private static volatile String message = "";
     private static volatile String error = "";
-    private static volatile long lastUpdatedAt;
 
     private LaunchProgress() {}
 
@@ -20,13 +19,11 @@ public final class LaunchProgress {
         progress = -1;
         message = text == null ? "" : text;
         error = "";
-        lastUpdatedAt = System.currentTimeMillis();
     }
 
     public static void update(String text, int value) {
         message = text == null ? "" : text;
         progress = value < 0 ? -1 : Math.max(0, Math.min(100, value));
-        lastUpdatedAt = System.currentTimeMillis();
     }
 
     public static void ready(String text) {
@@ -35,7 +32,6 @@ public final class LaunchProgress {
         running = true;
         starting = false;
         error = "";
-        lastUpdatedAt = System.currentTimeMillis();
     }
 
     public static void fail(String text) {
@@ -44,7 +40,6 @@ public final class LaunchProgress {
         progress = -1;
         running = false;
         starting = false;
-        lastUpdatedAt = System.currentTimeMillis();
     }
 
     public static void stopped(String text) {
@@ -52,7 +47,6 @@ public final class LaunchProgress {
         progress = -1;
         running = false;
         starting = false;
-        lastUpdatedAt = System.currentTimeMillis();
     }
 
     public static boolean isStarting() { return starting; }
@@ -60,5 +54,4 @@ public final class LaunchProgress {
     public static int progress() { return progress; }
     public static String message() { return message; }
     public static String error() { return error; }
-    public static long lastUpdatedAt() { return lastUpdatedAt; }
 }

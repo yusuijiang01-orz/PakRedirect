@@ -1,7 +1,6 @@
 import base64
 import hashlib
 import hmac
-import json
 import secrets
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -21,7 +20,6 @@ SESSION_DAYS = 30
 TRIAL_HOURS = 24
 VIP_PRESETS = (1, 7, 30, 90, 180, 365)
 TARGET_PACKAGE = "com.tepaylink.tamgioiphantranhmobile"
-RELAY_TOKEN = os.environ.get("RYLUX_RELAY_TOKEN", "").strip()
 
 
 class RegisterPayload(BaseModel):
@@ -92,25 +90,6 @@ def validate_username(value: str) -> str:
 
 def b64e(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
-
-
-def relay_credential(user_id: int) -> str:
-    payload = json.dumps(
-        {
-            "v": 1,
-            "sub": str(user_id),
-            "exp": int(utc_now().timestamp()) + 15 * 60,
-        },
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode("utf-8")
-    encoded = b64e(payload)
-    signed = hmac.new(
-        RELAY_TOKEN.encode("utf-8"),
-        ("v1." + encoded).encode("ascii"),
-        hashlib.sha256,
-    ).digest()
-    return "v1." + encoded + "." + b64e(signed)
 
 
 def b64d(value: str) -> bytes:
@@ -584,24 +563,6 @@ def authorize_module(
         "allowed": True,
         "module": dict(module),
         "expires_at": m["expires_at"],
-    }
-
-
-@router.get("/api/v1/modules/{module_code}/relay-token")
-def relay_token(
-    module_code: str,
-    authorization: str | None = Header(default=None),
-):
-    auth, _ = require_user(authorization)
-    if module_code != "sg_localization":
-        raise HTTPException(status_code=404, detail="模块不存在")
-    if not RELAY_TOKEN:
-        raise HTTPException(status_code=503, detail="relay 尚未配置")
-    if not membership(auth)["active"]:
-        raise HTTPException(status_code=403, detail="体验或 VIP 已到期，请续费后使用")
-    return {
-        "relay_url": "wss://relay.lovenom.eu.org/rylux-game",
-        "relay_token": relay_credential(int(auth["user_id"])),
     }
 
 

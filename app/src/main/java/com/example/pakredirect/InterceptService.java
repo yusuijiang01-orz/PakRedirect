@@ -11,8 +11,6 @@ import android.os.Build;
 import android.os.IBinder;
 import android.util.Log;
 
-import java.net.BindException;
-
 public class InterceptService extends Service implements BundledPakServer.Listener {
     public static final String ACTION_START = "com.example.pakredirect.START";
     public static final String ACTION_STOP = "com.example.pakredirect.STOP";
@@ -25,7 +23,6 @@ public class InterceptService extends Service implements BundledPakServer.Listen
 
     private static volatile boolean currentRunning;
     private static volatile int currentHits;
-    private static volatile boolean currentLocalizationEnabled;
 
     private final Object lifecycleLock = new Object();
     private BundledPakServer server;
@@ -55,32 +52,21 @@ public class InterceptService extends Service implements BundledPakServer.Listen
             }
         } catch (Throwable t) {
             Log.e("RYLUX", "startForeground failed", t);
-            String message = "启动失败: " + startupFailureMessage(t);
+            String message = "启动失败: " + safeMessage(t);
             LaunchProgress.fail(message);
             broadcast(message, 0, false, -1);
             stopSelf();
             return START_NOT_STICKY;
         }
 
-        synchronized (lifecycleLock) {
-            if (currentRunning) {
-                boolean requestedLocalization = LocalizationSettings.isEnabled(this);
-                if (requestedLocalization == currentLocalizationEnabled) {
-                    LaunchProgress.ready("本地游戏模块已启动");
-                    broadcast("本地游戏模块已启动", currentHits, true, 100);
-                    return START_STICKY;
-                }
-                stopServerLocked(null);
-            }
-            if (starting) {
-                String message = LaunchProgress.message();
-                if (message == null || message.trim().isEmpty()) message = "本地模块正在启动…";
-                broadcast(message, -1, false, LaunchProgress.progress());
-                return START_STICKY;
-            }
-            starting = true;
+        if (starting) {
+            String message = LaunchProgress.message();
+            if (message == null || message.trim().isEmpty()) message = "本地模块正在启动…";
+            broadcast(message, -1, currentRunning, LaunchProgress.progress());
+            return START_STICKY;
         }
 
+        starting = true;
         LaunchProgress.begin("正在验证加密汉化资源…");
         new Thread(() -> {
             synchronized (lifecycleLock) {
@@ -100,30 +86,24 @@ public class InterceptService extends Service implements BundledPakServer.Listen
                 throw new IllegalStateException("登录状态无效，请重新登录");
             }
 
-            boolean localizationEnabled = LocalizationSettings.isEnabled(this);
-            if (localizationEnabled) {
-                updateLaunchStatus("正在验证加密汉化资源…", -1);
-                ProtectedContentManager.UpdateResult update = ProtectedContentManager.checkAndApply(
-                        this,
-                        token,
-                        (message, percent, indeterminate) ->
-                                updateLaunchStatus(message, indeterminate ? -1 : percent)
-                );
-                if (update.updated) {
-                    updateLaunchStatus("加密汉化资源已更新 " + update.changedFiles + " 个文件", 100);
-                }
-            } else {
-                updateLaunchStatus("汉化已关闭，保留官方资源下载源…", 100);
+            updateLaunchStatus("正在验证加密汉化资源…", -1);
+            ProtectedContentManager.UpdateResult update = ProtectedContentManager.checkAndApply(
+                    this,
+                    token,
+                    (message, percent, indeterminate) ->
+                            updateLaunchStatus(message, indeterminate ? -1 : percent)
+            );
+            if (update.updated) {
+                updateLaunchStatus("加密汉化资源已更新 " + update.changedFiles + " 个文件", 100);
             }
 
             updateLaunchStatus("正在启动本地 PAK 服务…", 100);
-            next = new BundledPakServer(this, this, localizationEnabled);
+            next = new BundledPakServer(this, this);
             next.prepare();
             next.start();
             server = next;
             currentHits = 0;
             currentRunning = true;
-            currentLocalizationEnabled = localizationEnabled;
             String ready = "本地游戏模块已启动";
             LaunchProgress.ready(ready);
             updateNotification("本地游戏模块运行中 · 127.0.0.1:" + LOCAL_HTTP_PORT);
@@ -133,8 +113,7 @@ public class InterceptService extends Service implements BundledPakServer.Listen
             if (next != null) try { next.stop(); } catch (Throwable ignored) {}
             server = null;
             currentRunning = false;
-            currentLocalizationEnabled = false;
-            String message = "启动失败: " + startupFailureMessage(t);
+            String message = "启动失败: " + safeMessage(t);
             LaunchProgress.fail(message);
             broadcast(message, 0, false, -1);
             stopSelf();
@@ -149,7 +128,6 @@ public class InterceptService extends Service implements BundledPakServer.Listen
 
     private void stopServerLocked(String message) {
         currentRunning = false;
-        currentLocalizationEnabled = false;
         BundledPakServer old = server;
         server = null;
         if (old != null) try { old.stop(); } catch (Throwable ignored) {}
@@ -226,18 +204,5 @@ public class InterceptService extends Service implements BundledPakServer.Listen
     private static String safeMessage(Throwable t) {
         String message = t.getMessage();
         return message == null || message.trim().isEmpty() ? t.getClass().getSimpleName() : message;
-    }
-
-    private static String startupFailureMessage(Throwable error) {
-        Throwable cause = error;
-        while (cause != null) {
-            String message = cause.getMessage();
-            if (cause instanceof BindException
-                    || (message != null && message.contains("EADDRINUSE"))) {
-                return "本地 PAK 服务端口 18480 已被占用。请完全退出封神榜游戏（不要只切回桌面）后，再返回 RYLUX 重试";
-            }
-            cause = cause.getCause();
-        }
-        return safeMessage(error);
     }
 }

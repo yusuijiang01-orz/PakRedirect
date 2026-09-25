@@ -12,83 +12,75 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
 import android.provider.Settings;
-import android.util.Base64;
+import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
 import android.widget.Button;
+import android.widget.LinearLayout;
 import android.widget.Toast;
 
 import androidx.core.content.FileProvider;
 
-import org.json.JSONObject;
-
 import java.io.BufferedInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Set;
 import java.util.WeakHashMap;
 
 /**
- * Cloud-aware installer. The current Git LFS SHA-256/size is authoritative,
- * while public GitHub metadata and LFS bytes can use an accelerated route on
- * networks where GitHub is slow. Every accepted APK is still verified locally.
+ * Adds the game APK install entry to the existing game-detail panel without
+ * changing MainActivity's authentication or game-launch flow.
  */
-public final class GameApkCloudInstaller {
+public final class GameInstallAndMirrorHelper {
     private static final String TARGET_PACKAGE = "com.tepaylink.tamgioiphantranhmobile";
     private static final String GAME_APK_NAME = "TamGioiPhanTranhMobile-587.apk";
-    private static final String META_URL =
-            "https://api.github.com/repos/yusuijiang01-orz/PakRedirect/contents/apk/"
-                    + GAME_APK_NAME + "?ref=main";
-    // 游戏 APK 本体迁移到 GitHub Release（tag=game-apk）分发，避开 Git LFS 每月 1GB 带宽配额；
-    // 校验元数据（sha256/size）仍来自仓库内 LFS 指针，上传到 Release 的文件必须与指针一致。
-    private static final String MEDIA_URL =
+    // 游戏 APK 本体迁移到 GitHub Release（tag=game-apk）分发，避开 Git LFS 每月 1GB 带宽配额。
+    private static final String GAME_APK_URL =
             "https://github.com/yusuijiang01-orz/PakRedirect/releases/download/game-apk/"
                     + GAME_APK_NAME;
+    private static final long GAME_APK_SIZE = 101_938_646L;
+    // Git LFS object id from apk/TamGioiPhanTranhMobile-587.apk（上传到 Release 的 APK 必须与此一致）。
+    private static final String GAME_APK_SHA256 =
+            "48b5037202bedfcdbe3bf37d5447af6f71a8b5fddc6e79cc57efb6c304fdec6c";
 
-    private static final String PREFS = "rylux_game_installer_cloud_v2";
-    private static final String KEY_PENDING_UNKNOWN = "pending_unknown_sources";
+    private static final String PREFS = "rylux_game_installer";
+    private static final String KEY_MD5 = "game_apk_md5";
+    private static final String KEY_PENDING_UNKNOWN_SOURCES = "pending_unknown_sources";
     private static final String KEY_PENDING_UNINSTALL = "pending_after_uninstall";
-    private static final String INSTALL_BUTTON_TAG = "rylux_install_game_button";
 
     private static final Object INSTALL_LOCK = new Object();
     private static boolean installBusy;
 
     private static final WeakHashMap<Activity, ViewTreeObserver.OnGlobalLayoutListener> LISTENERS =
             new WeakHashMap<>();
-    private static final Set<View> HOOKED =
-            Collections.newSetFromMap(new WeakHashMap<>());
-
-    private GameApkCloudInstaller() {}
+    private GameInstallAndMirrorHelper() {}
 
     public static void onActivityResumed(Activity activity) {
         if (!(activity instanceof MainActivity)) return;
         attach(activity);
-        resumePending(activity);
+        resumePendingInstall(activity);
     }
 
     public static void attach(Activity activity) {
         if (!(activity instanceof MainActivity)) return;
         synchronized (LISTENERS) {
             if (LISTENERS.containsKey(activity)) {
-                activity.getWindow().getDecorView().post(() -> hook(activity));
+                activity.getWindow().getDecorView().post(() -> decorate(activity));
                 return;
             }
             View decor = activity.getWindow().getDecorView();
             ViewTreeObserver.OnGlobalLayoutListener listener =
-                    () -> decor.post(() -> hook(activity));
+                    () -> decor.post(() -> decorate(activity));
             LISTENERS.put(activity, listener);
             decor.getViewTreeObserver().addOnGlobalLayoutListener(listener);
-            decor.post(() -> hook(activity));
+            decor.post(() -> decorate(activity));
         }
     }
 
@@ -102,27 +94,54 @@ public final class GameApkCloudInstaller {
         }
     }
 
-    private static void hook(Activity activity) {
-        View found = findTagged(activity.getWindow().getDecorView(), INSTALL_BUTTON_TAG);
-        if (!(found instanceof Button)) return;
-        Button button = (Button) found;
-        if (!HOOKED.add(button)) return;
-        button.setOnClickListener(v -> startInstall(activity, button));
+    private static void decorate(Activity activity) {
+        View startButton = findTagged(activity.getWindow().getDecorView(), "rylux_start_game_button");
+        if (startButton == null || !(startButton.getParent() instanceof LinearLayout)) return;
+        LinearLayout parent = (LinearLayout) startButton.getParent();
+        if (!"rylux_game_panel_polished".equals(parent.getTag())) return;
+        if (hasInstallButton(parent)) return;
+
+        Button installButton = new Button(activity);
+        installButton.setTag("rylux_install_game_button");
+        styleInstallButton(activity, installButton);
+        installButton.setOnClickListener(v -> startGameInstall(activity, installButton));
+
+        LinearLayout.LayoutParams lp =
+                new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(activity, 56));
+        lp.topMargin = dp(activity, 10);
+        int startIndex = parent.indexOfChild(startButton);
+        parent.addView(installButton, Math.max(0, startIndex), lp);
     }
 
-    private static View findTagged(View view, String tag) {
-        Object value = view.getTag();
-        if (tag.equals(value)) return view;
-        if (!(view instanceof ViewGroup)) return null;
-        ViewGroup group = (ViewGroup) view;
-        for (int i = 0; i < group.getChildCount(); i++) {
-            View found = findTagged(group.getChildAt(i), tag);
-            if (found != null) return found;
+    private static boolean hasInstallButton(LinearLayout parent) {
+        for (int i = 0; i < parent.getChildCount(); i++) {
+            Object tag = parent.getChildAt(i).getTag();
+            if ("rylux_install_game_button".equals(tag)) return true;
+        }
+        return false;
+    }
+
+    private static View findTagged(View root, String tag) {
+        if (root == null) return null;
+        if (tag.equals(root.getTag())) return root;
+        if (root instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) root;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                View found = findTagged(group.getChildAt(i), tag);
+                if (found != null) return found;
+            }
         }
         return null;
     }
 
-    private static void startInstall(Activity activity, Button button) {
+    private static void styleInstallButton(Activity activity, Button button) {
+        button.setText("安装游戏");
+        button.setGravity(Gravity.CENTER);
+        button.setPadding(dp(activity, 14), 0, dp(activity, 14), 0);
+        RyluxUiPolish.stylePrimaryButton(activity, button);
+    }
+
+    private static void startGameInstall(Activity activity, Button installButton) {
         synchronized (INSTALL_LOCK) {
             if (installBusy) {
                 toast(activity, "游戏安装任务正在进行中");
@@ -130,125 +149,39 @@ public final class GameApkCloudInstaller {
             }
             installBusy = true;
         }
-
-        button.setEnabled(false);
-        button.setText("正在读取云端 APK 信息…");
+        installButton.setEnabled(false);
+        installButton.setText("正在检查本地 APK…");
 
         new Thread(() -> {
             try {
-                RemoteApkInfo remote = fetchRemoteApkInfo();
                 File apk = gameApkFile(activity);
-                boolean hadLocal = apk.isFile();
-                Verification local = verify(apk, remote);
-
-                if (!local.valid) {
-                    if (hadLocal) {
-                        updateButton(activity, button, "检测到云端 APK 已更新…");
-                    } else {
-                        updateButton(activity, button, "本地无 APK，准备下载…");
-                    }
+                Verification verification = verifyApk(activity, apk, true);
+                if (!verification.valid) {
                     if (apk.exists() && !apk.delete()) {
-                        throw new IllegalStateException("无法删除旧的本地 APK");
+                        throw new IllegalStateException("无法删除损坏的本地 APK");
                     }
-                    downloadApk(activity, button, apk, remote);
-                    local = verify(apk, remote);
-                    if (!local.valid) {
-                        throw new IllegalStateException("下载完成，但 APK 与云端校验信息不一致");
+                    downloadApk(activity, installButton, apk);
+                    verification = verifyApk(activity, apk, false);
+                    if (!verification.valid) {
+                        throw new IllegalStateException("APK 下载完成，但完整性校验失败");
                     }
                 } else {
-                    updateButton(activity, button, "本地 APK 与云端一致");
+                    updateButton(activity, installButton, "本地 APK MD5 校验通过");
                 }
 
-                rememberVerification(activity, remote, local);
+                rememberMd5(activity, verification.md5);
                 InstallDecision decision = inspectInstallDecision(activity, apk);
                 activity.runOnUiThread(() -> {
-                    finishBusyButton(button);
+                    finishBusyButton(installButton);
                     handleInstallDecision(activity, apk, decision);
                 });
             } catch (Throwable t) {
                 activity.runOnUiThread(() -> {
-                    finishBusyButton(button);
+                    finishBusyButton(installButton);
                     toast(activity, "安装游戏失败：" + safeMessage(t));
                 });
             }
-        }, "RYLUX-Cloud-APK").start();
-    }
-
-    private static RemoteApkInfo fetchRemoteApkInfo() throws Exception {
-        Throwable last = null;
-        String[] urls = CnDownloadRouter.githubApiUrls(META_URL);
-        for (int i = 0; i < urls.length; i++) {
-            HttpURLConnection connection = null;
-            try {
-                connection = (HttpURLConnection) new URL(urls[i]).openConnection();
-                connection.setConnectTimeout(4500);
-                connection.setReadTimeout(8000);
-                connection.setUseCaches(false);
-                connection.setInstanceFollowRedirects(true);
-                connection.setRequestProperty("User-Agent", "RYLUX/2.3 cloud-integrity");
-                connection.setRequestProperty("Accept", "application/vnd.github+json");
-                connection.setRequestProperty("X-GitHub-Api-Version", "2022-11-28");
-                connection.setRequestProperty("Cache-Control", "no-cache");
-                connection.setRequestProperty("Pragma", "no-cache");
-
-                int code = connection.getResponseCode();
-                if (code < 200 || code >= 300) {
-                    throw new IllegalStateException("HTTP " + code);
-                }
-                return parseRemoteApkInfo(readUtf8(connection));
-            } catch (Throwable t) {
-                last = t;
-            } finally {
-                if (connection != null) connection.disconnect();
-            }
-        }
-        throw new IllegalStateException(
-                "读取云端 APK 元数据失败，请检查网络后重试"
-                        + (last == null ? "" : "：" + safeMessage(last))
-        );
-    }
-
-    private static RemoteApkInfo parseRemoteApkInfo(String body) throws Exception {
-        JSONObject json = new JSONObject(body);
-        String encoded = json.optString("content", "");
-        if (encoded == null || encoded.trim().isEmpty()) {
-            throw new IllegalStateException("云端 APK 元数据缺少 LFS 指针内容");
-        }
-
-        byte[] decoded = Base64.decode(encoded.replace("\n", ""), Base64.DEFAULT);
-        String pointer = new String(decoded, StandardCharsets.UTF_8);
-        String sha256 = null;
-        long size = -1L;
-        for (String line : pointer.split("\\r?\\n")) {
-            String value = line == null ? "" : line.trim();
-            if (value.startsWith("oid sha256:")) {
-                sha256 = value.substring("oid sha256:".length()).trim().toLowerCase(Locale.US);
-            } else if (value.startsWith("size ")) {
-                try {
-                    size = Long.parseLong(value.substring("size ".length()).trim());
-                } catch (NumberFormatException ignored) {
-                    size = -1L;
-                }
-            }
-        }
-
-        if (sha256 == null || !sha256.matches("[0-9a-f]{64}") || size <= 0L) {
-            throw new IllegalStateException("无法解析云端 Git LFS 校验信息");
-        }
-        return new RemoteApkInfo(sha256, size);
-    }
-
-    private static String readUtf8(HttpURLConnection connection) throws Exception {
-        try (BufferedInputStream in = new BufferedInputStream(connection.getInputStream());
-             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-            byte[] buffer = new byte[16 * 1024];
-            int n;
-            while ((n = in.read(buffer)) != -1) {
-                if (out.size() + n > 1024 * 1024) throw new IllegalStateException("云端元数据响应过大");
-                out.write(buffer, 0, n);
-            }
-            return out.toString("UTF-8");
-        }
+        }, "RYLUX-Game-APK").start();
     }
 
     private static File gameApkFile(Context context) {
@@ -260,80 +193,77 @@ public final class GameApkCloudInstaller {
         return new File(base, GAME_APK_NAME);
     }
 
-    private static Verification verify(File apk, RemoteApkInfo remote) throws Exception {
-        if (apk == null || remote == null || !apk.isFile()) return Verification.invalid();
-        if (apk.length() != remote.size) return Verification.invalid();
-
-        String sha256 = digest(apk, "SHA-256");
-        if (!remote.sha256.equalsIgnoreCase(sha256)) return Verification.invalid();
-
+    private static Verification verifyApk(Context context, File apk, boolean requireStoredMd5WhenPresent)
+            throws Exception {
+        if (apk == null || !apk.isFile() || apk.length() != GAME_APK_SIZE) {
+            return Verification.invalid();
+        }
         String md5 = digest(apk, "MD5");
+        String sha256 = digest(apk, "SHA-256");
+        if (!GAME_APK_SHA256.equalsIgnoreCase(sha256)) return Verification.invalid();
+
+        String storedMd5 = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString(KEY_MD5, "");
+        if (requireStoredMd5WhenPresent
+                && storedMd5 != null
+                && !storedMd5.trim().isEmpty()
+                && !storedMd5.equalsIgnoreCase(md5)) {
+            return Verification.invalid();
+        }
         return new Verification(true, md5, sha256);
     }
 
-    private static void downloadApk(
-            Activity activity,
-            Button button,
-            File target,
-            RemoteApkInfo remote
-    ) throws Exception {
+    private static void downloadApk(Activity activity, Button button, File target) throws Exception {
         File part = new File(target.getParentFile(), target.getName() + ".part");
-        String direct = MEDIA_URL + "?sha256=" + remote.sha256;
-        String[] sources = CnDownloadRouter.largeGithubFileUrls(direct);
-        Throwable last = null;
+        if (part.exists() && !part.delete()) throw new IllegalStateException("无法清理旧下载缓存");
 
+        String[] sources = CnDownloadRouter.largeGithubFileUrls(GAME_APK_URL);
+        Throwable last = null;
+        HttpURLConnection connection = null;
         for (int sourceIndex = 0; sourceIndex < sources.length; sourceIndex++) {
             if (part.exists() && !part.delete()) {
                 throw new IllegalStateException("无法清理旧下载缓存");
             }
-            HttpURLConnection connection = null;
             try {
-                final int line = sourceIndex + 1;
-                updateButton(activity, button, "正在下载游戏（线路 " + line + "/" + sources.length + "）… 0%");
+                updateButton(activity, button, "正在下载游戏（线路 " + (sourceIndex + 1)
+                        + "/" + sources.length + "）… 0%");
                 connection = (HttpURLConnection) new URL(sources[sourceIndex]).openConnection();
-                connection.setConnectTimeout(sourceIndex == 0 ? 6000 : 10000);
-                connection.setReadTimeout(45_000);
+                connection.setConnectTimeout(sourceIndex == 0 ? 15_000 : 20_000);
+                connection.setReadTimeout(30_000);
                 connection.setUseCaches(false);
                 connection.setInstanceFollowRedirects(true);
-                connection.setRequestProperty("User-Agent", "RYLUX/2.3 cloud-integrity");
+                connection.setRequestProperty("User-Agent", "RYLUX/2.3");
                 connection.setRequestProperty("Accept", "application/octet-stream,*/*");
-                connection.setRequestProperty("Cache-Control", "no-cache");
-                connection.setRequestProperty("Pragma", "no-cache");
-
                 int code = connection.getResponseCode();
                 if (code < 200 || code >= 300) {
                     throw new IllegalStateException("下载服务器返回 HTTP " + code);
                 }
 
+                long total = connection.getContentLengthLong();
                 long read = 0L;
                 int lastPercent = -1;
-                try (BufferedInputStream in = new BufferedInputStream(connection.getInputStream(), 128 * 1024);
+                try (BufferedInputStream in = new BufferedInputStream(connection.getInputStream(), 64 * 1024);
                      FileOutputStream out = new FileOutputStream(part)) {
-                    byte[] buffer = new byte[128 * 1024];
+                    byte[] buffer = new byte[64 * 1024];
                     int n;
                     while ((n = in.read(buffer)) != -1) {
                         out.write(buffer, 0, n);
                         read += n;
-                        if (read > remote.size) throw new IllegalStateException("下载内容长度超过云端元数据");
-                        int percent = remote.size > 0
-                                ? (int) Math.min(99L, (read * 100L) / remote.size)
+                        long denominator = total > 0 ? total : GAME_APK_SIZE;
+                        int percent = denominator > 0
+                                ? (int) Math.min(99L, (read * 100L) / denominator)
                                 : 0;
                         if (percent != lastPercent) {
                             lastPercent = percent;
-                            updateButton(activity, button,
-                                    "正在下载游戏（线路 " + line + "/" + sources.length + "）… " + percent + "%");
+                            updateButton(activity, button, "正在下载游戏… " + percent + "%");
                         }
                     }
                     out.getFD().sync();
                 }
 
-                if (read != remote.size) {
+                if (read != GAME_APK_SIZE) {
                     throw new IllegalStateException("下载文件大小不正确：" + read + " 字节");
                 }
-                if (!remote.sha256.equalsIgnoreCase(digest(part, "SHA-256"))) {
-                    throw new IllegalStateException("下载线路返回的 APK SHA-256 不匹配");
-                }
-
                 if (target.exists() && !target.delete()) {
                     throw new IllegalStateException("无法替换旧 APK");
                 }
@@ -341,7 +271,7 @@ public final class GameApkCloudInstaller {
                     copyFile(part, target);
                     if (!part.delete()) part.deleteOnExit();
                 }
-                updateButton(activity, button, "正在校验 APK 内容…");
+                updateButton(activity, button, "正在校验 APK（MD5）…");
                 return;
             } catch (Throwable t) {
                 last = t;
@@ -351,9 +281,10 @@ public final class GameApkCloudInstaller {
                 }
             } finally {
                 if (connection != null) connection.disconnect();
+                connection = null;
             }
         }
-
+        if (part.exists() && !target.exists()) part.delete();
         throw new IllegalStateException("所有 APK 下载线路均不可用"
                 + (last == null ? "" : "：" + safeMessage(last)));
     }
@@ -376,17 +307,15 @@ public final class GameApkCloudInstaller {
             while ((n = in.read(buffer)) != -1) md.update(buffer, 0, n);
         }
         StringBuilder out = new StringBuilder();
-        for (byte b : md.digest()) out.append(String.format(Locale.US, "%02x", b & 0xff));
+        for (byte value : md.digest()) out.append(String.format(Locale.US, "%02x", value & 0xff));
         return out.toString();
     }
 
-    private static void rememberVerification(Context context, RemoteApkInfo remote, Verification local) {
+    private static void rememberMd5(Context context, String md5) {
+        if (md5 == null || md5.trim().isEmpty()) return;
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .edit()
-                .putString("remote_sha256", remote.sha256)
-                .putLong("remote_size", remote.size)
-                .putString("local_sha256", local.sha256)
-                .putString("local_md5", local.md5)
+                .putString(KEY_MD5, md5)
                 .apply();
     }
 
@@ -395,7 +324,6 @@ public final class GameApkCloudInstaller {
         int flags = Build.VERSION.SDK_INT >= 28
                 ? PackageManager.GET_SIGNING_CERTIFICATES
                 : PackageManager.GET_SIGNATURES;
-
         PackageInfo archive;
         try {
             archive = pm.getPackageArchiveInfo(apk.getAbsolutePath(), flags);
@@ -462,14 +390,14 @@ public final class GameApkCloudInstaller {
             return;
         }
         if (decision.kind == InstallDecision.DIFFERENT_SIGNATURE) {
-            showUninstallRequiredDialog(activity);
+            showUninstallRequiredDialog(activity, apk);
             return;
         }
 
         if (Build.VERSION.SDK_INT >= 26
                 && !activity.getPackageManager().canRequestPackageInstalls()) {
             SharedPreferences prefs = activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-            prefs.edit().putBoolean(KEY_PENDING_UNKNOWN, true).apply();
+            prefs.edit().putBoolean(KEY_PENDING_UNKNOWN_SOURCES, true).apply();
             try {
                 Intent settings = new Intent(
                         Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
@@ -478,7 +406,7 @@ public final class GameApkCloudInstaller {
                 activity.startActivity(settings);
                 toast(activity, "请允许 RYLUX 安装未知应用，返回后会继续安装");
             } catch (Throwable t) {
-                prefs.edit().putBoolean(KEY_PENDING_UNKNOWN, false).apply();
+                prefs.edit().putBoolean(KEY_PENDING_UNKNOWN_SOURCES, false).apply();
                 toast(activity, "无法打开“安装未知应用”设置");
             }
             return;
@@ -487,10 +415,10 @@ public final class GameApkCloudInstaller {
         launchPackageInstaller(activity, apk);
     }
 
-    private static void showUninstallRequiredDialog(Activity activity) {
+    private static void showUninstallRequiredDialog(Activity activity, File apk) {
         new AlertDialog.Builder(activity)
                 .setTitle("需要先卸载旧版本")
-                .setMessage("检测到设备已安装相同包名的游戏，但签名与当前云端 APK 不同。"
+                .setMessage("检测到设备已安装相同包名的游戏，但签名与当前 APK 不同。"
                         + "Android 无法直接覆盖安装。\n\n"
                         + "卸载旧版会删除该游戏的本地应用数据，请确认后继续。")
                 .setNegativeButton("取消", null)
@@ -528,36 +456,35 @@ public final class GameApkCloudInstaller {
         }
     }
 
-    private static void resumePending(Activity activity) {
+    private static void resumePendingInstall(Activity activity) {
         SharedPreferences prefs = activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        boolean pendingUnknown = prefs.getBoolean(KEY_PENDING_UNKNOWN, false);
+        boolean pendingUnknown = prefs.getBoolean(KEY_PENDING_UNKNOWN_SOURCES, false);
         boolean pendingUninstall = prefs.getBoolean(KEY_PENDING_UNINSTALL, false);
         if (!pendingUnknown && !pendingUninstall) return;
 
         if (pendingUnknown) {
-            if (Build.VERSION.SDK_INT < 26
-                    || activity.getPackageManager().canRequestPackageInstalls()) {
-                prefs.edit().putBoolean(KEY_PENDING_UNKNOWN, false).apply();
-                continueVerifiedInstall(activity);
+            if (Build.VERSION.SDK_INT >= 26
+                    && !activity.getPackageManager().canRequestPackageInstalls()) {
+                return;
             }
-            return;
+            prefs.edit().putBoolean(KEY_PENDING_UNKNOWN_SOURCES, false).apply();
         }
 
-        if (pendingUninstall && !isTargetInstalled(activity)) {
+        if (pendingUninstall) {
+            if (isTargetInstalled(activity)) {
+                prefs.edit().putBoolean(KEY_PENDING_UNINSTALL, false).apply();
+                toast(activity, "旧版本仍在，请卸载后重新点击“安装游戏”");
+                return;
+            }
             prefs.edit().putBoolean(KEY_PENDING_UNINSTALL, false).apply();
-            continueVerifiedInstall(activity);
         }
-    }
 
-    private static void continueVerifiedInstall(Activity activity) {
         new Thread(() -> {
             try {
-                RemoteApkInfo remote = fetchRemoteApkInfo();
                 File apk = gameApkFile(activity);
-                Verification verification = verify(apk, remote);
+                Verification verification = verifyApk(activity, apk, true);
                 if (!verification.valid) {
-                    activity.runOnUiThread(() ->
-                            toast(activity, "云端 APK 已变化，请重新点击“安装游戏”下载最新版本"));
+                    activity.runOnUiThread(() -> toast(activity, "本地 APK 校验失败，请重新点击“安装游戏”"));
                     return;
                 }
                 InstallDecision decision = inspectInstallDecision(activity, apk);
@@ -566,7 +493,7 @@ public final class GameApkCloudInstaller {
                 activity.runOnUiThread(() ->
                         toast(activity, "继续安装失败：" + safeMessage(t)));
             }
-        }, "RYLUX-Resume-APK").start();
+        }, "RYLUX-Resume-APK-Install").start();
     }
 
     private static boolean isTargetInstalled(Context context) {
@@ -582,7 +509,7 @@ public final class GameApkCloudInstaller {
 
     private static void updateButton(Activity activity, Button button, String text) {
         activity.runOnUiThread(() -> {
-            if (!activity.isFinishing()) button.setText(text);
+            if (button != null) button.setText(text);
         });
     }
 
@@ -590,8 +517,10 @@ public final class GameApkCloudInstaller {
         synchronized (INSTALL_LOCK) {
             installBusy = false;
         }
-        button.setEnabled(true);
-        button.setText("安装游戏");
+        if (button != null) {
+            button.setEnabled(true);
+            button.setText("安装游戏");
+        }
     }
 
     private static void toast(Context context, String message) {
@@ -605,14 +534,8 @@ public final class GameApkCloudInstaller {
         return message.trim();
     }
 
-    private static final class RemoteApkInfo {
-        final String sha256;
-        final long size;
-
-        RemoteApkInfo(String sha256, long size) {
-            this.sha256 = sha256;
-            this.size = size;
-        }
+    private static int dp(Context context, int value) {
+        return Math.round(value * context.getResources().getDisplayMetrics().density);
     }
 
     private static final class Verification {
@@ -622,8 +545,8 @@ public final class GameApkCloudInstaller {
 
         Verification(boolean valid, String md5, String sha256) {
             this.valid = valid;
-            this.md5 = md5 == null ? "" : md5;
-            this.sha256 = sha256 == null ? "" : sha256;
+            this.md5 = md5;
+            this.sha256 = sha256;
         }
 
         static Verification invalid() {
@@ -632,23 +555,23 @@ public final class GameApkCloudInstaller {
     }
 
     private static final class InstallDecision {
-        static final int NOT_INSTALLED = 1;
-        static final int SAME_SIGNATURE = 2;
-        static final int DIFFERENT_SIGNATURE = 3;
-        static final int UNKNOWN = 4;
+        static final int NOT_INSTALLED = 0;
+        static final int SAME_SIGNATURE = 1;
+        static final int DIFFERENT_SIGNATURE = 2;
+        static final int UNKNOWN_SIGNATURE = 3;
 
         final boolean valid;
         final int kind;
         final String message;
 
-        InstallDecision(boolean valid, int kind, String message) {
+        private InstallDecision(boolean valid, int kind, String message) {
             this.valid = valid;
             this.kind = kind;
             this.message = message == null ? "" : message;
         }
 
         static InstallDecision invalid(String message) {
-            return new InstallDecision(false, UNKNOWN, message);
+            return new InstallDecision(false, UNKNOWN_SIGNATURE, message);
         }
 
         static InstallDecision notInstalled() {
@@ -664,7 +587,7 @@ public final class GameApkCloudInstaller {
         }
 
         static InstallDecision unknown() {
-            return new InstallDecision(true, UNKNOWN, "");
+            return new InstallDecision(true, UNKNOWN_SIGNATURE, "");
         }
     }
 }

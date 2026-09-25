@@ -34,15 +34,11 @@ GET  /api/v1/plans
 POST /api/v1/redeem
 GET  /api/v1/modules
 POST /api/v1/modules/sg_localization/authorize
-GET  /api/v1/modules/sg_localization/relay-token
 ```
 
 注册默认赠送 24 小时体验。同一公网 IP 在成功注册后的 48 小时内再次注册返回 HTTP 429。登录会返回 Bearer Token；服务端数据库只保存 Token 的 SHA-256 摘要。
 
 首个模块的用户可见名称为“封神榜汉化”；内部模块代码仍保持 `sg_localization`，避免破坏已有客户端接口。
-
-游戏 relay 凭据只通过已登录且有效的授权接口按需返回。后端运行环境必须配置与
-Cloudflare Worker Secret `RYLUX_RELAY_TOKEN` 相同的环境变量；不要把真实值写入仓库、APK 或日志。
 
 旧接口仍保留：
 
@@ -73,11 +69,6 @@ V1 增加：
 
 ## 已有 VPS 升级
 
-部署 relay 功能前，在后端服务环境中配置与 Cloudflare Worker 相同的
-`RYLUX_RELAY_TOKEN`。该值只用于后端签发短时 relay 凭据，不写入仓库或 APK。
-可写入 root-only 文件 `/etc/pakredirect-license/relay.env`，内容只包含
-`RYLUX_RELAY_TOKEN=<same-secret-as-Cloudflare>`，再重启服务；该文件不会被 Git 复制。
-
 数据库文件：
 
 ```text
@@ -90,7 +81,7 @@ V1 增加：
 set -e
 
 rm -rf /tmp/RYLUX-v1
-git clone --depth 1 --branch feature/rylux-game-relay https://github.com/yusuijiang01-orz/PakRedirect.git /tmp/RYLUX-v1
+git clone --depth 1 https://github.com/yusuijiang01-orz/PakRedirect.git /tmp/RYLUX-v1
 
 cp /tmp/RYLUX-v1/backend/app.py /opt/pakredirect-license/
 cp /tmp/RYLUX-v1/backend/admin_v2.py /opt/pakredirect-license/

@@ -18,7 +18,6 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.Space;
-import android.widget.Switch;
 import android.widget.TextView;
 
 import java.util.ArrayList;
@@ -29,8 +28,8 @@ import java.util.WeakHashMap;
 /**
  * Presentation-only layer for the programmatic MainActivity.
  *
- * MainActivity still owns authentication, membership, game installation,
- * localization selection, protected-content preparation and game launch. This class only rearranges
+ * MainActivity still owns authentication, membership, protected-content
+ * preparation and game launch. This class only rearranges
  * and styles existing views so those behaviors keep their original listeners
  * and references.
  */
@@ -158,6 +157,7 @@ public final class RyluxUiPolish {
 
     private static void styleAvatar(Activity activity, FrameLayout shell) {
         if (!AVATAR_STYLED.add(shell)) return;
+        float scale = RyluxHomeNavigationPolish.homeScale(activity);
 
         boolean admin = MainActivity.currentRole != null
                 && "admin".equalsIgnoreCase(MainActivity.currentRole.trim());
@@ -181,17 +181,18 @@ public final class RyluxUiPolish {
         shell.setClipToPadding(false);
 
         FrameLayout portraitFrame = new FrameLayout(activity);
-        portraitFrame.setPadding(dp(activity, 2), dp(activity, 2), dp(activity, 2), dp(activity, 2));
+        portraitFrame.setPadding(dp(activity, 2 * scale), dp(activity, 2 * scale),
+                dp(activity, 2 * scale), dp(activity, 2 * scale));
         portraitFrame.setBackground(oval(
                 Color.rgb(21, 31, 45),
                 Color.rgb(170, 135, 77),
-                dp(activity, 1)
+                dp(activity, scale)
         ));
         FrameLayout.LayoutParams portraitFrameLp =
-                new FrameLayout.LayoutParams(dp(activity, 58), dp(activity, 58));
+                new FrameLayout.LayoutParams(dp(activity, 58 * scale), dp(activity, 58 * scale));
         portraitFrameLp.gravity = Gravity.BOTTOM | Gravity.START;
-        portraitFrameLp.leftMargin = dp(activity, 1);
-        portraitFrameLp.bottomMargin = dp(activity, 1);
+        portraitFrameLp.leftMargin = dp(activity, scale);
+        portraitFrameLp.bottomMargin = dp(activity, scale);
         shell.addView(portraitFrame, portraitFrameLp);
 
         ImageView portrait = new ImageView(activity);
@@ -209,25 +210,26 @@ public final class RyluxUiPolish {
         portraitFrame.addView(portrait, new FrameLayout.LayoutParams(-1, -1));
 
         boolean trial = !admin && "体验".equals(membership);
-        TextView badge = label(activity, membership, 10, Color.WHITE, true);
+        TextView badge = label(activity, membership, 10 * scale, Color.WHITE, true);
         badge.setGravity(Gravity.CENTER);
-        badge.setPadding(dp(activity, 8), 0, dp(activity, 8), 0);
+        badge.setPadding(dp(activity, 8 * scale), 0, dp(activity, 8 * scale), 0);
         badge.setBackground(round(
                 activity,
                 admin ? ADMIN_GREEN : (trial ? Color.rgb(109, 77, 22) : RED),
-                9,
+                9 * scale,
                 admin ? ADMIN_BORDER : (trial ? Color.rgb(173, 126, 36) : Color.rgb(255, 104, 106)),
-                1
+                Math.max(1, Math.round(scale))
         ));
         FrameLayout.LayoutParams badgeLp =
-                new FrameLayout.LayoutParams(-2, dp(activity, 22));
+                new FrameLayout.LayoutParams(-2, dp(activity, 22 * scale));
         badgeLp.gravity = Gravity.TOP | Gravity.END;
-        badgeLp.topMargin = dp(activity, 2);
-        badgeLp.rightMargin = dp(activity, 1);
+        badgeLp.topMargin = dp(activity, 2 * scale);
+        badgeLp.rightMargin = dp(activity, scale);
         shell.addView(badge, badgeLp);
     }
 
     private static void buildHero(Activity activity, GlowFrameLayout hero) {
+        float scale = RyluxHomeNavigationPolish.homeScale(activity);
         hero.removeAllViews();
         hero.setPadding(0, 0, 0, 0);
         hero.setClipChildren(true);
@@ -286,25 +288,25 @@ public final class RyluxUiPolish {
 
         LinearLayout caption = new LinearLayout(activity);
         caption.setOrientation(LinearLayout.VERTICAL);
-        caption.setPadding(dp(activity, 22), 0, dp(activity, 22), dp(activity, 23));
+        caption.setPadding(dp(activity, 22 * scale), 0, dp(activity, 22 * scale), dp(activity, 23 * scale));
 
-        TextView title = label(activity, "封神榜（越南版）", 29, Color.rgb(246, 224, 186), true);
-        title.setShadowLayer(dp(activity, 8), 0, dp(activity, 2), Color.argb(190, 0, 0, 0));
+        TextView title = label(activity, "封神榜（越南版）", 29 * scale, Color.rgb(246, 224, 186), true);
+        title.setShadowLayer(dp(activity, 8 * scale), 0, dp(activity, 2 * scale), Color.argb(190, 0, 0, 0));
         caption.addView(title);
 
-        TextView supported = label(activity, "已支持汉化", 12, Color.rgb(155, 205, 255), true);
+        TextView supported = label(activity, "已支持汉化", 12 * scale, Color.rgb(155, 205, 255), true);
         supported.setGravity(Gravity.CENTER);
-        supported.setPadding(dp(activity, 9), 0, dp(activity, 9), 0);
+        supported.setPadding(dp(activity, 9 * scale), 0, dp(activity, 9 * scale), 0);
         supported.setBackground(round(
                 activity,
                 Color.argb(190, 19, 55, 99),
-                6,
+                6 * scale,
                 Color.rgb(49, 119, 203),
                 1
         ));
         LinearLayout.LayoutParams supportedLp =
-                new LinearLayout.LayoutParams(-2, dp(activity, 27));
-        supportedLp.topMargin = dp(activity, 8);
+                new LinearLayout.LayoutParams(-2, dp(activity, 27 * scale));
+        supportedLp.topMargin = dp(activity, 8 * scale);
         caption.addView(supported, supportedLp);
 
         FrameLayout.LayoutParams captionLp =
@@ -447,7 +449,7 @@ public final class RyluxUiPolish {
     }
 
     private static void rebuildGamePanel(Activity activity, LinearLayout panel) {
-        if (panel.getChildCount() < 10) {
+        if (panel.getChildCount() < 9) {
             styleFallbackPanel(activity, panel);
             return;
         }
@@ -458,11 +460,10 @@ public final class RyluxUiPolish {
         TextView description = asText(children.get(2));
         View updateRow = children.get(3);
         View progressRow = children.get(4);
-        Button installButton = asButton(children.get(5));
-        View localizationControl = children.get(6);
-        Button startButton = asButton(children.get(7));
-        TextView moduleProgressText = asText(children.get(8));
-        View moduleProgress = children.get(9);
+        View localizationControl = children.get(5);
+        Button startButton = asButton(children.get(6));
+        TextView moduleProgressText = asText(children.get(7));
+        View moduleProgress = children.get(8);
 
         panel.removeAllViews();
 
@@ -556,29 +557,38 @@ public final class RyluxUiPolish {
         infoCard.addView(updateRow, new LinearLayout.LayoutParams(-1, dp(activity, 43)));
         infoCard.addView(separator(activity), new LinearLayout.LayoutParams(-1, dp(activity, 1)));
         infoCard.addView(progressRow, new LinearLayout.LayoutParams(-1, dp(activity, 43)));
-        infoCard.addView(separator(activity), new LinearLayout.LayoutParams(-1, dp(activity, 1)));
 
         LinearLayout.LayoutParams infoLp = new LinearLayout.LayoutParams(-1, -2);
         infoLp.topMargin = dp(activity, 2);
         panel.addView(infoCard, infoLp);
 
-        stylePrimaryButton(activity, installButton);
-        installButton.setText("安装游戏");
-        LinearLayout.LayoutParams installLp = new LinearLayout.LayoutParams(-1, dp(activity, 46));
-        installLp.topMargin = dp(activity, 12);
-        panel.addView(installButton, installLp);
-
-        styleFeatureControls(activity, localizationControl);
-        LinearLayout.LayoutParams localizationLp =
-                new LinearLayout.LayoutParams(-1, -2);
-        localizationLp.topMargin = dp(activity, 10);
-        panel.addView(localizationControl, localizationLp);
+        if (localizationControl instanceof LinearLayout) {
+            LinearLayout control = (LinearLayout) localizationControl;
+            control.setBackground(round(activity, SURFACE_2, 12, BORDER_SOFT, 1));
+            if (control.getChildCount() > 0 && control.getChildAt(0) instanceof LinearLayout) {
+                LinearLayout row = (LinearLayout) control.getChildAt(0);
+                if (row.getChildCount() > 0 && row.getChildAt(0) instanceof TextView) {
+                    TextView title = (TextView) row.getChildAt(0);
+                    title.setTextColor(TEXT);
+                    title.setTextSize(13);
+                    title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+                }
+            }
+            if (control.getChildCount() > 1 && control.getChildAt(1) instanceof TextView) {
+                TextView note = (TextView) control.getChildAt(1);
+                note.setTextColor(MUTED);
+                note.setTextSize(10);
+            }
+            LinearLayout.LayoutParams localizationLp = new LinearLayout.LayoutParams(-1, -2);
+            localizationLp.topMargin = dp(activity, 10);
+            panel.addView(localizationControl, localizationLp);
+        }
 
         stylePrimaryButton(activity, startButton);
         startButton.setText(startButton.isEnabled() ? "▶  启动游戏" : startButton.getText());
         LinearLayout.LayoutParams startLp =
                 new LinearLayout.LayoutParams(-1, dp(activity, 56));
-        startLp.topMargin = dp(activity, 12);
+        startLp.topMargin = dp(activity, 10);
         panel.addView(startButton, startLp);
 
         moduleProgressText.setTextColor(MUTED);
@@ -598,47 +608,7 @@ public final class RyluxUiPolish {
                 new LinearLayout.LayoutParams(-1, dp(activity, 5));
         progressLp.topMargin = dp(activity, 1);
         panel.addView(moduleProgress, progressLp);
-    }
-
-    private static void styleFeatureControls(Activity activity, View raw) {
-        if (!(raw instanceof LinearLayout)) return;
-        LinearLayout controls = (LinearLayout) raw;
-        for (int i = 0; i < controls.getChildCount(); i++) {
-            View child = controls.getChildAt(i);
-            if (!(child instanceof LinearLayout)) continue;
-            LinearLayout control = (LinearLayout) child;
-            control.setBackground(round(activity, SURFACE_2, 12, BORDER, 1));
-            if (control.getChildCount() < 2 || !(control.getChildAt(0) instanceof LinearLayout)) continue;
-
-            LinearLayout row = (LinearLayout) control.getChildAt(0);
-            if (row.getChildCount() < 2) continue;
-            View titleRaw = row.getChildAt(0);
-            if (titleRaw instanceof TextView) {
-                TextView title = (TextView) titleRaw;
-                title.setTextColor(TEXT);
-                title.setTextSize(13);
-                title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-            }
-            View toggleRaw = row.getChildAt(1);
-            if (toggleRaw instanceof Switch) {
-                Switch toggle = (Switch) toggleRaw;
-                toggle.setTextColor(TEXT);
-                toggle.setThumbTintList(new android.content.res.ColorStateList(
-                        new int[][]{new int[]{android.R.attr.state_checked}, new int[]{}},
-                        new int[]{Color.rgb(245, 248, 255), Color.rgb(190, 202, 219)}
-                ));
-                toggle.setTrackTintList(new android.content.res.ColorStateList(
-                        new int[][]{new int[]{android.R.attr.state_checked}, new int[]{}},
-                        new int[]{BLUE, Color.rgb(52, 65, 84)}
-                ));
-            }
-            View noteRaw = control.getChildAt(1);
-            if (noteRaw instanceof TextView) {
-                TextView note = (TextView) noteRaw;
-                note.setTextColor(MUTED);
-                note.setTextSize(10);
-            }
-        }
+        panel.setTag("rylux_game_panel_polished");
     }
 
     private static void styleHeader(Activity activity, View headerRaw, boolean gamePanel) {
@@ -749,7 +719,7 @@ public final class RyluxUiPolish {
         }
     }
 
-    private static void stylePrimaryButton(Activity activity, Button button) {
+    static void stylePrimaryButton(Activity activity, Button button) {
         button.setAllCaps(false);
         button.setTextSize(18);
         button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
@@ -801,7 +771,9 @@ public final class RyluxUiPolish {
         for (int i = 0; i < 7; i++) {
             if (!(cursor.getParent() instanceof View)) return null;
             cursor = (View) cursor.getParent();
-            if (cursor instanceof LinearLayout && cursor.getParent() instanceof FrameLayout) {
+            if (cursor instanceof LinearLayout
+                    && (cursor.getParent() instanceof FrameLayout
+                    || cursor.getParent() instanceof android.widget.ScrollView)) {
                 return (LinearLayout) cursor;
             }
         }
