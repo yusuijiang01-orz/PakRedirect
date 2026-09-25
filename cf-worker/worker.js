@@ -17,6 +17,10 @@ const BLOCKED_HEADERS = [
 ];
 
 const GAME_PATH = "/rylux-game";
+const GAME_UPSTREAM = { hostname: "verify.lovenom.eu.org", port: 9443 };
+const GAME_UPSTREAM_TCP_MAGIC = new Uint8Array([82, 89, 76, 85, 88, 72, 89, 50, 1]); // RYLUXHY2 + TCP
+const GAME_UPSTREAM_UDP_MAGIC = new Uint8Array([82, 89, 76, 85, 88, 72, 89, 50, 2]); // RYLUXHY2 + UDP
+const GAME_UPSTREAM_ACK = new Uint8Array([82, 89, 76, 79, 75, 0]); // RYLOK + status=0
 const LEGACY_GAME_TARGETS = new Map([
   [GAME_PATH, { hostname: "103.206.217.28", port: 5622 }],
   [GAME_PATH + "/target-2", { hostname: "103.206.217.28", port: 6662 }],
@@ -38,6 +42,7 @@ export default {
 };
 
 function resolveGameTarget(path) {
+  if (path === GAME_PATH + "/udp") return { mode: "udp" };
   const legacy = LEGACY_GAME_TARGETS.get(path);
   if (legacy) return legacy;
 
@@ -79,10 +84,23 @@ async function handleGameRelay(request, env, target) {
   }
 
   let socket;
+  let upstreamReader;
+  let upstreamWriter;
+  let initialUpstreamData = new Uint8Array(0);
   try {
-    socket = connect(target);
+    socket = connect(GAME_UPSTREAM, { secureTransport: "on", allowHalfOpen: true });
     await socket.opened;
+    upstreamWriter = socket.writable.getWriter();
+    await upstreamWriter.write(encodeGameUpstreamHello(target, token));
+    upstreamReader = socket.readable.getReader();
+    const greeting = await readGameUpstreamAck(upstreamReader);
+    if (!greeting) {
+      try { await socket.close(); } catch (_) {}
+      return jsonResponse("game relay upstream rejected target", 502);
+    }
+    initialUpstreamData = greeting;
   } catch (_) {
+    if (socket) try { await socket.close(); } catch (_) {}
     return jsonResponse("target connection failed", 502);
   }
 
@@ -91,7 +109,7 @@ async function handleGameRelay(request, env, target) {
   const server = pair[1];
   server.accept();
 
-  const writer = socket.writable.getWriter();
+  const writer = upstreamWriter;
   let writeChain = Promise.resolve();
   let closed = false;
 
@@ -116,7 +134,8 @@ async function handleGameRelay(request, env, target) {
         await close(1003, "binary frames only");
         return;
       }
-      await writer.write(new Uint8Array(data));
+      const bytes = new Uint8Array(data);
+      await writer.write(target.mode === "udp" ? encodeLengthFrame(bytes) : bytes);
     }).catch(() => close(1011, "upstream write failed"));
   });
 
@@ -124,12 +143,22 @@ async function handleGameRelay(request, env, target) {
   server.addEventListener("error", () => close(1011, "websocket error"));
 
   (async () => {
-    const reader = socket.readable.getReader();
+    const reader = upstreamReader;
     try {
-      while (!closed) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        if (value && value.byteLength) server.send(value);
+      if (target.mode === "udp") {
+        const framed = new LengthPrefixedReader(reader, initialUpstreamData);
+        while (!closed) {
+          const packet = await framed.readFrame();
+          if (packet === null) break;
+          server.send(packet);
+        }
+      } else {
+        if (initialUpstreamData.length) server.send(initialUpstreamData);
+        while (!closed) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (value && value.byteLength) server.send(value);
+        }
       }
     } catch (_) {
       // Closing the WebSocket below is enough to notify the client.
@@ -140,6 +169,90 @@ async function handleGameRelay(request, env, target) {
   })();
 
   return new Response(null, { status: 101, webSocket: client });
+}
+
+function encodeGameUpstreamHello(target, token) {
+  const tokenBytes = new TextEncoder().encode(token);
+  if (!tokenBytes.length || tokenBytes.length > 65535) throw new Error("invalid relay credential");
+  const isUdp = target.mode === "udp";
+  const magic = isUdp ? GAME_UPSTREAM_UDP_MAGIC : GAME_UPSTREAM_TCP_MAGIC;
+  const octets = isUdp ? [] : target.hostname.split(".").map(Number);
+  if (!isUdp && (octets.length !== 4 || octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255))) {
+    throw new Error("invalid game target address");
+  }
+  const bytes = new Uint8Array(magic.length + 2 + tokenBytes.length + (isUdp ? 0 : 6));
+  let offset = 0;
+  bytes.set(magic, offset); offset += magic.length;
+  bytes[offset++] = (tokenBytes.length >>> 8) & 0xff;
+  bytes[offset++] = tokenBytes.length & 0xff;
+  bytes.set(tokenBytes, offset); offset += tokenBytes.length;
+  if (!isUdp) {
+    bytes.set(octets, offset); offset += 4;
+    bytes[offset++] = (target.port >>> 8) & 0xff;
+    bytes[offset] = target.port & 0xff;
+  }
+  return bytes;
+}
+
+function encodeLengthFrame(data) {
+  if (data.length < 1 || data.length > 65535) throw new Error("invalid UDP packet size");
+  const frame = new Uint8Array(data.length + 2);
+  frame[0] = (data.length >>> 8) & 0xff;
+  frame[1] = data.length & 0xff;
+  frame.set(data, 2);
+  return frame;
+}
+
+class LengthPrefixedReader {
+  constructor(reader, initial = new Uint8Array(0)) {
+    this.reader = reader;
+    this.buffer = initial;
+  }
+
+  async readBytes(length) {
+    while (this.buffer.length < length) {
+      const { value, done } = await this.reader.read();
+      if (done) return null;
+      const chunk = value || new Uint8Array(0);
+      const joined = new Uint8Array(this.buffer.length + chunk.length);
+      joined.set(this.buffer);
+      joined.set(chunk, this.buffer.length);
+      this.buffer = joined;
+    }
+    const result = this.buffer.slice(0, length);
+    this.buffer = this.buffer.slice(length);
+    return result;
+  }
+
+  async readFrame() {
+    const header = await this.readBytes(2);
+    if (header === null) return null;
+    const length = (header[0] << 8) | header[1];
+    if (length < 1) throw new Error("invalid upstream UDP frame");
+    const frame = await this.readBytes(length);
+    if (frame === null) throw new Error("truncated upstream UDP frame");
+    return frame;
+  }
+}
+
+function startsWithBytes(value, prefix) {
+  if (value.length < prefix.length) return false;
+  for (let i = 0; i < prefix.length; i++) if (value[i] !== prefix[i]) return false;
+  return true;
+}
+
+async function readGameUpstreamAck(reader) {
+  let buffered = new Uint8Array(0);
+  while (buffered.length < GAME_UPSTREAM_ACK.length) {
+    const { value, done } = await reader.read();
+    if (done || !value) return null;
+    const joined = new Uint8Array(buffered.length + value.length);
+    joined.set(buffered);
+    joined.set(value, buffered.length);
+    buffered = joined;
+  }
+  if (!startsWithBytes(buffered, GAME_UPSTREAM_ACK)) return null;
+  return buffered.slice(GAME_UPSTREAM_ACK.length);
 }
 
 async function handleCdnProxy(request) {
@@ -255,3 +368,4 @@ function base64UrlBytes(value) {
   const raw = atob(padded);
   return Uint8Array.from(raw, (character) => character.charCodeAt(0));
 }
+
