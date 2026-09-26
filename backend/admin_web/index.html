@@ -77,23 +77,34 @@
 
       <section id="view-agents" class="hidden">
           <div class="panel agent-panel">
-            <div class="panel-head agent-panel-head"><div><h3>代理人权限与额度</h3><p class="muted">代理人注册普通账号后，使用用户 ID 配置权限与额度。</p></div><a class="agent-entry" href="/agent">代理人入口 <span aria-hidden="true">↗</span></a></div>
+            <div class="panel-head agent-panel-head"><div><h3>代理人权限与人民币余额</h3><p class="muted">使用已注册用户的 ID 配置代理权限，充值后可按套餐价格发卡和续期。</p></div><a class="agent-entry" href="/agent">代理人入口 <span aria-hidden="true">↗</span></a></div>
             <div class="panel-body agent-workspace">
               <section class="agent-config" aria-labelledby="agentConfigTitle">
                 <div class="agent-section-head"><span class="agent-step" aria-hidden="true">01</span><div><h4 id="agentConfigTitle">配置代理人</h4><p>填写账号信息，并勾选允许使用的功能。</p></div></div>
                 <div class="agent-fields">
                   <div class="agent-field"><label for="agentUserId">代理人用户 ID</label><input id="agentUserId" class="input" type="number" min="1" placeholder="输入已注册的用户 ID"></div>
-                  <div class="agent-field"><label for="agentQuota">剩余额度 <span>（天）</span></label><input id="agentQuota" class="input" type="number" min="0" placeholder="输入剩余天数"></div>
                 </div>
                 <fieldset class="agent-permissions"><legend>功能权限</legend><div class="agent-permission-options">
                   <label><input id="agentManage" type="checkbox"><span>管理所属用户</span></label>
                   <label><input id="agentIssue" type="checkbox"><span>发卡</span></label>
                   <label><input id="agentExtend" type="checkbox"><span>续期</span></label>
                 </div></fieldset>
-                <div class="agent-form-actions"><button id="agentSave" class="btn btn-primary">保存代理人</button></div>
+                <div class="agent-form-actions"><button id="agentSave" class="btn btn-primary">保存代理权限</button></div>
+              </section>
+              <section class="agent-assignment" aria-labelledby="agentBalanceTitle">
+                <div class="agent-section-head"><span class="agent-step" aria-hidden="true">02</span><div><h4 id="agentBalanceTitle">人民币余额调整</h4><p>正数充值，负数扣减。每次调整都会记录流水。</p></div></div>
+                <form id="agentBalanceForm">
+                  <div class="agent-fields">
+                    <div class="agent-field"><label for="agentBalanceId">代理人用户 ID</label><input id="agentBalanceId" class="input" type="number" min="1" required placeholder="输入代理人 ID"></div>
+                    <div class="agent-field"><label for="agentBalanceAmount">调整金额 <span>（元）</span></label><input id="agentBalanceAmount" class="input" type="text" inputmode="decimal" placeholder="如 100.00 或 -20.00" required></div>
+                  </div>
+                  <div class="form-group"><label for="agentBalanceReason">调整原因</label><input id="agentBalanceReason" class="input" maxlength="80" placeholder="例如：充值 / 退款调整" required></div>
+                  <p class="agent-field-help" id="agentBalanceSelected">从下方列表选择代理人，查看其当前余额。</p>
+                  <div class="agent-form-actions"><button id="agentBalanceSave" class="btn btn-primary">提交余额调整</button></div>
+                </form>
               </section>
               <section class="agent-assignment" aria-labelledby="agentAssignTitle">
-                <div class="agent-section-head"><span class="agent-step" aria-hidden="true">02</span><div><h4 id="agentAssignTitle">分配用户归属</h4><p>将用户关联到指定代理人。</p></div></div>
+                <div class="agent-section-head"><span class="agent-step" aria-hidden="true">03</span><div><h4 id="agentAssignTitle">分配用户归属</h4><p>将用户关联到指定代理人。</p></div></div>
                 <div class="agent-fields">
                   <div class="agent-field"><label for="agentAssignUser">用户 ID</label><input id="agentAssignUser" class="input" type="number" min="1" placeholder="输入需要分配的用户 ID"></div>
                   <div class="agent-field"><label for="agentAssignAgent">所属代理人 ID <span>（选填）</span></label><input id="agentAssignAgent" class="input" type="number" min="1" placeholder="留空设为直属用户" aria-describedby="agentAssignHelp"></div>
@@ -102,7 +113,7 @@
                 <div class="agent-form-actions"><button id="agentAssign" class="btn btn-secondary">分配用户</button></div>
               </section>
             </div>
-            <div class="agent-list-heading"><h4>代理人列表</h4><span class="muted">点击「编辑」回填权限与额度</span></div>
+            <div class="agent-list-heading"><h4>代理人列表</h4><span class="muted">权限配置与余额调整分别保存</span></div>
             <div id="agentList" class="agent-list" aria-live="polite"></div>
         </div>
       </section>
@@ -257,5 +268,6 @@
 </div>
 
 <script src="/admin/assets/app.js"></script>
+<div class="modal-backdrop hidden" id="agentEventsModal"><div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="agentEventsTitle"><div class="modal-head"><h3 id="agentEventsTitle">余额流水</h3><button class="btn btn-ghost btn-sm" data-close="agentEventsModal" aria-label="关闭">✕</button></div><div class="table-wrap"><table class="balance-table"><thead><tr><th>ID</th><th>变动金额</th><th>变动后余额</th><th>原因</th><th>时间</th></tr></thead><tbody id="agentEventsBody"></tbody></table></div></div></div>
 </body>
 </html>

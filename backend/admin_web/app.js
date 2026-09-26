@@ -154,21 +154,46 @@ function downloadText(){const txt=$("generatedKeys").value;if(!txt)return;const 
 async function copyKeys(){try{await navigator.clipboard.writeText($("generatedKeys").value);alertMsg("已复制全部兑换码")}catch{alertMsg("复制失败，请手动复制","error")}}
 async function saveCredentials(e){e.preventDefault();const fd=new FormData(e.target);const body={current_password:fd.get("current_password"),username:fd.get("username"),new_password:fd.get("new_password"),confirm_password:fd.get("confirm_password")};try{const d=await api("/admin/api/credentials",{method:"POST",body});alertMsg("管理员账号和密码已更新");state.username=d.username;state.mustChange=false;e.target.reset();$("settingsUsername").value=d.username;$("adminName").textContent=d.username;await loadMe();showView("overview")}catch(ex){alertMsg(ex.message,"error")}}
 async function logout(){try{await api("/admin/api/logout",{method:"POST",body:{}})}catch(e){}location.href="/admin/login"}
+const agentMoney=cents=>new Intl.NumberFormat("zh-CN",{style:"currency",currency:"CNY"}).format(Number(cents||0)/100);
+let agentItems=[];
+function selectAgentBalance(agent){
+  $("agentBalanceId").value=agent.id;
+  $("agentBalanceSelected").textContent=`${agent.username} (#${agent.id}) · 当前余额 ${agentMoney(agent.balance_cents)}`;
+}
 async function loadAgents(){
   try{
-    const d=await api("/admin/api/agents");
-    $("agentList").innerHTML=d.items.length?`<div class="table-wrap"><table class="agent-table"><thead><tr><th scope="col">代理人</th><th scope="col">状态</th><th scope="col">剩余额度</th><th scope="col">已开通权限</th><th scope="col">操作</th></tr></thead><tbody>${d.items.map(a=>`<tr><td><div class="agent-identity"><strong>${esc(a.username)}</strong><span class="muted code">ID ${a.id}</span></div></td><td><span class="badge ${a.status?"badge-active":"badge-disabled"}">${a.status?"已启用":"已停用"}</span></td><td><span class="agent-quota">${a.quota_days}</span><span class="muted"> 天</span></td><td><div class="agent-access-tags">${[[a.can_manage_users,"管理用户"],[a.can_issue_cards,"发卡"],[a.can_extend_vip,"续期"]].map(([enabled,label])=>`<span class="agent-access ${enabled?"is-enabled":""}">${label}<span class="agent-access-state">${enabled?"已开通":"未开通"}</span></span>`).join("")}</div></td><td><button class="btn btn-secondary btn-sm" data-agent-edit="${a.id}" aria-label="编辑代理人 ${esc(a.username)}">编辑</button></td></tr>`).join("")}</tbody></table></div>`:`<div class="agent-empty"><strong>暂无代理人</strong><p>在上方填写已注册用户的 ID，配置权限与额度后保存。</p></div>`;
+    const d=await api("/admin/api/agents");agentItems=d.items;
+    $("agentList").innerHTML=d.items.length?`<div class="table-wrap"><table class="agent-table"><thead><tr><th scope="col">代理人</th><th scope="col">状态</th><th scope="col">人民币余额</th><th scope="col">已开通权限</th><th scope="col">操作</th></tr></thead><tbody>${d.items.map(a=>`<tr><td><div class="agent-identity"><strong>${esc(a.username)}</strong><span class="muted code">ID ${esc(a.id)}</span></div></td><td><span class="badge ${a.status?"badge-active":"badge-disabled"}">${a.status?"已启用":"已停用"}</span></td><td><span class="agent-balance">${esc(agentMoney(a.balance_cents))}</span></td><td><div class="agent-access-tags">${[[a.can_manage_users,"管理用户"],[a.can_issue_cards,"发卡"],[a.can_extend_vip,"续期"]].map(([enabled,label])=>`<span class="agent-access ${enabled?"is-enabled":""}">${label}<span class="agent-access-state">${enabled?"已开通":"未开通"}</span></span>`).join("")}</div></td><td><div class="actions"><button class="btn btn-secondary btn-sm" data-agent-edit="${esc(a.id)}">编辑权限</button><button class="btn btn-primary btn-sm" data-agent-balance="${esc(a.id)}">余额调整</button><button class="btn btn-ghost btn-sm" data-agent-events="${esc(a.id)}">流水</button></div></td></tr>`).join("")}</tbody></table></div>`:`<div class="agent-empty"><strong>暂无代理人</strong><p>在上方填写已注册用户的 ID，配置权限后保存。</p></div>`;
     qsa("[data-agent-edit]").forEach(b=>b.onclick=()=>{
-      const a=d.items.find(x=>x.id===Number(b.dataset.agentEdit));
-      $("agentUserId").value=a.id;$("agentQuota").value=a.quota_days;
-      $("agentManage").checked=!!a.can_manage_users;$("agentIssue").checked=!!a.can_issue_cards;$("agentExtend").checked=!!a.can_extend_vip;
+      const a=d.items.find(x=>String(x.id)===b.dataset.agentEdit);
+      $("agentUserId").value=a.id;$("agentManage").checked=!!a.can_manage_users;$("agentIssue").checked=!!a.can_issue_cards;$("agentExtend").checked=!!a.can_extend_vip;
+      $("agentUserId").scrollIntoView({behavior:"smooth",block:"center"});$("agentUserId").focus({preventScroll:true});
     });
+    qsa("[data-agent-balance]").forEach(b=>b.onclick=()=>{selectAgentBalance(d.items.find(x=>String(x.id)===b.dataset.agentBalance));$("agentBalanceAmount").scrollIntoView({behavior:"smooth",block:"center"});$("agentBalanceAmount").focus({preventScroll:true})});
+    qsa("[data-agent-events]").forEach(b=>b.onclick=()=>loadAgentEvents(Number(b.dataset.agentEvents)));
+    const selected=d.items.find(a=>String(a.id)===$("agentBalanceId").value);if(selected)selectAgentBalance(selected);
   }catch(e){alertMsg(e.message,"error")}
 }
 async function saveAgent(){
-  const id=Number($("agentUserId").value),quota=Number($("agentQuota").value);
-  if(!Number.isInteger(id)||id<1||!Number.isInteger(quota)||quota<0){alertMsg("请填写有效的用户 ID 和额度","error");return}
-  try{await api(`/admin/api/agents/${id}`,{method:"PUT",body:{quota_days:quota,can_manage_users:$("agentManage").checked,can_issue_cards:$("agentIssue").checked,can_extend_vip:$("agentExtend").checked}});alertMsg("代理人已保存");loadAgents()}catch(e){alertMsg(e.message,"error")}
+  const id=Number($("agentUserId").value);
+  if(!Number.isInteger(id)||id<1){alertMsg("请填写有效的用户 ID","error");return}
+  $("agentSave").disabled=true;
+  try{await api(`/admin/api/agents/${id}`,{method:"PUT",body:{can_manage_users:$("agentManage").checked,can_issue_cards:$("agentIssue").checked,can_extend_vip:$("agentExtend").checked}});alertMsg("代理权限已保存");await loadAgents()}catch(e){alertMsg(e.message,"error")}finally{$("agentSave").disabled=false}
+}
+async function adjustAgentBalance(event){
+  event.preventDefault();
+  const id=Number($("agentBalanceId").value),amount_yuan=$("agentBalanceAmount").value.trim(),reason=$("agentBalanceReason").value.trim();
+  if(!Number.isInteger(id)||id<1||!/^[-+]?\d+(\.\d{1,2})?$/.test(amount_yuan)||Number(amount_yuan)===0||!reason){alertMsg("请输入有效的代理人 ID、非零人民币金额（最多两位小数）和调整原因。","error");return}
+  $("agentBalanceSave").disabled=true;
+  try{await api(`/admin/api/agents/${id}/balance`,{method:"POST",body:{amount_yuan,reason}});$("agentBalanceAmount").value="";$("agentBalanceReason").value="";alertMsg("代理人余额已调整");await loadAgents()}catch(e){alertMsg(e.message,"error")}finally{$("agentBalanceSave").disabled=false}
+}
+async function loadAgentEvents(id){
+  try{
+    const data=await api(`/admin/api/agents/${id}/balance-events`),agent=agentItems.find(item=>item.id===id);
+    $("agentEventsTitle").textContent=`${agent?.username||`#${id}`} · 余额流水`;
+    $("agentEventsBody").innerHTML=data.items.length?data.items.map(row=>`<tr><td>#${esc(row.id)}</td><td>${Number(row.delta_cents)>0?"+":""}${esc(agentMoney(row.delta_cents))}</td><td>${esc(agentMoney(row.balance_after_cents))}</td><td>${esc(row.reason||"-")}</td><td>${esc(fmt(row.created_at))}</td></tr>`).join(""):'<tr><td class="empty" colspan="5">暂无余额流水</td></tr>';
+    openModal("agentEventsModal");
+  }catch(e){alertMsg(e.message,"error")}
 }
 async function assignAgent(){
   const id=Number($("agentAssignUser").value),raw=$("agentAssignAgent").value.trim(),agent_id=raw?Number(raw):null;
@@ -176,7 +201,7 @@ async function assignAgent(){
   try{await api(`/admin/api/users/${id}/agent`,{method:"PUT",body:{agent_id}});alertMsg("用户归属已更新");loadUsers()}catch(e){alertMsg(e.message,"error")}
 }
 function bind(){
-  $("agentSave").onclick=saveAgent;$("agentAssign").onclick=assignAgent;
+  $("agentSave").onclick=saveAgent;$("agentAssign").onclick=assignAgent;$("agentBalanceForm").onsubmit=adjustAgentBalance;$("agentBalanceId").oninput=()=>{const agent=agentItems.find(item=>String(item.id)===$("agentBalanceId").value);$("agentBalanceSelected").textContent=agent?`${agent.username} (#${agent.id}) · 当前余额 ${agentMoney(agent.balance_cents)}`:"请核对代理人 ID 后提交调整。"};
   qsa(".nav-btn").forEach(b=>b.onclick=()=>showView(b.dataset.view));qsa("[data-jump]").forEach(b=>b.onclick=()=>showView(b.dataset.jump));$("menuBtn").onclick=()=>$("sidebar").classList.toggle("open");$("logoutBtn").onclick=logout;
   $("generateBtn").onclick=()=>openModal("generateModal");$("toggleRevealBtn").onclick=()=>{state.revealKeys=!state.revealKeys;loadLicenses()};$("copyAllBtn").onclick=copyAllFilteredKeys;qsa("[data-close]").forEach(b=>b.onclick=()=>closeModal(b.dataset.close));
   qsa(".day-btn").forEach(b=>b.onclick=(e)=>{e.preventDefault();state.days=Number(b.dataset.days);qsa(".day-btn").forEach(x=>x.classList.toggle("active",x===b))});$("confirmGenerate").onclick=generate;$("copyKeysBtn").onclick=copyKeys;$("downloadKeysBtn").onclick=downloadText;

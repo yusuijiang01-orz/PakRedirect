@@ -1,36 +1,93 @@
 <!doctype html>
 <html lang="zh-CN">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>RYLUX 代理人</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>RYLUX 代理后台</title>
   <link rel="stylesheet" href="/admin/assets/styles.css">
-  <style>[hidden]{display:none!important}</style>
 </head>
 <body>
-<main class="main" style="max-width:1100px;margin:auto;padding:24px">
-  <h1>RYLUX 代理人</h1>
-  <p id="message" role="status"></p>
-  <section class="panel" id="loginPanel">
-    <div class="panel-head"><h3>登录</h3></div>
-    <form id="loginForm" class="panel-body">
-      <div class="form-group"><label>账号</label><input id="username" class="input" required></div>
-      <div class="form-group"><label>密码</label><input id="password" class="input" type="password" required></div>
-      <button class="btn btn-primary">登录</button>
+<section class="login-shell" id="loginPanel">
+  <div class="login-card">
+    <div class="brand-row"><div class="brand-mark">RX</div><div><h1>RYLUX 代理后台</h1><span class="muted">管理所属用户、VIP 与兑换码</span></div></div>
+    <div id="loginAlert" class="alert alert-error hidden" role="alert"></div>
+    <form id="loginForm">
+      <div class="form-group"><label for="username">代理账号</label><input id="username" class="input" autocomplete="username" required></div>
+      <div class="form-group"><label for="password">密码</label><input id="password" class="input" type="password" autocomplete="current-password" required></div>
+      <button class="btn btn-primary" id="loginBtn" type="submit">登录</button>
     </form>
+  </div>
+</section>
+<div class="app hidden" id="dashboard">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand-row"><div class="brand-mark">RX</div><div><div class="sidebar-title">RYLUX</div><div class="sidebar-sub">Agent & VIP Console</div></div></div>
+    <nav class="nav" aria-label="代理后台导航">
+      <button class="nav-btn active" data-view="overview">数据概览</button>
+      <button class="nav-btn" data-view="users" id="usersNav">用户 / VIP</button>
+      <button class="nav-btn" data-view="licenses" id="licensesNav">兑换码</button>
+      <button class="nav-btn" data-view="logs">操作日志</button>
+      <button class="nav-btn" data-view="settings">账号设置</button>
+    </nav>
+    <div class="sidebar-footer">代理工作台<br>所属用户 · 自有兑换码</div>
+  </aside>
+  <section class="main">
+    <header class="topbar">
+      <div class="console-heading"><button class="btn btn-ghost mobile-menu" id="menuBtn" aria-label="打开导航" aria-expanded="false">☰</button><h2 id="pageTitle">数据概览</h2></div>
+      <div class="top-actions"><span class="balance-pill" id="topBalance">¥0.00</span><span class="muted" id="agentName"></span><button class="btn btn-ghost btn-sm" id="logoutBtn">退出</button></div>
+    </header>
+    <main class="content">
+      <div id="globalAlert" class="alert hidden" role="status" aria-live="polite"></div>
+      <section id="view-overview">
+        <div class="panel"><div class="panel-head"><div><h3>账户余额</h3><p class="panel-description">发卡和 VIP 续期按对应套餐扣款，余额由管理员充值。</p></div><button class="btn btn-secondary btn-sm" data-jump="settings">余额流水</button></div>
+          <div class="panel-body"><div class="agent-balance-value" id="balanceValue">¥0.00</div><div class="price-grid" id="overviewPrices"></div></div>
+        </div>
+        <div class="panel" id="overviewUsersPanel"><div class="panel-head"><h3>所属用户与 VIP</h3><button class="btn btn-secondary btn-sm" id="overviewUsersBtn" data-jump="users">查看用户</button></div><div class="panel-body"><div class="grid-stats">
+          <div class="stat-card"><div class="stat-label">全部用户</div><div class="stat-value" id="userStatTotal">-</div></div>
+          <div class="stat-card"><div class="stat-label">有效体验 / VIP</div><div class="stat-value" id="userStatActive">-</div></div>
+          <div class="stat-card"><div class="stat-label">已到期</div><div class="stat-value" id="userStatExpired">-</div></div>
+          <div class="stat-card"><div class="stat-label">已禁用用户</div><div class="stat-value" id="userStatDisabled">-</div></div>
+          <div class="stat-card"><div class="stat-label">今日注册</div><div class="stat-value" id="userStatToday">-</div></div>
+        </div></div></div>
+        <div class="panel" id="overviewLicensesPanel"><div class="panel-head"><h3>我的兑换码</h3><button class="btn btn-secondary btn-sm" id="overviewLicensesBtn" data-jump="licenses">管理兑换码</button></div><div class="panel-body"><div class="grid-stats agent-code-stats">
+          <div class="stat-card"><div class="stat-label">全部兑换码</div><div class="stat-value" id="statTotal">-</div></div>
+          <div class="stat-card"><div class="stat-label">可用</div><div class="stat-value" id="statActive">-</div></div>
+          <div class="stat-card"><div class="stat-label">已到期</div><div class="stat-value" id="statExpired">-</div></div>
+          <div class="stat-card"><div class="stat-label">禁用 / 已兑换</div><div class="stat-value" id="statDisabled">-</div></div>
+        </div></div></div>
+        <div class="panel" id="overviewRecentPanel"><div class="panel-head"><h3>最近兑换码</h3></div><div class="table-wrap"><table><thead><tr><th>ID</th><th>兑换码</th><th>套餐</th><th>状态</th><th>兑换用户</th><th>兑换时间</th></tr></thead><tbody id="recentBody"></tbody></table></div></div>
+      </section>
+      <section id="view-users" class="hidden">
+        <div class="panel"><div class="panel-head"><div><h3>所属用户 / VIP 管理</h3><p class="panel-description">添加账号、管理账号状态，或按套餐为所属用户续期。</p></div><button class="btn btn-primary" id="addUserBtn">+ 添加用户</button></div>
+          <div class="panel-body"><div class="toolbar"><input id="userSearchInput" class="input" placeholder="搜索用户名 / 最后登录 IP" aria-label="搜索用户"><select id="userStatusFilter" class="select" aria-label="用户状态"><option value="">全部状态</option><option value="active">体验 / VIP 有效</option><option value="expired">已到期</option><option value="disabled">已禁用</option></select><button class="btn btn-primary" id="userSearchBtn">搜索</button><button class="btn btn-ghost" id="userResetBtn">重置</button><span class="muted" id="userSelectedInfo">已选 0 个</span><select class="select" id="batchRenewDays" aria-label="批量续期套餐"><option value="30">月卡 · ¥20</option><option value="90">季卡 · ¥48</option><option value="180">半年卡 · ¥78</option><option value="365">年卡 · ¥118</option></select><button class="btn btn-secondary" id="batchRenewBtn" disabled>批量续期</button></div></div>
+          <div class="table-wrap"><table><thead><tr><th><input type="checkbox" id="userSelectAll" aria-label="选择本页用户"></th><th>ID</th><th>用户名</th><th>会员状态</th><th>到期时间</th><th>注册时间</th><th>最后登录</th><th>IP</th><th>操作</th></tr></thead><tbody id="userBody"></tbody></table></div>
+          <div class="pager"><span class="muted" id="userPagerInfo"></span><button class="btn btn-ghost btn-sm" id="userPrevBtn">上一页</button><button class="btn btn-ghost btn-sm" id="userNextBtn">下一页</button></div>
+        </div>
+      </section>
+      <section id="view-licenses" class="hidden">
+        <div class="panel"><div class="panel-head"><div><h3>我的兑换码</h3><p class="panel-description">查看自己发出的卡片、收款标记与兑换用户。</p></div><div class="toolbar"><button class="btn btn-ghost" id="exportCsvBtn">导出 CSV</button><button class="btn btn-ghost" id="toggleRevealBtn">显示完整兑换码</button><button class="btn btn-secondary" id="copyPageBtn">复制本页兑换码</button><button class="btn btn-primary" id="generateBtn">+ 生成兑换码</button></div></div>
+          <div class="panel-body"><div class="toolbar"><input id="searchInput" class="input" placeholder="搜索兑换码 / 标签 / 兑换用户" aria-label="搜索兑换码"><select id="statusFilter" class="select" aria-label="兑换码状态"><option value="">全部状态</option><option value="active">可用</option><option value="expired">已到期</option><option value="disabled">禁用 / 已兑换</option></select><button class="btn btn-primary" id="searchBtn">搜索</button><button class="btn btn-ghost" id="resetSearchBtn">重置</button></div></div>
+          <div class="table-wrap"><table><thead><tr><th>ID</th><th>兑换码</th><th>套餐</th><th>标签</th><th>状态</th><th>收款</th><th>卡片到期</th><th>兑换用户</th><th>兑换时间</th><th>操作</th></tr></thead><tbody id="licenseBody"></tbody></table></div>
+          <div class="pager"><span class="muted" id="licensePagerInfo"></span><button class="btn btn-ghost btn-sm" id="licensePrevBtn">上一页</button><button class="btn btn-ghost btn-sm" id="licenseNextBtn">下一页</button></div>
+        </div>
+      </section>
+      <section id="view-logs" class="hidden">
+        <div class="panel"><div class="panel-head"><div><h3>操作日志</h3><p class="panel-description">当前代理账号的用户管理、发卡与续期记录。</p></div></div><div class="table-wrap"><table><thead><tr><th>ID</th><th>操作</th><th>目标</th><th>详情</th><th>IP</th><th>时间</th></tr></thead><tbody id="logBody"></tbody></table></div><div class="pager"><span class="muted" id="logPagerInfo"></span><button class="btn btn-ghost btn-sm" id="logPrevBtn">上一页</button><button class="btn btn-ghost btn-sm" id="logNextBtn">下一页</button></div></div>
+      </section>
+      <section id="view-settings" class="hidden">
+        <div class="settings-grid">
+          <div class="panel"><div class="panel-head"><h3>账号密码</h3></div><form id="passwordForm" class="panel-body"><div class="form-group"><label for="currentPassword">当前密码</label><input class="input" id="currentPassword" type="password" autocomplete="current-password" required></div><div class="form-group"><label for="newPassword">新密码</label><input class="input" id="newPassword" type="password" autocomplete="new-password" minlength="10" required></div><div class="form-group"><label for="confirmPassword">确认新密码</label><input class="input" id="confirmPassword" type="password" autocomplete="new-password" minlength="10" required></div><button class="btn btn-primary" id="savePasswordBtn">修改密码</button></form></div>
+          <div class="panel"><div class="panel-head"><h3>代理账号信息</h3></div><div class="panel-body info-list"><div class="info-row"><span class="muted">账号</span><strong id="settingsUsername">-</strong></div><div class="info-row"><span class="muted">用户 ID</span><span id="settingsId">-</span></div><div class="info-row"><span class="muted">人民币余额</span><strong id="settingsBalance">-</strong></div><div class="info-row"><span class="muted">已开通权限</span><span id="settingsPermissions">-</span></div><p class="muted">充值和权限调整请联系管理员。</p></div></div>
+        </div>
+        <div class="panel"><div class="panel-head"><h3>余额流水</h3><button class="btn btn-ghost btn-sm" id="refreshBalanceBtn">刷新</button></div><div class="table-wrap"><table><thead><tr><th>ID</th><th>变动金额</th><th>变动后余额</th><th>原因</th><th>时间</th></tr></thead><tbody id="balanceBody"></tbody></table></div></div>
+      </section>
+    </main>
   </section>
-  <section id="dashboard" hidden>
-    <div class="panel"><div class="panel-head"><h3 id="agentName">代理人</h3><button id="logout" class="btn btn-ghost">退出</button></div>
-      <div class="panel-body">剩余额度：<strong id="quota">0</strong> 天 · 邀请码：<strong id="inviteCode">-</strong></div></div>
-    <div class="panel" id="cardsPanel"><div class="panel-head"><h3>发卡</h3></div><form id="cardsForm" class="panel-body">
-      <select id="cardDays" class="select"><option>1</option><option>7</option><option>30</option><option>90</option><option>180</option><option>365</option></select>
-      <input id="cardQty" class="input" type="number" min="1" max="100" value="1" required>
-      <input id="cardLabel" class="input" maxlength="80" placeholder="卡片标签">
-      <label><input id="cardPaid" type="checkbox" checked> 已收款</label>
-      <button class="btn btn-primary">生成</button>
-      <textarea id="generated" class="keys" readonly aria-label="生成的兑换码"></textarea>
-    </form><div class="panel-body" id="cards"></div></div>
-    <div class="panel" id="usersPanel"><div class="panel-head"><h3>所属用户</h3></div><div class="panel-body" id="users"></div></div>
-  </section>
-</main>
+</div>
+<div class="modal-backdrop hidden" id="addUserModal"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="addUserTitle"><form id="addUserForm"><div class="modal-head"><h3 id="addUserTitle">添加所属用户</h3><button class="btn btn-ghost btn-sm" type="button" data-close="addUserModal" aria-label="关闭">✕</button></div><div class="modal-body"><div class="form-group"><label for="newUsername">用户名</label><input class="input" id="newUsername" minlength="3" maxlength="32" autocomplete="off" required></div><div class="form-group"><label for="userPassword">初始密码</label><input class="input" id="userPassword" type="password" minlength="6" autocomplete="new-password" required></div><div class="alert alert-error hidden" id="addUserError" role="alert"></div></div><div class="modal-foot"><button class="btn btn-ghost" type="button" data-close="addUserModal">取消</button><button class="btn btn-primary" id="confirmAddUser">创建用户</button></div></form></div></div>
+<div class="modal-backdrop hidden" id="generateModal"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="generateTitle"><form id="generateForm"><div class="modal-head"><h3 id="generateTitle">生成兑换码</h3><button class="btn btn-ghost btn-sm" type="button" data-close="generateModal" aria-label="关闭">✕</button></div><div class="modal-body"><div class="form-group"><label for="genDays">套餐与单价</label><select class="select" id="genDays" required></select></div><div class="form-group"><label for="genQty">生成数量</label><input class="input" id="genQty" type="number" min="1" max="100" step="1" value="1" required></div><div class="form-group"><label for="genLabel">标签（选填）</label><input class="input" id="genLabel" maxlength="80" placeholder="方便识别本批兑换码"></div><label><input type="checkbox" id="genPaid" checked> 已收款</label><div class="charge-preview" id="generatePreview" aria-live="polite"></div><div class="alert alert-error hidden" id="generateError" role="alert"></div></div><div class="modal-foot"><button class="btn btn-ghost" type="button" data-close="generateModal">取消</button><button class="btn btn-primary" id="confirmGenerate">确认扣款并生成</button></div></form></div></div>
+<div class="modal-backdrop hidden" id="renewModal"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="renewTitle"><form id="renewForm"><div class="modal-head"><h3 id="renewTitle">VIP 续期</h3><button class="btn btn-ghost btn-sm" type="button" data-close="renewModal" aria-label="关闭">✕</button></div><div class="modal-body"><p id="renewUser"></p><div class="form-group"><label for="renewDays">续期套餐</label><select class="select" id="renewDays" required></select></div><div class="charge-preview" id="renewPreview" aria-live="polite"></div><div class="alert alert-error hidden" id="renewError" role="alert"></div></div><div class="modal-foot"><button class="btn btn-ghost" type="button" data-close="renewModal">取消</button><button class="btn btn-primary" id="confirmRenew">确认扣款并续期</button></div></form></div></div>
+<div class="modal-backdrop hidden" id="resultModal"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="resultTitle"><div class="modal-head"><h3 id="resultTitle">兑换码已生成</h3><button class="btn btn-ghost btn-sm" data-close="resultModal" aria-label="关闭">✕</button></div><div class="modal-body"><p class="muted" id="generatedInfo"></p><textarea class="keys" id="generatedKeys" readonly aria-label="生成的兑换码"></textarea></div><div class="modal-foot"><button class="btn btn-secondary" id="downloadKeysBtn">下载 TXT</button><button class="btn btn-primary" id="copyKeysBtn">复制全部</button></div></div></div>
+<div class="modal-backdrop hidden" id="userSessionsModal"><div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="userSessionsTitle"><div class="modal-head"><div><h3 id="userSessionsTitle">用户登录设备</h3><p class="muted" id="userSessionsSummary"></p></div><button class="btn btn-ghost btn-sm" data-close="userSessionsModal" aria-label="关闭">✕</button></div><div class="table-wrap"><table><thead><tr><th>会话</th><th>登录时间</th><th>最近活动</th><th>到期时间</th><th>IP</th><th>设备</th><th>状态</th></tr></thead><tbody id="userSessionsBody"></tbody></table></div><div class="modal-foot"><button class="btn btn-danger" id="unbindDeviceBtn">解除设备绑定</button><button class="btn btn-ghost" data-close="userSessionsModal">关闭</button></div></div></div>
 <script src="/agent/app.js"></script>
-</body></html>
+</body>
+</html>

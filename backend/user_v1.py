@@ -623,7 +623,7 @@ def redeem(
             code = db.execute(
                 """
                 SELECT id,key_hash,key_hint,key_value,label,expires_at,enabled,created_at,
-                       duration_days,redeemed_by_user_id,redeemed_at,is_paid
+                       duration_days,redeemed_by_user_id,redeemed_at,is_paid,issued_by_agent_id
                 FROM licenses WHERE key_hash=? LIMIT 1
                 """,
                 (code_hash,),
@@ -656,6 +656,11 @@ def redeem(
                 "UPDATE app_users SET vip_expires_at=?,vip_level=1,updated_at=? WHERE id=?",
                 (iso(new_exp), iso(now), auth["user_id"]),
             )
+            if code["issued_by_agent_id"] and user["role"] == "user" and user["owner_agent_id"] is None:
+                db.execute(
+                    "UPDATE app_users SET owner_agent_id=? WHERE id=? AND role='user' AND owner_agent_id IS NULL",
+                    (code["issued_by_agent_id"], auth["user_id"]),
+                )
             db.execute(
                 """
                 UPDATE licenses
@@ -683,6 +688,11 @@ def redeem(
             if int(code["is_paid"]):
                 from agent_referral import reward_paid_redeem
                 reward_paid_redeem(db, auth["user_id"], code["id"], days, now)
+            if code["issued_by_agent_id"]:
+                from agent_referral import record_agent_action
+                record_agent_action(db, code["issued_by_agent_id"], "card_redeemed",
+                                    f"license:{code['id']}", f"user:{auth['user_id']};days={days}",
+                                    request_ip(request))
             db.commit()
         except HTTPException:
             db.rollback()
