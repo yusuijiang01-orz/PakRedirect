@@ -76,22 +76,34 @@
       </section>
 
       <section id="view-agents" class="hidden">
-        <div class="panel">
-          <div class="panel-head"><div><h3>代理人权限与额度</h3><div class="muted">先让代理人注册普通账号，再用用户 ID 配置。代理入口：/agent</div></div></div>
-          <div class="toolbar">
-            <input id="agentUserId" class="input" type="number" min="1" placeholder="代理人用户 ID">
-            <input id="agentQuota" class="input" type="number" min="0" placeholder="剩余额度（天）">
-            <label><input id="agentManage" type="checkbox"> 管理所属用户</label>
-            <label><input id="agentIssue" type="checkbox"> 发卡</label>
-            <label><input id="agentExtend" type="checkbox"> 续期</label>
-            <button id="agentSave" class="btn btn-primary">保存代理人</button>
-          </div>
-          <div class="toolbar">
-            <input id="agentAssignUser" class="input" type="number" min="1" placeholder="用户 ID">
-            <input id="agentAssignAgent" class="input" type="number" min="1" placeholder="所属代理人 ID（空为直属）">
-            <button id="agentAssign" class="btn btn-secondary">分配用户</button>
-          </div>
-          <div id="agentList" class="muted"></div>
+          <div class="panel agent-panel">
+            <div class="panel-head agent-panel-head"><div><h3>代理人权限与额度</h3><p class="muted">代理人注册普通账号后，使用用户 ID 配置权限与额度。</p></div><a class="agent-entry" href="/agent">代理人入口 <span aria-hidden="true">↗</span></a></div>
+            <div class="panel-body agent-workspace">
+              <section class="agent-config" aria-labelledby="agentConfigTitle">
+                <div class="agent-section-head"><span class="agent-step" aria-hidden="true">01</span><div><h4 id="agentConfigTitle">配置代理人</h4><p>填写账号信息，并勾选允许使用的功能。</p></div></div>
+                <div class="agent-fields">
+                  <div class="agent-field"><label for="agentUserId">代理人用户 ID</label><input id="agentUserId" class="input" type="number" min="1" placeholder="输入已注册的用户 ID"></div>
+                  <div class="agent-field"><label for="agentQuota">剩余额度 <span>（天）</span></label><input id="agentQuota" class="input" type="number" min="0" placeholder="输入剩余天数"></div>
+                </div>
+                <fieldset class="agent-permissions"><legend>功能权限</legend><div class="agent-permission-options">
+                  <label><input id="agentManage" type="checkbox"><span>管理所属用户</span></label>
+                  <label><input id="agentIssue" type="checkbox"><span>发卡</span></label>
+                  <label><input id="agentExtend" type="checkbox"><span>续期</span></label>
+                </div></fieldset>
+                <div class="agent-form-actions"><button id="agentSave" class="btn btn-primary">保存代理人</button></div>
+              </section>
+              <section class="agent-assignment" aria-labelledby="agentAssignTitle">
+                <div class="agent-section-head"><span class="agent-step" aria-hidden="true">02</span><div><h4 id="agentAssignTitle">分配用户归属</h4><p>将用户关联到指定代理人。</p></div></div>
+                <div class="agent-fields">
+                  <div class="agent-field"><label for="agentAssignUser">用户 ID</label><input id="agentAssignUser" class="input" type="number" min="1" placeholder="输入需要分配的用户 ID"></div>
+                  <div class="agent-field"><label for="agentAssignAgent">所属代理人 ID <span>（选填）</span></label><input id="agentAssignAgent" class="input" type="number" min="1" placeholder="留空设为直属用户" aria-describedby="agentAssignHelp"></div>
+                </div>
+                <p class="agent-field-help" id="agentAssignHelp">直属用户不归属任何代理人。</p>
+                <div class="agent-form-actions"><button id="agentAssign" class="btn btn-secondary">分配用户</button></div>
+              </section>
+            </div>
+            <div class="agent-list-heading"><h4>代理人列表</h4><span class="muted">点击「编辑」回填权限与额度</span></div>
+            <div id="agentList" class="agent-list" aria-live="polite"></div>
         </div>
       </section>
 
