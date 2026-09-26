@@ -13,6 +13,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
       - name: Setup Java 17
         uses: actions/setup-java@v5
         with:
@@ -37,6 +42,13 @@ jobs:
       - name: Validate Python sources
         run: |
           python3 -m py_compile backend/*.py tools/rylux-patch-encryptor.py tools/build-rylux-mirror.py
+
+      - name: Test backend agent and referral flows
+        run: |
+          python3 -m pip install -r backend/requirements.txt httpx pytest
+          python3 -m pytest backend/test_agent_referral.py -q
+          node --check backend/admin_web/app.js
+          node --check backend/agent_web/app.js
 
       - name: Build Android debug APK
         run: |

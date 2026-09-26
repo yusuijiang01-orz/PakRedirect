@@ -55,6 +55,8 @@ def serialize_license(row, reveal: bool = False):
         "key_value": key_value if reveal else None,
         "key_available": bool(key_value),
         "duration_days": int(row["duration_days"] or 0) if "duration_days" in row.keys() else 0,
+        "is_paid": bool(row["is_paid"]) if "is_paid" in row.keys() else False,
+        "issued_by_agent_id": row["issued_by_agent_id"] if "issued_by_agent_id" in row.keys() else None,
         "redeemed": bool(row["redeemed_at"]) if "redeemed_at" in row.keys() else False,
         "redeemed_at": row["redeemed_at"] if "redeemed_at" in row.keys() else None,
         "label": row["label"] or "",
@@ -106,7 +108,7 @@ def list_licenses(query: str, state: str, page: int, page_size: int, reveal: boo
         rows = db.execute(
             """
             SELECT id,key_hash,key_hint,key_value,label,expires_at,enabled,created_at,last_seen_at,last_seen_ip,
-                   duration_days,redeemed_by_user_id,redeemed_at
+                   duration_days,redeemed_by_user_id,redeemed_at,is_paid,issued_by_agent_id
             FROM licenses
             """
             + where
@@ -116,7 +118,7 @@ def list_licenses(query: str, state: str, page: int, page_size: int, reveal: boo
     return [serialize_license(row, reveal) for row in rows], int(total)
 
 
-def create_licenses(days: int, quantity: int, label: str):
+def create_licenses(days: int, quantity: int, label: str, paid: bool = False):
     if days not in CODE_PRESETS:
         raise ValueError("有效期不在允许范围")
     if not 1 <= quantity <= MAX_BATCH:
@@ -133,8 +135,8 @@ def create_licenses(days: int, quantity: int, label: str):
                     db.execute(
                         """
                         INSERT INTO licenses
-                            (key_hash,key_hint,key_value,label,expires_at,enabled,created_at,duration_days)
-                        VALUES(?,?,?,?,?,1,?,?)
+                            (key_hash,key_hint,key_value,label,expires_at,enabled,created_at,duration_days,is_paid)
+                        VALUES(?,?,?,?,?,1,?,?,?)
                         """,
                         (
                             key_hash(value),
@@ -144,6 +146,7 @@ def create_licenses(days: int, quantity: int, label: str):
                             iso(expires),
                             iso(now),
                             days,
+                            int(paid),
                         ),
                     )
                     made.append(value)
@@ -188,13 +191,13 @@ def admin_generate(payload: GeneratePayload, request: Request):
     token = require_ready(request)
     require_csrf(request, token)
     try:
-        keys, expires_at = create_licenses(payload.days, payload.quantity, payload.label)
+        keys, expires_at = create_licenses(payload.days, payload.quantity, payload.label, payload.paid)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     log_action(
         "redeem_codes_generated",
         f"{payload.quantity} 张",
-        f"{payload.days}天; 标签={payload.label[:80]}; full-key=stored",
+        f"{payload.days}天; 付费={payload.paid}; 标签={payload.label[:80]}; full-key=stored",
         request_ip(request),
     )
     return {"ok": True, "keys": keys, "expires_at": expires_at, "duration_days": payload.days}

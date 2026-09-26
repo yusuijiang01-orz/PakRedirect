@@ -16,6 +16,7 @@
     <nav class="nav">
       <button class="nav-btn active" data-view="overview">数据概览</button>
       <button class="nav-btn" data-view="users">用户 / VIP</button>
+      <button class="nav-btn" data-view="agents">代理人</button>
       <button class="nav-btn" data-view="licenses">兑换码</button>
       <button class="nav-btn" data-view="logs">操作日志</button>
       <button class="nav-btn" data-view="settings">系统设置</button>
@@ -71,6 +72,26 @@
             <thead><tr><th>ID</th><th>兑换码</th><th>标签</th><th>状态</th><th>到期时间</th><th>最后验证</th><th>IP</th></tr></thead>
             <tbody id="recentBody"></tbody>
           </table></div>
+        </div>
+      </section>
+
+      <section id="view-agents" class="hidden">
+        <div class="panel">
+          <div class="panel-head"><div><h3>代理人权限与额度</h3><div class="muted">先让代理人注册普通账号，再用用户 ID 配置。代理入口：/agent</div></div></div>
+          <div class="toolbar">
+            <input id="agentUserId" class="input" type="number" min="1" placeholder="代理人用户 ID">
+            <input id="agentQuota" class="input" type="number" min="0" placeholder="剩余额度（天）">
+            <label><input id="agentManage" type="checkbox"> 管理所属用户</label>
+            <label><input id="agentIssue" type="checkbox"> 发卡</label>
+            <label><input id="agentExtend" type="checkbox"> 续期</label>
+            <button id="agentSave" class="btn btn-primary">保存代理人</button>
+          </div>
+          <div class="toolbar">
+            <input id="agentAssignUser" class="input" type="number" min="1" placeholder="用户 ID">
+            <input id="agentAssignAgent" class="input" type="number" min="1" placeholder="所属代理人 ID（空为直属）">
+            <button id="agentAssign" class="btn btn-secondary">分配用户</button>
+          </div>
+          <div id="agentList" class="muted"></div>
         </div>
       </section>
 
@@ -199,6 +220,7 @@
     <div class="modal-head"><h3>生成兑换码</h3><button class="btn btn-ghost btn-sm" data-close="generateModal">关闭</button></div>
     <div class="modal-body">
       <div class="form-group"><label>标签</label><input class="input" id="genLabel" maxlength="80" placeholder="客户名 / 渠道 / 测试"></div>
+      <div class="form-group"><label><input type="checkbox" id="genPaid"> 已收款（被邀请用户兑换后触发同等天数奖励）</label></div>
       <div class="form-group"><label>生成数量</label><input class="input" id="genQty" type="number" min="1" max="1000" value="1"></div>
       <div class="form-group"><label>充值时长</label><div class="days-grid" id="dayGrid">
         <button class="day-btn" data-days="1">1 天</button><button class="day-btn" data-days="7">7 天</button>

@@ -17,6 +17,7 @@ from user_v1 import (
     utc_now,
     validate_username,
 )
+from agent_referral import record_registration
 
 router = APIRouter()
 
@@ -210,6 +211,8 @@ def guarded_register(payload: RegisterPayload, request: Request):
                     iso(now),
                 ),
             )
+
+        record_registration(db, user_id, payload.invite_code, trial_allowed, device_hash, ip_hash, now)
 
         token, session_expires = create_session(db, user_id, ip, device_hash)
         db.commit()

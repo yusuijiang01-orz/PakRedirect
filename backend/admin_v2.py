@@ -46,6 +46,7 @@ class GeneratePayload(BaseModel):
     days: int
     quantity: int = Field(default=1, ge=1, le=MAX_BATCH)
     label: str = Field(default="", max_length=80)
+    paid: bool = False
 
 
 class ExtendPayload(BaseModel):

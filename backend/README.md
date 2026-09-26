@@ -13,7 +13,7 @@ RYLUX V1 后端继续运行在现有 `verify.lovenom.eu.org`，使用 FastAPI + 
 - `modules`：游戏模块；
 - `module_access_logs`：模块启动授权日志。
 
-`registration_guard_v1.py` 会给 `app_users` 增量增加 `registration_ip_hash`，并使用真实客户端 IP 的 SHA-256 摘要执行“同一 IP 48 小时最多成功注册一个账号”的限制。明文注册 IP 不新增持久化字段；原有最后登录 IP 字段继续按既有逻辑使用。
+`registration_guard_v1.py` 会给 `app_users` 增量增加 `registration_ip_hash`。有设备 ID 且该设备未领过试用时，最多允许同一 IP 在 48 小时内领取 3 次试用；其余账号仍可注册，但不会领取试用。明文注册 IP 不新增持久化字段；原有最后登录 IP 字段继续按既有逻辑使用。
 
 现有 `licenses` 表继续保留，并增量加入：
 
@@ -36,7 +36,7 @@ GET  /api/v1/modules
 POST /api/v1/modules/sg_localization/authorize
 ```
 
-注册默认赠送 24 小时体验。同一公网 IP 在成功注册后的 48 小时内再次注册返回 HTTP 429。登录会返回 Bearer Token；服务端数据库只保存 Token 的 SHA-256 摘要。
+注册在满足设备/IP 领取规则时赠送 24 小时体验；不满足时仍可注册，但体验立即到期。登录会返回 Bearer Token；服务端数据库只保存 Token 的 SHA-256 摘要。
 
 首个模块的用户可见名称为“封神榜汉化”；内部模块代码仍保持 `sg_localization`，避免破坏已有客户端接口。
 
@@ -67,6 +67,34 @@ V1 增加：
 
 管理员登录体系、PBKDF2-SHA256、Secure + HttpOnly Cookie、CSRF 和登录限流继续保留。
 
+## 代理人与邀请活动
+
+管理员在 `/admin` 的“代理人”页输入已注册用户 ID，设置“管理所属用户”“发卡”“续期”三项权限与**剩余额度（天）**。代理人使用原账号登录 `/agent`。管理员可将普通用户指派给代理人；代理人邀请码注册的普通用户也自动归属该代理人。管理员列表仍可查看全部用户。代理人 `/agent/api/users` 只能列出和操作 `owner_agent_id` 为自己的普通用户，不能调用管理员接口。
+
+代理人发卡或为所属用户续期，会按 `套餐天数 × 数量` 从额度扣除。扣除、发卡、VIP 流水在同一个 SQLite 事务中完成；余额不足返回 409。已发出的卡不会因为代理人额度调整而失效。管理员可在代理人页调整剩余额度；`agent_quota_events` 保存变动记录。代理人只能查看自己发出的卡。
+
+用户调用 `GET /api/v1/referrals/me` 获取邀请码及邀请统计。注册请求可传 `invite_code`。只有获批 24 小时试用、设备 ID 非空、且设备/IP 摘要与邀请者不同的注册计为有效；注册后立即过期的账号不计入。每累计 **2 个有效邀请**，邀请者获得 **1 天 VIP**。邀请关系在注册时固定，不能事后更换。
+
+V1 尚未接在线支付。管理员发卡时勾选“已收款”，或代理人发卡时标记 `paid=true`，该卡兑换才视为付费购买；被邀请人兑换后，邀请者获得相同天数。普通/赠送卡、体验期和管理员续期均不触发购买奖励。邀请奖励累计上限 **365 天**，包括有效注册奖励和付费兑换奖励；超过上限的部分不再发放。流水写入 `referral_rewards` 和 `vip_events`，每张付费卡只能兑换一次，防止重复奖励。
+
+新增接口：
+
+```text
+GET  /api/v1/referrals/me                 Bearer 登录
+POST /api/v1/auth/register                可选 invite_code
+GET  /agent/api/me                        Bearer 代理人登录
+GET  /agent/api/users                     查看所属用户（需管理权限）
+POST /agent/api/users/{id}/toggle         启用/停用所属用户（需管理权限）
+POST /agent/api/users/{id}/extend         续期所属用户（需续期权限，扣额度）
+GET  /agent/api/licenses                  查看自己发出的卡（需发卡权限）
+POST /agent/api/licenses/generate         发卡（需发卡权限，扣额度）
+GET  /admin/api/agents                    管理员列出代理人
+PUT  /admin/api/agents/{id}               管理员设置权限和剩余额度
+PUT  /admin/api/users/{id}/agent          管理员分配用户归属
+```
+
+上述管理员写接口沿用 Secure Cookie 与 CSRF。应用客户端需要在注册界面收集邀请码，并把它作为 `invite_code` 发给注册接口，用户才能在软件内参与活动。数据库迁移在服务启动时自动执行；部署时需同步 `agent_referral.py` 和 `agent_web/`。
+
 ## 已有 VPS 升级
 
 数据库文件：
@@ -89,6 +117,8 @@ cp /tmp/RYLUX-v1/backend/admin_key_access.py /opt/pakredirect-license/
 cp /tmp/RYLUX-v1/backend/admin_code_v1.py /opt/pakredirect-license/
 cp /tmp/RYLUX-v1/backend/user_v1.py /opt/pakredirect-license/
 cp /tmp/RYLUX-v1/backend/registration_guard_v1.py /opt/pakredirect-license/
+cp /tmp/RYLUX-v1/backend/agent_referral.py /opt/pakredirect-license/
+cp -a /tmp/RYLUX-v1/backend/agent_web /opt/pakredirect-license/
 cp /tmp/RYLUX-v1/backend/manage.py /opt/pakredirect-license/
 cp /tmp/RYLUX-v1/backend/requirements.txt /opt/pakredirect-license/
 cp /tmp/RYLUX-v1/backend/pakredirect-license.service /etc/systemd/system/pakredirect-license.service
@@ -136,11 +166,7 @@ curl -sS \
   https://verify.lovenom.eu.org/api/v1/me
 ```
 
-同一公网 IP 立即再次使用不同用户名注册，预期返回 HTTP 429 和：
-
-```text
-当前网络 48 小时内已注册过账号，请稍后再试
-```
+同一设备再次注册仍返回成功，但 `membership.active=false`，不会计为有效邀请。
 
 ## V1 支付边界
 

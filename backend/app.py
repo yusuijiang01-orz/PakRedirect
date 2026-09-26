@@ -14,6 +14,7 @@ from registration_guard_v1 import init_registration_guard_v1, router as registra
 from user_v1 import init_user_v1, router as user_router
 from admin_user_controls import router as admin_user_controls_router
 from protected_content import router as protected_content_router
+from agent_referral import init_agent_referral, router as agent_referral_router
 
 DB_PATH = Path(os.environ.get("PAKREDIRECT_LICENSE_DB", "./data/licenses.db")).resolve()
 
@@ -30,6 +31,7 @@ app.include_router(admin_code_router)
 app.include_router(registration_guard_router)
 app.include_router(admin_user_controls_router)
 app.include_router(protected_content_router)
+app.include_router(agent_referral_router)
 app.include_router(user_router)
 app.include_router(admin_router)
 
@@ -84,6 +86,7 @@ def init_db() -> None:
     init_full_key_support()
     init_user_v1()
     init_registration_guard_v1()
+    init_agent_referral()
 
 
 @app.on_event("startup")
