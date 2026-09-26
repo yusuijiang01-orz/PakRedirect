@@ -28,6 +28,7 @@ class RegisterPayload(BaseModel):
     username: str = Field(min_length=3, max_length=32)
     password: str = Field(min_length=6, max_length=128)
     device_id: str = Field(default="", max_length=256)
+    invite_code: str = Field(default="", max_length=32)
 
 
 class LoginPayload(BaseModel):
@@ -258,7 +259,7 @@ def init_user_v1() -> None:
         if "role" not in user_columns:
             db.execute("ALTER TABLE app_users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
         db.execute(
-            "UPDATE app_users SET role='user' WHERE role IS NULL OR role NOT IN ('user','admin')"
+            "UPDATE app_users SET role='user' WHERE role IS NULL OR role NOT IN ('user','admin','agent')"
         )
 
         plans = [
@@ -366,6 +367,7 @@ def serialize_user(row) -> dict:
         "id": int(user["id"]),
         "username": user["username"],
         "role": user.get("role", "user") or "user",
+        "owner_agent_id": user.get("owner_agent_id"),
         "enabled": bool(user["status"]),
         "membership": m,
         "created_at": user["created_at"],
@@ -621,7 +623,7 @@ def redeem(
             code = db.execute(
                 """
                 SELECT id,key_hash,key_hint,key_value,label,expires_at,enabled,created_at,
-                       duration_days,redeemed_by_user_id,redeemed_at
+                       duration_days,redeemed_by_user_id,redeemed_at,is_paid
                 FROM licenses WHERE key_hash=? LIMIT 1
                 """,
                 (code_hash,),
@@ -678,6 +680,9 @@ def redeem(
                     iso(now),
                 ),
             )
+            if int(code["is_paid"]):
+                from agent_referral import reward_paid_redeem
+                reward_paid_redeem(db, auth["user_id"], code["id"], days, now)
             db.commit()
         except HTTPException:
             db.rollback()

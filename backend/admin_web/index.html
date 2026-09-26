@@ -16,6 +16,7 @@
     <nav class="nav">
       <button class="nav-btn active" data-view="overview">数据概览</button>
       <button class="nav-btn" data-view="users">用户 / VIP</button>
+      <button class="nav-btn" data-view="agents">代理人</button>
       <button class="nav-btn" data-view="licenses">兑换码</button>
       <button class="nav-btn" data-view="logs">操作日志</button>
       <button class="nav-btn" data-view="settings">系统设置</button>
@@ -71,6 +72,38 @@
             <thead><tr><th>ID</th><th>兑换码</th><th>标签</th><th>状态</th><th>到期时间</th><th>最后验证</th><th>IP</th></tr></thead>
             <tbody id="recentBody"></tbody>
           </table></div>
+        </div>
+      </section>
+
+      <section id="view-agents" class="hidden">
+          <div class="panel agent-panel">
+            <div class="panel-head agent-panel-head"><div><h3>代理人权限与额度</h3><p class="muted">代理人注册普通账号后，使用用户 ID 配置权限与额度。</p></div><a class="agent-entry" href="/agent">代理人入口 <span aria-hidden="true">↗</span></a></div>
+            <div class="panel-body agent-workspace">
+              <section class="agent-config" aria-labelledby="agentConfigTitle">
+                <div class="agent-section-head"><span class="agent-step" aria-hidden="true">01</span><div><h4 id="agentConfigTitle">配置代理人</h4><p>填写账号信息，并勾选允许使用的功能。</p></div></div>
+                <div class="agent-fields">
+                  <div class="agent-field"><label for="agentUserId">代理人用户 ID</label><input id="agentUserId" class="input" type="number" min="1" placeholder="输入已注册的用户 ID"></div>
+                  <div class="agent-field"><label for="agentQuota">剩余额度 <span>（天）</span></label><input id="agentQuota" class="input" type="number" min="0" placeholder="输入剩余天数"></div>
+                </div>
+                <fieldset class="agent-permissions"><legend>功能权限</legend><div class="agent-permission-options">
+                  <label><input id="agentManage" type="checkbox"><span>管理所属用户</span></label>
+                  <label><input id="agentIssue" type="checkbox"><span>发卡</span></label>
+                  <label><input id="agentExtend" type="checkbox"><span>续期</span></label>
+                </div></fieldset>
+                <div class="agent-form-actions"><button id="agentSave" class="btn btn-primary">保存代理人</button></div>
+              </section>
+              <section class="agent-assignment" aria-labelledby="agentAssignTitle">
+                <div class="agent-section-head"><span class="agent-step" aria-hidden="true">02</span><div><h4 id="agentAssignTitle">分配用户归属</h4><p>将用户关联到指定代理人。</p></div></div>
+                <div class="agent-fields">
+                  <div class="agent-field"><label for="agentAssignUser">用户 ID</label><input id="agentAssignUser" class="input" type="number" min="1" placeholder="输入需要分配的用户 ID"></div>
+                  <div class="agent-field"><label for="agentAssignAgent">所属代理人 ID <span>（选填）</span></label><input id="agentAssignAgent" class="input" type="number" min="1" placeholder="留空设为直属用户" aria-describedby="agentAssignHelp"></div>
+                </div>
+                <p class="agent-field-help" id="agentAssignHelp">直属用户不归属任何代理人。</p>
+                <div class="agent-form-actions"><button id="agentAssign" class="btn btn-secondary">分配用户</button></div>
+              </section>
+            </div>
+            <div class="agent-list-heading"><h4>代理人列表</h4><span class="muted">点击「编辑」回填权限与额度</span></div>
+            <div id="agentList" class="agent-list" aria-live="polite"></div>
         </div>
       </section>
 
@@ -199,6 +232,7 @@
     <div class="modal-head"><h3>生成兑换码</h3><button class="btn btn-ghost btn-sm" data-close="generateModal">关闭</button></div>
     <div class="modal-body">
       <div class="form-group"><label>标签</label><input class="input" id="genLabel" maxlength="80" placeholder="客户名 / 渠道 / 测试"></div>
+      <div class="form-group"><label><input type="checkbox" id="genPaid"> 已收款（被邀请用户兑换后触发同等天数奖励）</label></div>
       <div class="form-group"><label>生成数量</label><input class="input" id="genQty" type="number" min="1" max="1000" value="1"></div>
       <div class="form-group"><label>充值时长</label><div class="days-grid" id="dayGrid">
         <button class="day-btn" data-days="1">1 天</button><button class="day-btn" data-days="7">7 天</button>

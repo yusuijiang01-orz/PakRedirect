@@ -40,11 +40,11 @@ async function loadMe(){
 function showView(name){
   if(state.mustChange&&name!=="settings")name="settings";
   state.view=name;
-  ["overview","users","licenses","logs","settings"].forEach(v=>$(`view-${v}`).classList.toggle("hidden",v!==name));
+  ["overview","users","agents","licenses","logs","settings"].forEach(v=>$(`view-${v}`).classList.toggle("hidden",v!==name));
   qsa(".nav-btn").forEach(b=>b.classList.toggle("active",b.dataset.view===name));
-  const titles={overview:"数据概览",users:"用户 / VIP",licenses:"兑换码",logs:"操作日志",settings:"系统设置"};
+  const titles={overview:"数据概览",users:"用户 / VIP",agents:"代理人",licenses:"兑换码",logs:"操作日志",settings:"系统设置"};
   $("pageTitle").textContent=titles[name];$("sidebar").classList.remove("open");
-  if(name==="overview")loadOverview();if(name==="users")loadUsers();if(name==="licenses")loadLicenses();if(name==="logs")loadLogs();
+  if(name==="overview")loadOverview();if(name==="users")loadUsers();if(name==="agents")loadAgents();if(name==="licenses")loadLicenses();if(name==="logs")loadLogs();
 }
 async function loadOverview(){
   try{
@@ -65,7 +65,7 @@ async function loadUsers(){
     const q=encodeURIComponent($("userSearchInput").value.trim()),status=encodeURIComponent($("userStatusFilter").value);
     const d=await api(`/admin/api/users?q=${q}&status=${status}&page=${state.userPage}&page_size=30`);state.userPages=d.pages;
     $("userBody").innerHTML=d.items.length?d.items.map(r=>`<tr>
-      <td><label><input type="checkbox" data-user-check="${r.id}" ${state.selectedUserIds.has(Number(r.id))?"checked":""}> #${r.id}</label></td><td><strong>${esc(r.username)}</strong></td><td>${r.role==="admin"?'<span class="badge badge-admin">Admin</span>':'<span class="muted">普通用户</span>'}</td><td>${membershipBadge(r.membership,r.enabled,r.role)}
+      <td><label><input type="checkbox" data-user-check="${r.id}" ${state.selectedUserIds.has(Number(r.id))?"checked":""}> #${r.id}</label></td><td><strong>${esc(r.username)}</strong>${r.owner_agent_id?`<small class="muted"> · 代理 #${r.owner_agent_id}</small>`:""}</td><td>${r.role==="admin"?'<span class="badge badge-admin">Admin</span>':r.role==="agent"?'<span class="badge badge-active">代理人</span>':'<span class="muted">普通用户</span>'}</td><td>${membershipBadge(r.membership,r.enabled,r.role)}
       <td>${fmt(r.membership.expires_at)}</td><td>${fmt(r.created_at)}</td><td>${fmt(r.last_login_at)}</td><td>${esc(r.last_login_ip||"-")}</td><td>${r.login_count}</td>
       <td><div class="actions">
         <button class="btn ${r.enabled?"btn-danger":"btn-success"} btn-sm" data-user-toggle="${r.id}" data-enabled="${r.enabled?0:1}">${r.enabled?"禁用":"启用"}</button>
@@ -123,7 +123,7 @@ async function loadLicenses(){
     $("licenseBody").innerHTML=d.items.length?d.items.map(r=>{
       const statusHtml=r.redeemed?`<span class="badge badge-disabled">已兑换</span>`:badge(r.status);
       const toggleDisabled=r.redeemed?"disabled":"";
-      return `<tr><td>#${r.id}</td><td>${keyCell(r)}</td><td>${r.duration_days?`${r.duration_days} 天`:"-"}</td><td>${esc(r.label||"-")}</td>
+      return `<tr><td>#${r.id}</td><td>${keyCell(r)}</td><td>${r.duration_days?`${r.duration_days} 天`:"-"}${r.is_paid?' <span class="badge badge-active">已收款</span>':""}</td><td>${esc(r.label||"-")}${r.issued_by_agent_id?`<div class="muted">代理 #${r.issued_by_agent_id}</div>`:""}</td>
         <td>${statusHtml}</td><td>${fmt(r.expires_at)}</td><td>${fmt(r.last_seen_at)}</td><td>${esc(r.last_seen_ip||"-")}</td>
         <td><div class="actions"><button class="btn ${r.enabled?"btn-danger":"btn-success"} btn-sm" data-toggle="${r.id}" data-enabled="${r.enabled?0:1}" ${toggleDisabled}>${r.enabled?"禁用":"启用"}</button>
         <select class="select" data-extend-select="${r.id}"><option value="1">+1天</option><option value="7">+7天</option><option value="30" selected>+30天</option><option value="90">+90天</option><option value="180">+180天</option><option value="365">+365天</option></select>
@@ -148,13 +148,35 @@ function openModal(id){$(id).classList.remove("hidden")}function closeModal(id){
 async function generate(){
   const quantity=Number($("genQty").value),label=$("genLabel").value.trim();if(!Number.isInteger(quantity)||quantity<1||quantity>1000){alertMsg("生成数量必须为 1-1000","error");return}
   $("confirmGenerate").disabled=true;$("confirmGenerate").textContent="生成中...";
-  try{const d=await api("/admin/api/licenses/generate",{method:"POST",body:{days:state.days,quantity,label}});closeModal("generateModal");$("generatedKeys").value=d.keys.join("\n");$("generatedExpiry").textContent=`套餐：${d.duration_days||state.days} 天 · 兑换码自身到期：${fmt(d.expires_at)} · 共 ${d.keys.length} 张`;openModal("resultModal");loadLicenses();loadOverview()}catch(e){alertMsg(e.message,"error")}finally{$("confirmGenerate").disabled=false;$("confirmGenerate").textContent="生成"}
+  try{const d=await api("/admin/api/licenses/generate",{method:"POST",body:{days:state.days,quantity,label,paid:$("genPaid").checked}});closeModal("generateModal");$("generatedKeys").value=d.keys.join("\n");$("generatedExpiry").textContent=`套餐：${d.duration_days||state.days} 天 · 兑换码自身到期：${fmt(d.expires_at)} · 共 ${d.keys.length} 张`;openModal("resultModal");loadLicenses();loadOverview()}catch(e){alertMsg(e.message,"error")}finally{$("confirmGenerate").disabled=false;$("confirmGenerate").textContent="生成"}
 }
 function downloadText(){const txt=$("generatedKeys").value;if(!txt)return;const blob=new Blob([txt],{type:"text/plain;charset=utf-8"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`RYLUX-codes-${new Date().toISOString().slice(0,10)}.txt`;a.click();URL.revokeObjectURL(a.href)}
 async function copyKeys(){try{await navigator.clipboard.writeText($("generatedKeys").value);alertMsg("已复制全部兑换码")}catch{alertMsg("复制失败，请手动复制","error")}}
 async function saveCredentials(e){e.preventDefault();const fd=new FormData(e.target);const body={current_password:fd.get("current_password"),username:fd.get("username"),new_password:fd.get("new_password"),confirm_password:fd.get("confirm_password")};try{const d=await api("/admin/api/credentials",{method:"POST",body});alertMsg("管理员账号和密码已更新");state.username=d.username;state.mustChange=false;e.target.reset();$("settingsUsername").value=d.username;$("adminName").textContent=d.username;await loadMe();showView("overview")}catch(ex){alertMsg(ex.message,"error")}}
 async function logout(){try{await api("/admin/api/logout",{method:"POST",body:{}})}catch(e){}location.href="/admin/login"}
+async function loadAgents(){
+  try{
+    const d=await api("/admin/api/agents");
+    $("agentList").innerHTML=d.items.length?`<div class="table-wrap"><table class="agent-table"><thead><tr><th scope="col">代理人</th><th scope="col">状态</th><th scope="col">剩余额度</th><th scope="col">已开通权限</th><th scope="col">操作</th></tr></thead><tbody>${d.items.map(a=>`<tr><td><div class="agent-identity"><strong>${esc(a.username)}</strong><span class="muted code">ID ${a.id}</span></div></td><td><span class="badge ${a.status?"badge-active":"badge-disabled"}">${a.status?"已启用":"已停用"}</span></td><td><span class="agent-quota">${a.quota_days}</span><span class="muted"> 天</span></td><td><div class="agent-access-tags">${[[a.can_manage_users,"管理用户"],[a.can_issue_cards,"发卡"],[a.can_extend_vip,"续期"]].map(([enabled,label])=>`<span class="agent-access ${enabled?"is-enabled":""}">${label}<span class="agent-access-state">${enabled?"已开通":"未开通"}</span></span>`).join("")}</div></td><td><button class="btn btn-secondary btn-sm" data-agent-edit="${a.id}" aria-label="编辑代理人 ${esc(a.username)}">编辑</button></td></tr>`).join("")}</tbody></table></div>`:`<div class="agent-empty"><strong>暂无代理人</strong><p>在上方填写已注册用户的 ID，配置权限与额度后保存。</p></div>`;
+    qsa("[data-agent-edit]").forEach(b=>b.onclick=()=>{
+      const a=d.items.find(x=>x.id===Number(b.dataset.agentEdit));
+      $("agentUserId").value=a.id;$("agentQuota").value=a.quota_days;
+      $("agentManage").checked=!!a.can_manage_users;$("agentIssue").checked=!!a.can_issue_cards;$("agentExtend").checked=!!a.can_extend_vip;
+    });
+  }catch(e){alertMsg(e.message,"error")}
+}
+async function saveAgent(){
+  const id=Number($("agentUserId").value),quota=Number($("agentQuota").value);
+  if(!Number.isInteger(id)||id<1||!Number.isInteger(quota)||quota<0){alertMsg("请填写有效的用户 ID 和额度","error");return}
+  try{await api(`/admin/api/agents/${id}`,{method:"PUT",body:{quota_days:quota,can_manage_users:$("agentManage").checked,can_issue_cards:$("agentIssue").checked,can_extend_vip:$("agentExtend").checked}});alertMsg("代理人已保存");loadAgents()}catch(e){alertMsg(e.message,"error")}
+}
+async function assignAgent(){
+  const id=Number($("agentAssignUser").value),raw=$("agentAssignAgent").value.trim(),agent_id=raw?Number(raw):null;
+  if(!Number.isInteger(id)||id<1||(agent_id!==null&&(!Number.isInteger(agent_id)||agent_id<1))){alertMsg("用户或代理人 ID 无效","error");return}
+  try{await api(`/admin/api/users/${id}/agent`,{method:"PUT",body:{agent_id}});alertMsg("用户归属已更新");loadUsers()}catch(e){alertMsg(e.message,"error")}
+}
 function bind(){
+  $("agentSave").onclick=saveAgent;$("agentAssign").onclick=assignAgent;
   qsa(".nav-btn").forEach(b=>b.onclick=()=>showView(b.dataset.view));qsa("[data-jump]").forEach(b=>b.onclick=()=>showView(b.dataset.jump));$("menuBtn").onclick=()=>$("sidebar").classList.toggle("open");$("logoutBtn").onclick=logout;
   $("generateBtn").onclick=()=>openModal("generateModal");$("toggleRevealBtn").onclick=()=>{state.revealKeys=!state.revealKeys;loadLicenses()};$("copyAllBtn").onclick=copyAllFilteredKeys;qsa("[data-close]").forEach(b=>b.onclick=()=>closeModal(b.dataset.close));
   qsa(".day-btn").forEach(b=>b.onclick=(e)=>{e.preventDefault();state.days=Number(b.dataset.days);qsa(".day-btn").forEach(x=>x.classList.toggle("active",x===b))});$("confirmGenerate").onclick=generate;$("copyKeysBtn").onclick=copyKeys;$("downloadKeysBtn").onclick=downloadText;

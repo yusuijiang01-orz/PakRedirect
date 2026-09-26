@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>RYLUX 代理人</title>
+  <link rel="stylesheet" href="/admin/assets/styles.css">
+  <style>[hidden]{display:none!important}</style>
+</head>
+<body>
+<main class="main" style="max-width:1100px;margin:auto;padding:24px">
+  <h1>RYLUX 代理人</h1>
+  <p id="message" role="status"></p>
+  <section class="panel" id="loginPanel">
+    <div class="panel-head"><h3>登录</h3></div>
+    <form id="loginForm" class="panel-body">
+      <div class="form-group"><label>账号</label><input id="username" class="input" required></div>
+      <div class="form-group"><label>密码</label><input id="password" class="input" type="password" required></div>
+      <button class="btn btn-primary">登录</button>
+    </form>
+  </section>
+  <section id="dashboard" hidden>
+    <div class="panel"><div class="panel-head"><h3 id="agentName">代理人</h3><button id="logout" class="btn btn-ghost">退出</button></div>
+      <div class="panel-body">剩余额度：<strong id="quota">0</strong> 天 · 邀请码：<strong id="inviteCode">-</strong></div></div>
+    <div class="panel" id="cardsPanel"><div class="panel-head"><h3>发卡</h3></div><form id="cardsForm" class="panel-body">
+      <select id="cardDays" class="select"><option>1</option><option>7</option><option>30</option><option>90</option><option>180</option><option>365</option></select>
+      <input id="cardQty" class="input" type="number" min="1" max="100" value="1" required>
+      <input id="cardLabel" class="input" maxlength="80" placeholder="卡片标签">
+      <label><input id="cardPaid" type="checkbox" checked> 已收款</label>
+      <button class="btn btn-primary">生成</button>
+      <textarea id="generated" class="keys" readonly aria-label="生成的兑换码"></textarea>
+    </form><div class="panel-body" id="cards"></div></div>
+    <div class="panel" id="usersPanel"><div class="panel-head"><h3>所属用户</h3></div><div class="panel-body" id="users"></div></div>
+  </section>
+</main>
+<script src="/agent/app.js"></script>
+</body></html>
