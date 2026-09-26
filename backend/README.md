@@ -137,6 +137,8 @@ nginx -t
 systemctl reload nginx
 ```
 
+`/agent` 和 `/agent/` 页面需要由 Nginx 转发到本机 FastAPI 的 18888 端口；升级时请同步 `nginx-pakredirect-license.conf`，并在 `nginx -t` 通过后 reload。
+
 检查：
 
 ```bash
