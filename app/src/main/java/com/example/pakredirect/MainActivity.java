@@ -2,6 +2,8 @@ package com.example.pakredirect;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
@@ -75,6 +77,7 @@ public class MainActivity extends Activity {
     private EditText usernameEdit;
     private EditText passwordEdit;
     private EditText confirmPasswordEdit;
+    private EditText inviteCodeEdit;
     private CheckBox rememberCheck;
     private Button authButton;
     private TextView switchModeLink;
@@ -154,6 +157,7 @@ public class MainActivity extends Activity {
         currentExpiresAt = null;
         currentProfile = null;
         confirmPasswordEdit = null;
+        inviteCodeEdit = null;
         rememberCheck = null;
         clearTransientViews();
 
@@ -190,6 +194,9 @@ public class MainActivity extends Activity {
         if (asRegister) {
             confirmPasswordEdit = input("确认密码", true);
             card.addView(confirmPasswordEdit, inputParams());
+            inviteCodeEdit = input("邀请码（选填）", false);
+            inviteCodeEdit.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
+            card.addView(inviteCodeEdit, inputParams());
         } else {
             rememberCheck = new CheckBox(this);
             rememberCheck.setText("记住密码");
@@ -255,10 +262,11 @@ public class MainActivity extends Activity {
 
         setAuthBusy(true);
         final boolean registering = registerMode;
+        final String inviteCode = inviteCodeEdit == null ? "" : inviteCodeEdit.getText().toString().trim();
         final boolean rememberPassword = !registering && rememberCheck != null && rememberCheck.isChecked();
         new Thread(() -> {
             AuthClient.AuthResult result = registering
-                    ? AuthClient.register(username, password, deviceId())
+                    ? AuthClient.register(username, password, deviceId(), inviteCode)
                     : AuthClient.login(username, password, deviceId());
             runOnUiThread(() -> {
                 setAuthBusy(false);
@@ -478,6 +486,28 @@ public class MainActivity extends Activity {
         redeemLp.topMargin = dp(10);
         panel.addView(redeem, redeemLp);
 
+        TextView referralTitle = text("邀请好友 · 赠送 VIP", 16, TEXT, true);
+        referralTitle.setPadding(0, dp(22), 0, dp(8));
+        panel.addView(referralTitle);
+        TextView referralRule = text("每 2 位有效新用户注册赠 1 天 VIP；好友购买 VIP 后，你也会获得相同天数，累计最多 365 天。", 13, MUTED, false);
+        referralRule.setLineSpacing(dp(2), 1f);
+        panel.addView(referralRule);
+        TextView referralCode = text("正在获取邀请码…", 16, TEXT, true);
+        referralCode.setTextIsSelectable(true);
+        panel.addView(referralCode);
+        TextView referralStats = text("", 13, MUTED, false);
+        referralStats.setPadding(0, dp(6), 0, dp(8));
+        panel.addView(referralStats);
+        Button copyInvite = button("复制邀请码", CARD_SOFT, TEXT);
+        copyInvite.setEnabled(false);
+        panel.addView(copyInvite, new LinearLayout.LayoutParams(-1, dp(46)));
+        Button refreshInvites = button("刷新邀请记录", CARD_SOFT, TEXT);
+        LinearLayout.LayoutParams inviteRefreshLp = new LinearLayout.LayoutParams(-1, dp(46));
+        inviteRefreshLp.topMargin = dp(8);
+        panel.addView(refreshInvites, inviteRefreshLp);
+        refreshInvites.setOnClickListener(v -> loadReferrals(overlay, referralCode, referralStats,
+                copyInvite, refreshInvites));
+
         Button logout = button("退出登录", Color.rgb(68, 35, 38), Color.rgb(255, 185, 185));
         logout.setOnClickListener(v -> {
             closeActiveOverlayImmediate();
@@ -492,8 +522,45 @@ public class MainActivity extends Activity {
         panelLp.leftMargin = dp(16);
         panelLp.rightMargin = dp(16);
         panelLp.topMargin = dp(72);
-        overlay.addView(panel, panelLp);
+        panelLp.bottomMargin = dp(20);
+        ScrollView accountScroll = new ScrollView(this);
+        accountScroll.addView(panel, new ScrollView.LayoutParams(-1, -2));
+        overlay.addView(accountScroll, panelLp);
         attachOverlay(overlay, panel, false);
+        loadReferrals(overlay, referralCode, referralStats, copyInvite, refreshInvites);
+    }
+
+    private void loadReferrals(FrameLayout overlay, TextView code, TextView stats,
+                               Button copy, Button refresh) {
+        final String token = currentToken;
+        if (token == null || token.trim().isEmpty()) return;
+        refresh.setEnabled(false);
+        refresh.setText("正在加载…");
+        new Thread(() -> {
+            AuthClient.ReferralResult result = AuthClient.referrals(token);
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed() || activeOverlay != overlay || !token.equals(currentToken)) return;
+                refresh.setEnabled(true);
+                refresh.setText("刷新邀请记录");
+                if (!result.success) {
+                    code.setText("暂时无法获取邀请记录");
+                    stats.setText(result.message + "，请稍后刷新");
+                    copy.setEnabled(false);
+                    return;
+                }
+                code.setText("我的邀请码：" + result.inviteCode);
+                stats.setText("已邀请 " + result.totalInvited + " 人 · 有效邀请 " + result.validInvited
+                        + " 人\n已获赠 " + result.rewardDays + " 天 VIP · 累计上限 " + result.rewardCapDays + " 天");
+                copy.setEnabled(true);
+                copy.setOnClickListener(v -> {
+                    ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                    if (clipboard != null) {
+                        clipboard.setPrimaryClip(ClipData.newPlainText("RYLUX 邀请码", result.inviteCode));
+                        toast("邀请码已复制");
+                    }
+                });
+            });
+        }, "RYLUX-Referrals").start();
     }
 
     private void showGamePanel(AuthClient.ProfileResult profile) {
@@ -1173,6 +1240,7 @@ public class MainActivity extends Activity {
         if (usernameEdit != null) usernameEdit.setEnabled(!busy);
         if (passwordEdit != null) passwordEdit.setEnabled(!busy);
         if (confirmPasswordEdit != null) confirmPasswordEdit.setEnabled(!busy);
+        if (inviteCodeEdit != null) inviteCodeEdit.setEnabled(!busy);
         if (rememberCheck != null) rememberCheck.setEnabled(!busy);
         if (authProgress != null) authProgress.setVisibility(busy ? View.VISIBLE : View.GONE);
     }

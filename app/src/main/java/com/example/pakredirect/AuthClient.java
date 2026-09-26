@@ -16,11 +16,16 @@ public final class AuthClient {
     private AuthClient() {}
 
     public static AuthResult register(String username, String password, String deviceId) {
+        return register(username, password, deviceId, "");
+    }
+
+    public static AuthResult register(String username, String password, String deviceId, String inviteCode) {
         try {
             JSONObject body = new JSONObject();
             body.put("username", username == null ? "" : username.trim());
             body.put("password", password == null ? "" : password);
             body.put("device_id", deviceId == null ? "" : deviceId);
+            body.put("invite_code", inviteCode == null ? "" : inviteCode.trim());
             HttpResult http = request("POST", "/auth/register", null, body);
             if (!http.requestOk) return AuthResult.networkError(http.message);
             if (!http.success) return AuthResult.failure(http.message);
@@ -66,6 +71,16 @@ public final class AuthClient {
         } catch (Throwable t) {
             return ProfileResult.failure("用户数据解析失败");
         }
+    }
+
+    public static ReferralResult referrals(String token) {
+        HttpResult http = request("GET", "/referrals/me", token, null);
+        if (!http.requestOk || !http.success) return ReferralResult.failure(http.message);
+        String code = nullable(http.json.optString("invite_code", null));
+        if (code == null) return ReferralResult.failure("邀请码数据异常");
+        return new ReferralResult(true, code, http.json.optInt("total_invited", 0),
+                http.json.optInt("valid_invited", 0), http.json.optInt("reward_days", 0),
+                http.json.optInt("reward_cap_days", 365), "");
     }
 
     public static ActionResult redeem(String token, String code) {
@@ -276,6 +291,31 @@ public final class AuthClient {
 
         static ProfileResult failure(String message) {
             return new ProfileResult(true, false, "", false, "expired", null, "user", message);
+        }
+    }
+
+    public static final class ReferralResult {
+        public final boolean success;
+        public final String inviteCode;
+        public final int totalInvited;
+        public final int validInvited;
+        public final int rewardDays;
+        public final int rewardCapDays;
+        public final String message;
+
+        ReferralResult(boolean success, String inviteCode, int totalInvited, int validInvited,
+                       int rewardDays, int rewardCapDays, String message) {
+            this.success = success;
+            this.inviteCode = inviteCode;
+            this.totalInvited = totalInvited;
+            this.validInvited = validInvited;
+            this.rewardDays = rewardDays;
+            this.rewardCapDays = rewardCapDays;
+            this.message = message;
+        }
+
+        static ReferralResult failure(String message) {
+            return new ReferralResult(false, "", 0, 0, 0, 365, message);
         }
     }
 
