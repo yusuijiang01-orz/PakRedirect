@@ -83,6 +83,13 @@ def test_agent_scope_balance_and_paid_referrals(setup_backend):
     own_cards = client.get("/agent/api/licenses?reveal=1", headers=agent_token).json()
     assert own_cards["total"] == 2
     assert {r["key_value"] for r in own_cards["items"]} == set(cards.json()["keys"])
+    assert all(r["agent_price_cents"] == 2000 for r in own_cards["items"])
+    unused_card = next(row for row in own_cards["items"] if row["key_value"] == cards.json()["keys"][1])
+    assert client.post(f"/agent/api/licenses/{unused_card['id']}/toggle", json={"enabled": False}, headers=agent_token).status_code == 200
+    exported = client.get("/agent/api/licenses/export.csv", headers=agent_token)
+    assert exported.status_code == 200 and cards.json()["keys"][0] in exported.text
+    balance_events = client.get("/agent/api/balance-events", headers=agent_token).json()["items"]
+    assert balance_events[0]["delta_cents"] == -4000
     assert client.post("/agent/api/licenses/generate", json={"days": 30, "quantity": 1}, headers=agent_token).status_code == 409
     buyer_token = bearer(first)
     redeemed = client.post("/api/v1/redeem", json={"code": cards.json()["keys"][0]}, headers=buyer_token)
@@ -92,6 +99,8 @@ def test_agent_scope_balance_and_paid_referrals(setup_backend):
 
     # An invalid registration cannot trigger the paid-card referral bonus.
     bad_token = bearer(invalid)
+    assert client.post("/api/v1/redeem", json={"code": cards.json()["keys"][1]}, headers=bad_token).status_code == 400
+    assert client.post(f"/agent/api/licenses/{unused_card['id']}/toggle", json={"enabled": True}, headers=agent_token).status_code == 200
     assert client.post("/api/v1/redeem", json={"code": cards.json()["keys"][1]}, headers=bad_token).status_code == 200
     assert client.get("/api/v1/referrals/me", headers=agent_token).json()["reward_days"] == 31
 
@@ -214,3 +223,9 @@ def test_balance_atomicity_and_batch_scope(setup_backend):
     success = client.post("/agent/api/users/batch-renew", json={"user_ids": [own, own], "days": 30}, headers=token)
     assert success.status_code == 200 and success.json()["debit_cents"] == 2000
     assert client.get("/agent/api/me", headers=token).json()["balance_cents"] == 0
+    sessions = client.get(f"/agent/api/users/{own}/sessions", headers=token)
+    assert sessions.status_code == 200 and sessions.json()["items"] == []
+    assert client.post(f"/agent/api/users/{own}/unbind-device", json={}, headers=token).status_code == 200
+    assert client.get(f"/agent/api/users/{other}/sessions", headers=token).status_code == 404
+    assert client.delete(f"/agent/api/users/{own}", headers=token).status_code == 200
+    assert client.get("/agent/api/users", headers=token).json()["total"] == 0
