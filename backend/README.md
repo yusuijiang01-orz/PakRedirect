@@ -69,13 +69,15 @@ V1 增加：
 
 ## 代理人与邀请活动
 
-管理员在 `/admin` 的“代理人”页输入已注册用户 ID，设置“管理所属用户”“发卡”“续期”三项权限与**剩余额度（天）**。代理人使用原账号登录 `/agent`。管理员可将普通用户指派给代理人；代理人邀请码注册的普通用户也自动归属该代理人。管理员列表仍可查看全部用户。代理人 `/agent/api/users` 只能列出和操作 `owner_agent_id` 为自己的普通用户，不能调用管理员接口。
+管理员在 `/admin` 的“代理人”页把已注册用户设为代理人，并分别授予“管理所属用户”“发卡”“VIP 续期”权限。代理人使用原账号登录 `/agent`。管理员可将普通用户指派给代理人；代理人邀请码注册的用户，以及兑换代理人卡密的未归属用户，会自动归属该代理人。管理员列表仍可查看全部用户。代理人只能读取和操作 `owner_agent_id` 属于自己的普通用户，不能调用管理员接口。
 
-代理人发卡或为所属用户续期，会按 `套餐天数 × 数量` 从额度扣除。扣除、发卡、VIP 流水在同一个 SQLite 事务中完成；余额不足返回 409。已发出的卡不会因为代理人额度调整而失效。管理员可在代理人页调整剩余额度；`agent_quota_events` 保存变动记录。代理人只能查看自己发出的卡。
+代理人额度以人民币计，采用分为单位存储，管理员可充值或扣减并查看余额流水。当前代理套餐价格为：月卡 30 天 ¥20，季卡 90 天 ¥48，半年卡 180 天 ¥78，年卡 365 天 ¥118。发卡和续期按套餐价格扣除代理余额；余额检查、余额流水和对应发卡/VIP 操作在同一 SQLite 事务中完成，余额不足返回 409。已发出的卡不会因为后续余额调整而失效。旧版 `quota_days` 和 `agent_quota_events` 保留作历史记录，不会自动折算成人民币，新余额默认 ¥0。
+
+代理后台提供所属用户与 VIP 管理、自助添加用户、批量续期、登录设备查看与解绑、用户启用/停用及删除、本人卡密管理/导出、余额与操作流水。每项操作都按已授予的权限限制；发卡权限只能查看本人生成的卡，管理用户或续期只能作用于自己的所属用户。管理员仍可查看和管理全体用户、所有卡密及代理人。
 
 用户调用 `GET /api/v1/referrals/me` 获取邀请码及邀请统计。注册请求可传 `invite_code`。只有获批 24 小时试用、设备 ID 非空、且设备/IP 摘要与邀请者不同的注册计为有效；注册后立即过期的账号不计入。每累计 **2 个有效邀请**，邀请者获得 **1 天 VIP**。邀请关系在注册时固定，不能事后更换。
 
-V1 尚未接在线支付。管理员发卡时勾选“已收款”，或代理人发卡时标记 `paid=true`，该卡兑换才视为付费购买；被邀请人兑换后，邀请者获得相同天数。普通/赠送卡、体验期和管理员续期均不触发购买奖励。邀请奖励累计上限 **365 天**，包括有效注册奖励和付费兑换奖励；超过上限的部分不再发放。流水写入 `referral_rewards` 和 `vip_events`，每张付费卡只能兑换一次，防止重复奖励。
+V1 尚未接在线支付。管理员发卡时勾选“已收款”，或代理人发卡时标记 `paid=true`，该卡兑换才视为付费购买；被邀请人兑换后，邀请者获得相同天数。代理人使用余额直接为所属用户续期也视为付费购买，并按续期天数奖励邀请者。普通/赠送卡、体验期和管理员人工续期不触发购买奖励。邀请奖励累计上限 **365 天**，包括有效注册奖励和付费购买奖励；超过上限的部分不再发放。流水写入 `referral_rewards` 和 `vip_events`，每张付费卡只能兑换一次，防止重复奖励。
 
 新增接口：
 
@@ -83,13 +85,27 @@ V1 尚未接在线支付。管理员发卡时勾选“已收款”，或代理�
 GET  /api/v1/referrals/me                 Bearer 登录
 POST /api/v1/auth/register                可选 invite_code
 GET  /agent/api/me                        Bearer 代理人登录
-GET  /agent/api/users                     查看所属用户（需管理权限）
+GET  /agent/api/prices                    查看代理套餐价格
+GET  /agent/api/overview                  查看所属用户/自有卡密概览
+GET  /agent/api/users                     查看所属用户（需管理或续期权限）
+POST /agent/api/users                     创建所属用户（需管理权限）
 POST /agent/api/users/{id}/toggle         启用/停用所属用户（需管理权限）
-POST /agent/api/users/{id}/extend         续期所属用户（需续期权限，扣额度）
+POST /agent/api/users/{id}/extend         续期所属用户（扣余额并奖励有效邀请者）
+POST /agent/api/users/batch-renew         批量续期所属用户
+GET  /agent/api/users/{id}/sessions       查看所属用户会话（需管理权限）
+POST /agent/api/users/{id}/unbind-device  解除所属用户设备绑定
+DELETE /agent/api/users/{id}              删除所属用户（需管理权限）
 GET  /agent/api/licenses                  查看自己发出的卡（需发卡权限）
-POST /agent/api/licenses/generate         发卡（需发卡权限，扣额度）
+POST /agent/api/licenses/generate         发卡（扣人民币余额）
+POST /agent/api/licenses/{id}/toggle      启用/停用本人未兑换卡密
+GET  /agent/api/licenses/export.csv       导出本人卡密
+GET  /agent/api/balance-events            查看本人余额流水
+GET  /agent/api/logs                      查看本人操作流水
+POST /agent/api/change-password           修改代理人密码
 GET  /admin/api/agents                    管理员列出代理人
-PUT  /admin/api/agents/{id}               管理员设置权限和剩余额度
+PUT  /admin/api/agents/{id}               管理员设置代理权限
+POST /admin/api/agents/{id}/balance       管理员调整人民币余额
+GET  /admin/api/agents/{id}/balance-events 管理员查看代理余额流水
 PUT  /admin/api/users/{id}/agent          管理员分配用户归属
 ```
 
