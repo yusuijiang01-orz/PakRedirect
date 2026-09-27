@@ -43,7 +43,7 @@ source_dir="${work_dir}/source/backend"
 
 echo "[2/4] Installing backend files..."
 for file in app.py admin_v2.py admin_key_access.py admin_code_v1.py \
-  user_v1.py registration_guard_v1.py manage.py requirements.txt; do
+  user_v1.py registration_guard_v1.py agent_referral.py manage.py requirements.txt; do
   install -o paklicense -g paklicense -m 0644 "${source_dir}/${file}" "${APP_DIR}/${file}"
 done
 
@@ -52,12 +52,14 @@ install -o root -g root -m 0644 "${source_dir}/pakredirect-license.service" \
 install -o root -g root -m 0644 "${source_dir}/nginx-pakredirect-license.conf" \
   /etc/nginx/sites-available/pakredirect-license
 
-admin_web_tmp="${APP_DIR}/.admin_web.new.$$"
-rm -rf -- "${admin_web_tmp}"
-cp -a "${source_dir}/admin_web" "${admin_web_tmp}"
-chown -R paklicense:paklicense "${admin_web_tmp}"
-rm -rf -- "${APP_DIR}/admin_web"
-mv -- "${admin_web_tmp}" "${APP_DIR}/admin_web"
+for web_dir in admin_web agent_web; do
+  web_tmp="${APP_DIR}/.${web_dir}.new.$$"
+  rm -rf -- "${web_tmp}"
+  cp -a "${source_dir}/${web_dir}" "${web_tmp}"
+  chown -R paklicense:paklicense "${web_tmp}"
+  rm -rf -- "${APP_DIR}/${web_dir}"
+  mv -- "${web_tmp}" "${APP_DIR}/${web_dir}"
+done
 
 chown paklicense:paklicense "${APP_DIR}/requirements.txt"
 "${APP_DIR}/.venv/bin/pip" install -r "${APP_DIR}/requirements.txt"
