@@ -6,6 +6,7 @@ on:
       - feat/agent-referrals
     paths:
       - .github/workflows/relabel-game-apk.yml
+      - apk/_statfix17_patch/app-aligned-signed.apk
   workflow_dispatch:
 
 permissions:
@@ -60,7 +61,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          SOURCE='apk/TamGioiPhanTranhMobile-587.apk'
+          SOURCE='apk/_statfix17_patch/app-aligned-signed.apk'
           test -s "$SOURCE"
           if head -c 80 "$SOURCE" | grep -aq 'version https://git-lfs.github.com/spec/v1'; then
             echo 'The game APK is still an LFS pointer.' >&2
@@ -73,7 +74,7 @@ jobs:
           import subprocess
           from pathlib import Path
 
-          source = 'apk/TamGioiPhanTranhMobile-587.apk'
+          source = 'apk/_statfix17_patch/app-aligned-signed.apk'
           tools = Path(os.environ['ANDROID_HOME']) / 'build-tools' / '35.0.0'
           expected_package = 'com.tepaylink.tamgioiphantranhmobile'
           expected_signer = '015c81c0cbc09d5dc1b825a673ef7676af4c51526870f2107d321c726c4d7aa7'
@@ -97,7 +98,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          SOURCE='apk/TamGioiPhanTranhMobile-587.apk'
+          SOURCE='apk/_statfix17_patch/app-aligned-signed.apk'
           java -jar "$RUNNER_TEMP/apktool_3.0.3.jar" decode --no-src --output "$RUNNER_TEMP/game-decoded" "$SOURCE"
           DECODED="$RUNNER_TEMP/game-decoded" python3 - <<'PY'
           import os
@@ -189,7 +190,7 @@ jobs:
             --ks-pass env:RYLUX_KEYSTORE_PASSWORD \
             --key-pass env:RYLUX_KEY_PASSWORD \
             --v4-signing-enabled true \
-            --out 'TamGioiPhanTranhMobile-587-zh-signed.apk' \
+            --out 'TamGioiPhanTranhMobile-587-statfix17-zh-signed.apk' \
             "$RUNNER_TEMP/game-aligned.apk"
 
       - name: Verify signed APK and unchanged source
@@ -202,8 +203,10 @@ jobs:
           import re
           import subprocess
           from pathlib import Path
+          from zipfile import ZipFile
 
-          apk = 'TamGioiPhanTranhMobile-587-zh-signed.apk'
+          source_apk = 'apk/_statfix17_patch/app-aligned-signed.apk'
+          apk = 'TamGioiPhanTranhMobile-587-statfix17-zh-signed.apk'
           tools = Path(os.environ['ANDROID_HOME']) / 'build-tools' / '35.0.0'
           expected_package = 'com.tepaylink.tamgioiphantranhmobile'
           expected_signer = '015c81c0cbc09d5dc1b825a673ef7676af4c51526870f2107d321c726c4d7aa7'
@@ -229,14 +232,27 @@ jobs:
               label != expected_label for label in launcher_labels
           ):
               raise SystemExit('Signed APK application or launcher label is incorrect.')
-          print('Verified package, version, app label, launcher label, and signer certificate.')
+          native_library = 'lib/arm64-v8a/libcocos2dcpp.so'
+          with ZipFile(source_apk) as source_zip, ZipFile(apk) as signed_zip:
+              if (source_zip.namelist().count(native_library) != 1 or
+                      signed_zip.namelist().count(native_library) != 1):
+                  raise SystemExit('Expected exactly one native library entry in each APK.')
+              with source_zip.open(native_library) as source_lib, signed_zip.open(native_library) as signed_lib:
+                  while True:
+                      source_bytes = source_lib.read(1024 * 1024)
+                      signed_bytes = signed_lib.read(1024 * 1024)
+                      if source_bytes != signed_bytes:
+                          raise SystemExit('Rebuilt native library differs from the patched input.')
+                      if not source_bytes:
+                          break
+          print('Verified package, version, labels, signer certificate, and patched native library.')
           PY
 
       - name: Upload signed APK
         uses: actions/upload-artifact@v4
         with:
-          name: TamGioiPhanTranhMobile-587-zh-signed
+          name: TamGioiPhanTranhMobile-587-statfix17-zh-signed
           path: |
-            TamGioiPhanTranhMobile-587-zh-signed.apk
-            TamGioiPhanTranhMobile-587-zh-signed.apk.idsig
+            TamGioiPhanTranhMobile-587-statfix17-zh-signed.apk
+            TamGioiPhanTranhMobile-587-statfix17-zh-signed.apk.idsig
           if-no-files-found: error
