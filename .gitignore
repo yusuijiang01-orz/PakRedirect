@@ -3,3 +3,5 @@ app/build/
 local.properties
 *.jks
 *.keystore
+__pycache__/
+*.pyc
