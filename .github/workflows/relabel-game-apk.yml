@@ -1,6 +1,11 @@
 name: Relabel and sign game APK
 
 on:
+  push:
+    branches:
+      - feat/agent-referrals
+    paths:
+      - .github/workflows/relabel-game-apk.yml
   workflow_dispatch:
 
 permissions:
