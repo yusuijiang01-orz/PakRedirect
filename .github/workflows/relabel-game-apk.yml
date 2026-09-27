@@ -188,6 +188,7 @@ jobs:
             --ks-key-alias "$RYLUX_KEY_ALIAS" \
             --ks-pass env:RYLUX_KEYSTORE_PASSWORD \
             --key-pass env:RYLUX_KEY_PASSWORD \
+            --v4-signing-enabled true \
             --out 'TamGioiPhanTranhMobile-587-zh-signed.apk' \
             "$RUNNER_TEMP/game-aligned.apk"
 
@@ -208,7 +209,8 @@ jobs:
           expected_signer = '015c81c0cbc09d5dc1b825a673ef7676af4c51526870f2107d321c726c4d7aa7'
           expected_label = '封神榜手游'
 
-          certs = subprocess.run([f'{tools}/apksigner', 'verify', '--verbose', '--print-certs', apk],
+          certs = subprocess.run([f'{tools}/apksigner', 'verify', '--verbose', '--print-certs',
+                                  '--v4-signature-file', f'{apk}.idsig', apk],
                                  check=True, capture_output=True, text=True).stdout
           signers = re.findall(r'^Signer #\d+ certificate SHA-256 digest: ([0-9a-fA-F]{64})$', certs, re.M)
           if len(signers) != 1 or signers[0].lower() != expected_signer:
@@ -234,5 +236,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: TamGioiPhanTranhMobile-587-zh-signed
-          path: TamGioiPhanTranhMobile-587-zh-signed.apk
+          path: |
+            TamGioiPhanTranhMobile-587-zh-signed.apk
+            TamGioiPhanTranhMobile-587-zh-signed.apk.idsig
           if-no-files-found: error
