@@ -1,0 +1,233 @@
+name: Relabel and sign game APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  relabel:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check signing secrets
+        shell: bash
+        env:
+          RYLUX_KEYSTORE_B64: ${{ secrets.RYLUX_KEYSTORE_B64 }}
+          RYLUX_KEYSTORE_PASSWORD: ${{ secrets.RYLUX_KEYSTORE_PASSWORD }}
+          RYLUX_KEY_ALIAS: ${{ secrets.RYLUX_KEY_ALIAS }}
+          RYLUX_KEY_PASSWORD: ${{ secrets.RYLUX_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$RYLUX_KEYSTORE_B64" || -z "$RYLUX_KEYSTORE_PASSWORD" || -z "$RYLUX_KEY_ALIAS" || -z "$RYLUX_KEY_PASSWORD" ]]; then
+            echo 'All four RYLUX signing secrets are required.' >&2
+            exit 1
+          fi
+
+      - name: Check out selected branch and LFS APK
+        uses: actions/checkout@v5
+        with:
+          lfs: true
+          persist-credentials: false
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android build-tools 35.0.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'build-tools;35.0.0' >/dev/null
+
+      - name: Download verified Apktool 3.0.3
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --silent --show-error \
+            'https://github.com/iBotPeaches/Apktool/releases/download/v3.0.3/apktool_3.0.3.jar' \
+            --output "$RUNNER_TEMP/apktool_3.0.3.jar"
+          echo 'dbf930b076c6b9be08d57c449cacefc3bdd6b71ebd59b3066fc0e1f5b14f9423  '"$RUNNER_TEMP/apktool_3.0.3.jar" | sha256sum --check --status
+
+      - name: Verify original APK and record its identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE='apk/TamGioiPhanTranhMobile-587.apk'
+          test -s "$SOURCE"
+          if head -c 80 "$SOURCE" | grep -aq 'version https://git-lfs.github.com/spec/v1'; then
+            echo 'The game APK is still an LFS pointer.' >&2
+            exit 1
+          fi
+          sha256sum "$SOURCE" > "$RUNNER_TEMP/source-apk.sha256"
+          python3 - <<'PY'
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          source = 'apk/TamGioiPhanTranhMobile-587.apk'
+          tools = Path(os.environ['ANDROID_HOME']) / 'build-tools' / '35.0.0'
+          expected_package = 'com.tepaylink.tamgioiphantranhmobile'
+          expected_signer = '015c81c0cbc09d5dc1b825a673ef7676af4c51526870f2107d321c726c4d7aa7'
+
+          certs = subprocess.run([f'{tools}/apksigner', 'verify', '--print-certs', source],
+                                 check=True, capture_output=True, text=True).stdout
+          signers = re.findall(r'^Signer #\d+ certificate SHA-256 digest: ([0-9a-fA-F]{64})$', certs, re.M)
+          if len(signers) != 1 or signers[0].lower() != expected_signer:
+              raise SystemExit('Original APK signing certificate does not match the expected certificate.')
+
+          badging = subprocess.run([f'{tools}/aapt', 'dump', 'badging', source],
+                                   check=True, capture_output=True, text=True).stdout
+          package = re.search(r"^package: name='([^']+)' versionCode='([^']+)' versionName='([^']*)'", badging, re.M)
+          if not package or package.group(1) != expected_package:
+              raise SystemExit('Original APK package does not match the expected package.')
+          with open(Path(os.environ['RUNNER_TEMP']) / 'source-package-version.txt', 'w', encoding='utf-8') as output:
+              output.write('\n'.join(package.groups()))
+          PY
+
+      - name: Change only app and launcher label resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE='apk/TamGioiPhanTranhMobile-587.apk'
+          java -jar "$RUNNER_TEMP/apktool_3.0.3.jar" decode --no-src --output "$RUNNER_TEMP/game-decoded" "$SOURCE"
+          DECODED="$RUNNER_TEMP/game-decoded" python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          root_dir = Path(os.environ['DECODED'])
+          manifest_path = root_dir / 'AndroidManifest.xml'
+          android = '{http://schemas.android.com/apk/res/android}'
+          ET.register_namespace('android', 'http://schemas.android.com/apk/res/android')
+          tree = ET.parse(manifest_path)
+          manifest = tree.getroot()
+          application = manifest.find('application')
+          if application is None:
+              raise SystemExit('Decoded APK has no application element.')
+
+          labels = [application]
+          for component in list(application.findall('activity')) + list(application.findall('activity-alias')):
+              for intent in component.findall('intent-filter'):
+                  actions = {item.get(android + 'name') for item in intent.findall('action')}
+                  categories = {item.get(android + 'name') for item in intent.findall('category')}
+                  if 'android.intent.action.MAIN' in actions and categories.intersection({
+                      'android.intent.category.LAUNCHER', 'android.intent.category.LEANBACK_LAUNCHER'
+                  }):
+                      labels.append(component)
+                      break
+
+          if len(labels) == 1:
+              raise SystemExit('No launcher activity or alias was found.')
+
+          string_names = set()
+          manifest_changed = False
+          for element in labels:
+              value = element.get(android + 'label')
+              if value is None:
+                  continue  # An unlabeled launcher inherits the application label.
+              if value.startswith('@string/'):
+                  string_names.add(value.removeprefix('@string/'))
+              elif value.startswith('@') or value.startswith('?'):
+                  raise SystemExit(f'Unsupported label reference: {value}')
+              else:
+                  element.set(android + 'label', '封神榜手游')
+                  manifest_changed = True
+
+          if application.get(android + 'label') is None:
+              application.set(android + 'label', '封神榜手游')
+              manifest_changed = True
+
+          found = set()
+          for path in sorted((root_dir / 'res').glob('values*/*.xml')):
+              resource_tree = ET.parse(path)
+              resources = resource_tree.getroot()
+              changed = False
+              for item in resources.findall('string'):
+                  name = item.get('name')
+                  if name in string_names:
+                      item[:] = []
+                      item.text = '封神榜手游'
+                      found.add(name)
+                      changed = True
+              if changed:
+                  resource_tree.write(path, encoding='utf-8', xml_declaration=True)
+
+          if found != string_names:
+              raise SystemExit('A referenced label string is missing from decoded resources.')
+          if manifest_changed:
+              tree.write(manifest_path, encoding='utf-8', xml_declaration=True)
+          PY
+          java -jar "$RUNNER_TEMP/apktool_3.0.3.jar" build "$RUNNER_TEMP/game-decoded" --output "$RUNNER_TEMP/game-unsigned.apk"
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -f -p 4 "$RUNNER_TEMP/game-unsigned.apk" "$RUNNER_TEMP/game-aligned.apk"
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -p 4 "$RUNNER_TEMP/game-aligned.apk"
+
+      - name: Sign relabeled APK
+        shell: bash
+        env:
+          RYLUX_KEYSTORE_B64: ${{ secrets.RYLUX_KEYSTORE_B64 }}
+          RYLUX_KEYSTORE_PASSWORD: ${{ secrets.RYLUX_KEYSTORE_PASSWORD }}
+          RYLUX_KEY_ALIAS: ${{ secrets.RYLUX_KEY_ALIAS }}
+          RYLUX_KEY_PASSWORD: ${{ secrets.RYLUX_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYSTORE="$RUNNER_TEMP/game-signing.jks"
+          trap 'rm -f "$KEYSTORE"' EXIT
+          printf '%s' "$RYLUX_KEYSTORE_B64" | base64 --decode > "$KEYSTORE"
+          chmod 600 "$KEYSTORE"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign \
+            --ks "$KEYSTORE" \
+            --ks-key-alias "$RYLUX_KEY_ALIAS" \
+            --ks-pass env:RYLUX_KEYSTORE_PASSWORD \
+            --key-pass env:RYLUX_KEY_PASSWORD \
+            --out 'TamGioiPhanTranhMobile-587-zh-signed.apk' \
+            "$RUNNER_TEMP/game-aligned.apk"
+
+      - name: Verify signed APK and unchanged source
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum --check --status "$RUNNER_TEMP/source-apk.sha256"
+          python3 - <<'PY'
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          apk = 'TamGioiPhanTranhMobile-587-zh-signed.apk'
+          tools = Path(os.environ['ANDROID_HOME']) / 'build-tools' / '35.0.0'
+          expected_package = 'com.tepaylink.tamgioiphantranhmobile'
+          expected_signer = '015c81c0cbc09d5dc1b825a673ef7676af4c51526870f2107d321c726c4d7aa7'
+          expected_label = '封神榜手游'
+
+          certs = subprocess.run([f'{tools}/apksigner', 'verify', '--verbose', '--print-certs', apk],
+                                 check=True, capture_output=True, text=True).stdout
+          signers = re.findall(r'^Signer #\d+ certificate SHA-256 digest: ([0-9a-fA-F]{64})$', certs, re.M)
+          if len(signers) != 1 or signers[0].lower() != expected_signer:
+              raise SystemExit('Signed APK certificate does not match the original signer.')
+
+          badging = subprocess.run([f'{tools}/aapt', 'dump', 'badging', apk],
+                                   check=True, capture_output=True, text=True).stdout
+          package = re.search(r"^package: name='([^']+)' versionCode='([^']+)' versionName='([^']*)'", badging, re.M)
+          with open(Path(os.environ['RUNNER_TEMP']) / 'source-package-version.txt', encoding='utf-8') as source:
+              original = source.read().splitlines()
+          if not package or package.group(1) != expected_package or list(package.groups()) != original:
+              raise SystemExit('Signed APK package or version differs from the original.')
+          app_label = re.search(r"^application-label:'([^']*)'$", badging, re.M)
+          launcher_labels = re.findall(r"^launchable-activity:.* label='([^']*)'", badging, re.M)
+          if not app_label or app_label.group(1) != expected_label or not launcher_labels or any(
+              label != expected_label for label in launcher_labels
+          ):
+              raise SystemExit('Signed APK application or launcher label is incorrect.')
+          print('Verified package, version, app label, launcher label, and signer certificate.')
+          PY
+
+      - name: Upload signed APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TamGioiPhanTranhMobile-587-zh-signed
+          path: TamGioiPhanTranhMobile-587-zh-signed.apk
+          if-no-files-found: error
