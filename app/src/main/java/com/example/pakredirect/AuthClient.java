@@ -20,12 +20,19 @@ public final class AuthClient {
     }
 
     public static AuthResult register(String username, String password, String deviceId, String inviteCode) {
+        return register(username, password, deviceId, inviteCode, "", "");
+    }
+
+    public static AuthResult register(String username, String password, String deviceId, String inviteCode,
+                                      String captchaId, String captchaCode) {
         try {
             JSONObject body = new JSONObject();
             body.put("username", username == null ? "" : username.trim());
             body.put("password", password == null ? "" : password);
             body.put("device_id", deviceId == null ? "" : deviceId);
             body.put("invite_code", inviteCode == null ? "" : inviteCode.trim());
+            body.put("captcha_id", captchaId == null ? "" : captchaId);
+            body.put("captcha_code", captchaCode == null ? "" : captchaCode.trim());
             HttpResult http = request("POST", "/auth/register", null, body);
             if (!http.requestOk) return AuthResult.networkError(http.message);
             if (!http.success) return AuthResult.failure(http.message);
@@ -48,6 +55,16 @@ public final class AuthClient {
         } catch (Throwable t) {
             return AuthResult.networkError("网络请求失败");
         }
+    }
+
+    public static CaptchaResult captcha() {
+        HttpResult http = request("GET", "/auth/captcha", null, null);
+        if (!http.requestOk) return CaptchaResult.networkError(http.message);
+        if (!http.success) return CaptchaResult.failure(http.message);
+        String challengeId = nullable(http.json.optString("challenge_id", null));
+        String imageBase64 = nullable(http.json.optString("image_base64", null));
+        if (challengeId == null || imageBase64 == null) return CaptchaResult.failure("验证码数据异常");
+        return new CaptchaResult(true, true, challengeId, imageBase64, "");
     }
 
     public static ProfileResult me(String token) {
@@ -260,6 +277,30 @@ public final class AuthClient {
 
         static AuthResult failure(String message) {
             return new AuthResult(true, false, null, "", false, "expired", null, "user", message);
+        }
+    }
+
+    public static final class CaptchaResult {
+        public final boolean requestOk;
+        public final boolean success;
+        public final String challengeId;
+        public final String imageBase64;
+        public final String message;
+
+        CaptchaResult(boolean requestOk, boolean success, String challengeId, String imageBase64, String message) {
+            this.requestOk = requestOk;
+            this.success = success;
+            this.challengeId = challengeId;
+            this.imageBase64 = imageBase64;
+            this.message = message;
+        }
+
+        static CaptchaResult networkError(String message) {
+            return new CaptchaResult(false, false, null, null, message);
+        }
+
+        static CaptchaResult failure(String message) {
+            return new CaptchaResult(true, false, null, null, message);
         }
     }
 

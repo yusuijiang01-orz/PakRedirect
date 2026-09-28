@@ -7,6 +7,8 @@ import android.content.ClipboardManager;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
@@ -15,12 +17,14 @@ import android.net.VpnService;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
+import android.text.InputFilter;
 import android.text.InputType;
 import android.text.method.PasswordTransformationMethod;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.util.Base64;
 import android.view.animation.AccelerateDecelerateInterpolator;
 import android.view.animation.DecelerateInterpolator;
 import android.widget.Button;
@@ -78,6 +82,11 @@ public class MainActivity extends Activity {
     private EditText passwordEdit;
     private EditText confirmPasswordEdit;
     private EditText inviteCodeEdit;
+    private EditText captchaEdit;
+    private ImageView captchaImage;
+    private Button refreshCaptchaButton;
+    private String captchaChallengeId = "";
+    private int captchaRequestVersion;
     private CheckBox rememberCheck;
     private Button authButton;
     private TextView switchModeLink;
@@ -158,6 +167,11 @@ public class MainActivity extends Activity {
         currentProfile = null;
         confirmPasswordEdit = null;
         inviteCodeEdit = null;
+        captchaEdit = null;
+        captchaImage = null;
+        refreshCaptchaButton = null;
+        captchaChallengeId = "";
+        captchaRequestVersion++;
         rememberCheck = null;
         clearTransientViews();
 
@@ -197,6 +211,37 @@ public class MainActivity extends Activity {
             inviteCodeEdit = input("邀请码（选填）", false);
             inviteCodeEdit.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
             card.addView(inviteCodeEdit, inputParams());
+
+            LinearLayout captchaRow = new LinearLayout(this);
+            captchaRow.setOrientation(LinearLayout.HORIZONTAL);
+            captchaRow.setGravity(Gravity.CENTER_VERTICAL);
+            LinearLayout.LayoutParams captchaRowLp = new LinearLayout.LayoutParams(-1, dp(58));
+            captchaRowLp.topMargin = dp(10);
+            card.addView(captchaRow, captchaRowLp);
+
+            captchaImage = new ImageView(this);
+            captchaImage.setScaleType(ImageView.ScaleType.FIT_XY);
+            captchaImage.setContentDescription("四位注册验证码，点击图片可刷新");
+            captchaImage.setBackgroundColor(Color.rgb(245, 247, 250));
+            captchaImage.setOnClickListener(v -> refreshCaptcha());
+            LinearLayout.LayoutParams captchaImageLp = new LinearLayout.LayoutParams(dp(168), dp(58));
+            captchaRow.addView(captchaImage, captchaImageLp);
+
+            refreshCaptchaButton = button("换一张", CARD_SOFT, TEXT);
+            refreshCaptchaButton.setTextSize(13);
+            LinearLayout.LayoutParams captchaRefreshLp = new LinearLayout.LayoutParams(0, dp(48), 1f);
+            captchaRefreshLp.leftMargin = dp(10);
+            captchaRow.addView(refreshCaptchaButton, captchaRefreshLp);
+            refreshCaptchaButton.setOnClickListener(v -> refreshCaptcha());
+
+            captchaEdit = input("输入图中 4 位验证码", false);
+            captchaEdit.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
+            captchaEdit.setFilters(new InputFilter[]{new InputFilter.LengthFilter(4)});
+            card.addView(captchaEdit, inputParams());
+            TextView captchaHint = text("验证码 3 分钟有效，点击图片可更换", 12, MUTED, false);
+            LinearLayout.LayoutParams captchaHintLp = new LinearLayout.LayoutParams(-1, -2);
+            captchaHintLp.topMargin = dp(2);
+            card.addView(captchaHint, captchaHintLp);
         } else {
             rememberCheck = new CheckBox(this);
             rememberCheck.setText("记住密码");
@@ -239,6 +284,44 @@ public class MainActivity extends Activity {
 
         root.addView(card, blockParams());
         setScrollableContent(root);
+        if (asRegister) refreshCaptcha();
+    }
+
+    private void refreshCaptcha() {
+        if (!registerMode || captchaImage == null) return;
+        captchaChallengeId = "";
+        final int requestVersion = ++captchaRequestVersion;
+        captchaImage.setEnabled(false);
+        captchaImage.setImageDrawable(null);
+        if (captchaEdit != null) captchaEdit.setText("");
+        if (authButton != null) authButton.setEnabled(false);
+        if (refreshCaptchaButton != null) refreshCaptchaButton.setEnabled(false);
+        new Thread(() -> {
+            AuthClient.CaptchaResult result = AuthClient.captcha();
+            runOnUiThread(() -> {
+                if (!registerMode || captchaImage == null || requestVersion != captchaRequestVersion) return;
+                if (!result.requestOk || !result.success) {
+                    captchaImage.setEnabled(true);
+                    if (refreshCaptchaButton != null) refreshCaptchaButton.setEnabled(true);
+                    toast("验证码加载失败：" + result.message);
+                    return;
+                }
+                try {
+                    byte[] bytes = Base64.decode(result.imageBase64, Base64.DEFAULT);
+                    Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                    if (bitmap == null) throw new IllegalArgumentException("验证码图片无效");
+                    captchaImage.setImageBitmap(bitmap);
+                    captchaImage.setEnabled(true);
+                    captchaChallengeId = result.challengeId;
+                    if (authButton != null) authButton.setEnabled(true);
+                    if (refreshCaptchaButton != null) refreshCaptchaButton.setEnabled(true);
+                } catch (Throwable error) {
+                    captchaImage.setEnabled(true);
+                    if (refreshCaptchaButton != null) refreshCaptchaButton.setEnabled(true);
+                    toast("验证码图片读取失败，请点击换一张");
+                }
+            });
+        }, "RYLUX-Captcha").start();
     }
 
     private void submitAuth() {
@@ -258,20 +341,28 @@ public class MainActivity extends Activity {
                 focusWithMessage(confirmPasswordEdit, "两次输入的密码不一致");
                 return;
             }
+            String captchaCode = captchaEdit == null ? "" : captchaEdit.getText().toString().trim();
+            if (captchaChallengeId.isEmpty() || captchaCode.length() != 4) {
+                focusWithMessage(captchaEdit, "请输入图中的 4 位验证码");
+                return;
+            }
         }
 
         setAuthBusy(true);
         final boolean registering = registerMode;
         final String inviteCode = inviteCodeEdit == null ? "" : inviteCodeEdit.getText().toString().trim();
+        final String captchaId = registering ? captchaChallengeId : "";
+        final String captchaCode = registering && captchaEdit != null ? captchaEdit.getText().toString().trim() : "";
         final boolean rememberPassword = !registering && rememberCheck != null && rememberCheck.isChecked();
         new Thread(() -> {
             AuthClient.AuthResult result = registering
-                    ? AuthClient.register(username, password, deviceId(), inviteCode)
+                    ? AuthClient.register(username, password, deviceId(), inviteCode, captchaId, captchaCode)
                     : AuthClient.login(username, password, deviceId());
             runOnUiThread(() -> {
                 setAuthBusy(false);
                 if (!result.requestOk || !result.success) {
                     toast(result.message);
+                    if (registering) refreshCaptcha();
                     return;
                 }
                 currentToken = result.token;
@@ -1241,6 +1332,9 @@ public class MainActivity extends Activity {
         if (passwordEdit != null) passwordEdit.setEnabled(!busy);
         if (confirmPasswordEdit != null) confirmPasswordEdit.setEnabled(!busy);
         if (inviteCodeEdit != null) inviteCodeEdit.setEnabled(!busy);
+        if (captchaEdit != null) captchaEdit.setEnabled(!busy);
+        if (refreshCaptchaButton != null) refreshCaptchaButton.setEnabled(!busy);
+        if (authButton != null) authButton.setEnabled(!busy && (!registerMode || !captchaChallengeId.isEmpty()));
         if (rememberCheck != null) rememberCheck.setEnabled(!busy);
         if (authProgress != null) authProgress.setVisibility(busy ? View.VISIBLE : View.GONE);
     }

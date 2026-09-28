@@ -26,6 +26,7 @@ RYLUX V1 后端继续运行在现有 `verify.lovenom.eu.org`，使用 FastAPI + 
 ## 用户接口
 
 ```text
+GET  /api/v1/auth/captcha
 POST /api/v1/auth/register
 POST /api/v1/auth/login
 POST /api/v1/auth/logout
@@ -36,7 +37,7 @@ GET  /api/v1/modules
 POST /api/v1/modules/sg_localization/authorize
 ```
 
-注册在满足设备/IP 领取规则时赠送 24 小时体验；不满足时仍可注册，但体验立即到期。登录会返回 Bearer Token；服务端数据库只保存 Token 的 SHA-256 摘要。
+注册前先请求 `GET /api/v1/auth/captcha`，返回 3 分钟有效的一次性 PNG 验证码挑战。注册请求必须提交 `captcha_id` 与 `captcha_code`；验证码最多尝试 5 次，且绑定签发时的 IP。设备 ID 有值时，同一设备仅可领取一次试用；同一 IP 在滚动 48 小时内最多领取 3 次。设备 ID 为空时按 IP 额度判定；若设备 ID 与 IP 均不可用则不发试用。未获试用的账号仍可注册。登录会返回 Bearer Token；服务端数据库只保存 Token 的 SHA-256 摘要。旧版客户端未提交验证码字段时无法注册，需要更新客户端。
 
 首个模块的用户可见名称为“封神榜汉化”；内部模块代码仍保持 `sg_localization`，避免破坏已有客户端接口。
 
