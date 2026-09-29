@@ -156,12 +156,6 @@ public final class RyluxHomeNavigationPolish {
         TextView accountTitle = label(activity, "账号中心", widthDp <= 360 ? 16 : 17, TEXT, true);
         accountTitle.setSingleLine(true);
         accountText.addView(accountTitle, new LinearLayout.LayoutParams(-1, -2));
-
-        TextView accountHint = label(activity, "会员状态 · 兑换码 · 退出登录", widthDp <= 360 ? 12 : 13, MUTED, false);
-        accountHint.setMaxLines(2);
-        LinearLayout.LayoutParams hintLp = new LinearLayout.LayoutParams(-1, -2);
-        hintLp.topMargin = dp(activity, 4);
-        accountText.addView(accountHint, hintLp);
         identityRow.addView(accountText, new LinearLayout.LayoutParams(0, -2, 1f));
 
         if (!narrow) {
@@ -174,6 +168,14 @@ public final class RyluxHomeNavigationPolish {
         }
 
         accountRegion.addView(identityRow, new LinearLayout.LayoutParams(-1, -2));
+
+        // Give the description the full card width and its own natural-height
+        // row so it does not compete with the avatar and button for space.
+        TextView accountHint = label(activity, "会员状态 · 兑换码 · 退出登录", widthDp <= 360 ? 12 : 13, MUTED, false);
+        accountHint.setIncludeFontPadding(true);
+        LinearLayout.LayoutParams hintLp = new LinearLayout.LayoutParams(-1, -2);
+        hintLp.topMargin = dp(activity, 6);
+        accountRegion.addView(accountHint, hintLp);
 
         if (narrow) {
             Button accountButton = smallButton(activity, "查看账号");
