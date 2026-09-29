@@ -110,8 +110,6 @@ public final class RyluxHomeNavigationPolish {
         Configuration c = activity.getResources().getConfiguration();
         int widthDp = c.screenWidthDp;
         float scale = homeScale(activity);
-        // Preserve the reference phone's single-row account header on compact
-        // high-density screens; the account row uses readable fixed dp sizes.
         boolean narrow = widthDp < 280;
 
         root.setPadding(
@@ -121,24 +119,22 @@ public final class RyluxHomeNavigationPolish {
                 dp(activity, 30 * scale)
         );
 
-        TextView title = label(activity, "RYLUX 控制台", (widthDp <= 360 ? 20 : 23) * scale, TEXT, true);
+        TextView title = label(activity, "RYLUX 控制台", widthDp <= 360 ? 20 : 23, TEXT, true);
         root.addView(title, new LinearLayout.LayoutParams(-1, -2));
 
-        TextView subtitle = label(activity, "选择下方功能继续", 13 * scale, MUTED, false);
+        TextView subtitle = label(activity, "选择下方功能继续", 13, MUTED, false);
         LinearLayout.LayoutParams subtitleLp = new LinearLayout.LayoutParams(-1, -2);
-        subtitleLp.topMargin = dp(activity, 3 * scale);
-        subtitleLp.bottomMargin = dp(activity, 10 * scale);
+        subtitleLp.topMargin = dp(activity, 4);
+        subtitleLp.bottomMargin = dp(activity, 14);
         root.addView(subtitle, subtitleLp);
 
-        // Account header deliberately has no card/background. Keeping it visually
-        // open prevents the avatar/status/button from being squeezed inside a
-        // rounded rectangle on narrow phones and emulator windows.
         LinearLayout accountRegion = new LinearLayout(activity);
         accountRegion.setTag(ACCOUNT_REGION_TAG);
         accountRegion.setOrientation(LinearLayout.VERTICAL);
         accountRegion.setGravity(Gravity.CENTER_VERTICAL);
-        accountRegion.setPadding(0, dp(activity, 2 * scale), 0, dp(activity, 4 * scale));
-        accountRegion.setBackgroundColor(Color.TRANSPARENT);
+        accountRegion.setPadding(dp(activity, 12), dp(activity, 12), dp(activity, 12), dp(activity, 12));
+        accountRegion.setBackground(round(activity, SURFACE_2, 16, BORDER, 1));
+        accountRegion.setMinimumHeight(dp(activity, widthDp <= 360 ? 88 : 96));
         accountRegion.setClickable(true);
         accountRegion.setFocusable(true);
         accountRegion.setOnClickListener(v -> avatar.performClick());
@@ -147,6 +143,7 @@ public final class RyluxHomeNavigationPolish {
         identityRow.setOrientation(LinearLayout.HORIZONTAL);
         identityRow.setGravity(Gravity.CENTER_VERTICAL);
         identityRow.setBaselineAligned(false);
+        identityRow.setMinimumHeight(dp(activity, widthDp <= 360 ? 64 : 72));
 
         // screenWidthDp already accounts for display density. Scaling these
         // dimensions again made the account entry tiny on 480dpi devices.
@@ -190,7 +187,7 @@ public final class RyluxHomeNavigationPolish {
         }
 
         LinearLayout.LayoutParams accountLp = new LinearLayout.LayoutParams(-1, -2);
-        accountLp.bottomMargin = dp(activity, 16 * scale);
+        accountLp.bottomMargin = dp(activity, 18);
         root.addView(accountRegion, accountLp);
 
         TextView gameSection = label(activity, "游戏服务", 16 * scale, TEXT, true);
