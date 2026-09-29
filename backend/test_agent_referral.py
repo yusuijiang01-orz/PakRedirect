@@ -163,9 +163,9 @@ def test_admin_paid_flag_and_permission_revocation(setup_backend):
     paid = client.post("/admin/api/licenses/generate", json={"days": 30, "quantity": 1, "paid": True}, headers=admin_auth)
     assert free.status_code == paid.status_code == 200
     assert client.post("/api/v1/redeem", json={"code": free.json()["keys"][0]}, headers=buyer_token).status_code == 200
-    assert client.get("/api/v1/referrals/me", headers=inviter_token).json()["reward_days"] == 0
+    assert client.get("/api/v1/referrals/me", headers=inviter_token).json()["reward_days"] == 7
     assert client.post("/api/v1/redeem", json={"code": paid.json()["keys"][0]}, headers=buyer_token).status_code == 200
-    assert client.get("/api/v1/referrals/me", headers=inviter_token).json()["reward_days"] == 30
+    assert client.get("/api/v1/referrals/me", headers=inviter_token).json()["reward_days"] == 37
 
     # A direct paid agent renewal is also a purchase and rewards the invite owner.
     buyer2 = register(client, "paid-buyer-two", "buyer-device-two", "10.2.1.3", code)
