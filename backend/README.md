@@ -114,6 +114,16 @@ PUT  /admin/api/users/{id}/agent          管理员分配用户归属
 
 ## 已有 VPS 升级
 
+### 仅部署邀请名单接口变更
+
+账号中心改版的 APK 会读取 `GET /api/v1/referrals/me` 返回的 `invited_users`。如果 VPS 尚未包含该字段，可在 VPS 上通过 SSH 终端粘贴下面一条命令部署。命令从本功能分支获取脚本，脚本则从固定的完整 Git commit SHA 获取后端源码。它会先检查 Python 语法，再备份 VPS 当前的 `agent_referral.py`，原子替换文件、重启 API 并检查本机健康接口；重启或健康检查失败时会恢复备份并再次重启。
+
+```bash
+curl -fsSLo /tmp/deploy-referral-list.sh https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/rylux-account-center-redesign/tools/deploy-referral-list.sh && sudo bash /tmp/deploy-referral-list.sh b66cc381251d3e4f6b65f313298e74a5fa2656c8
+```
+
+备份保存在 `/var/backups/pakredirect-license/referral-list/`。该步骤只替换 `/opt/pakredirect-license/agent_referral.py` 并重启 `pakredirect-license.service`；不会迁移/修改数据库、配置、Nginx 或 Python 依赖。部署成功后再构建并发布对应 APK。若 VPS 无法从 GitHub 拉取仓库提交，需要先解决该 VPS 的 GitHub 网络访问问题。
+
 数据库文件：
 
 ```text
