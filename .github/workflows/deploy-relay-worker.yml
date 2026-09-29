@@ -116,7 +116,7 @@ jobs:
                           response.extend(chunk)
               status_line = bytes(response).split(b"\r\n", 1)[0].decode("ascii", "replace")
               if not status_line.startswith("HTTP/1.1 101 "):
-                  body = bytes(response).partition(b"\\r\\n\\r\\n")[2].decode("utf-8", "replace").strip()
+                  body = bytes(response).partition(b"\r\n\r\n")[2].decode("utf-8", "replace").strip()
                   print(f"Expected WebSocket 101 for {path}, got {status_line or 'no response'}; body={body}")
                   raise SystemExit(1)
               print(f"Approved relay route {path} accepted WebSocket handshake (101).")
