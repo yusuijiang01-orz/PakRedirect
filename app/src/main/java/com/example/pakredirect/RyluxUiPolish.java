@@ -353,7 +353,18 @@ public final class RyluxUiPolish {
         TextView redeemTitle = asText(children.get(5));
         EditText code = asEdit(children.get(6));
         Button redeem = asButton(children.get(7));
-        Button logout = asButton(children.get(8));
+        Button logout = null;
+        for (int i = 8; i < children.size(); i++) {
+            View child = children.get(i);
+            if (child instanceof Button && "退出登录".equals(value((Button) child))) {
+                logout = (Button) child;
+                break;
+            }
+        }
+        if (logout == null) {
+            styleFallbackPanel(activity, panel);
+            return;
+        }
 
         panel.removeAllViews();
 
@@ -440,12 +451,18 @@ public final class RyluxUiPolish {
         redeemLp.topMargin = dp(activity, 10);
         panel.addView(redeem, redeemLp);
 
-        styleDangerButton(activity, logout);
-        logout.setText("退出登录");
-        LinearLayout.LayoutParams logoutLp =
-                new LinearLayout.LayoutParams(-1, dp(activity, 46));
-        logoutLp.topMargin = dp(activity, 14);
-        panel.addView(logout, logoutLp);
+        for (int i = 8; i < children.size(); i++) {
+            View child = children.get(i);
+            if (child == logout) {
+                styleDangerButton(activity, logout);
+                LinearLayout.LayoutParams logoutLp =
+                        new LinearLayout.LayoutParams(-1, dp(activity, 46));
+                logoutLp.topMargin = dp(activity, 14);
+                panel.addView(logout, logoutLp);
+            } else {
+                panel.addView(child);
+            }
+        }
     }
 
     private static void rebuildGamePanel(Activity activity, LinearLayout panel) {
