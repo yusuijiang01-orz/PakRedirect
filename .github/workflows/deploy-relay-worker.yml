@@ -75,7 +75,7 @@ jobs:
           upstream_host = os.environ["RELAY_UPSTREAM_HOST"]
           token_bytes = os.environ["RELAY_TOKEN"].encode("ascii")
           hello = (
-              b"RYLUXHY2\\x01"
+              b"RYLUXHY2\x01"
               + len(token_bytes).to_bytes(2, "big")
               + token_bytes
               + bytes((103, 206, 217, 28))
@@ -87,7 +87,7 @@ jobs:
                   connection.settimeout(12)
                   connection.sendall(hello)
                   ack = connection.recv(6)
-          if ack != b"RYLOK\\x00":
+          if ack != b"RYLOK\x00":
               print(f"VPS relay rejected the direct TCP/TLS handshake: {ack!r}")
               raise SystemExit(1)
           print("GitHub runner completed direct VPS relay handshake.")
