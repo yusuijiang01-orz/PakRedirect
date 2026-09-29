@@ -46,6 +46,7 @@ jobs:
         shell: bash
         env:
           RELAY_TOKEN: ${{ secrets.RYLUX_RELAY_TOKEN }}
+          RELAY_UPSTREAM_HOST: ${{ secrets.RYLUX_RELAY_UPSTREAM_HOST }}
         run: |
           set -euo pipefail
           # Allow the newly uploaded Worker secret to propagate to edge locations.
@@ -69,6 +70,27 @@ jobs:
           import os
           import socket
           import ssl
+
+          # First prove the runner can reach the VPS relay directly, bypassing Cloudflare DNS.
+          upstream_host = os.environ["RELAY_UPSTREAM_HOST"]
+          token_bytes = os.environ["RELAY_TOKEN"].encode("ascii")
+          hello = (
+              b"RYLUXHY2\\x01"
+              + len(token_bytes).to_bytes(2, "big")
+              + token_bytes
+              + bytes((103, 206, 217, 28))
+              + (5622).to_bytes(2, "big")
+          )
+          context = ssl.create_default_context()
+          with socket.create_connection((upstream_host, 9443), timeout=10) as raw:
+              with context.wrap_socket(raw, server_hostname="verify.lovenom.eu.org") as connection:
+                  connection.settimeout(12)
+                  connection.sendall(hello)
+                  ack = connection.recv(6)
+          if ack != b"RYLOK\\x00":
+              print(f"VPS relay rejected the direct TCP/TLS handshake: {ack!r}")
+              raise SystemExit(1)
+          print("GitHub runner completed direct VPS relay handshake.")
 
           host = "relay.lovenom.eu.org"
           for path in ("/rylux-game/103.206.217.28/5622",):
