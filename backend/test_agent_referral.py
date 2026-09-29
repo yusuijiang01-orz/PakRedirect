@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -24,7 +25,24 @@ def setup_backend(monkeypatch, tmp_path):
 
 
 def register(client, name, device, ip, invite_code=""):
-    return client.post("/api/v1/auth/register", json={"username": name, "password": "password123", "device_id": device, "invite_code": invite_code}, headers={"x-real-ip": ip})
+    headers = {"x-real-ip": ip}
+    with patch("registration_guard_v1.secrets.choice", return_value="A"):
+        captcha = client.get("/api/v1/auth/captcha", headers=headers)
+    assert captcha.status_code == 200, captcha.text
+    response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": name,
+            "password": "password123",
+            "device_id": device,
+            "invite_code": invite_code,
+            "captcha_id": captcha.json()["challenge_id"],
+            "captcha_code": "AAAA",
+        },
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    return response
 
 
 def admin_headers(client):

@@ -84,5 +84,6 @@ jobs:
           tag_name: v${{ inputs.version_name }}
           name: RYLUX v${{ inputs.version_name }}
           generate_release_notes: true
+          overwrite_files: true
           files: |
             RYLUX-v${{ inputs.version_name }}.apk
