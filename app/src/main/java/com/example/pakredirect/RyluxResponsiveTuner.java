@@ -224,8 +224,11 @@ public final class RyluxResponsiveTuner {
         if (panel.getChildCount() > 4 && panel.getChildAt(4) instanceof Button) {
             setHeight(panel.getChildAt(4), dp(activity, 44));
         }
-        if (panel.getChildCount() > 5 && panel.getChildAt(5) instanceof Button) {
-            setHeight(panel.getChildAt(5), dp(activity, 42));
+        for (int i = 5; i < panel.getChildCount(); i++) {
+            View child = panel.getChildAt(i);
+            if (child instanceof Button) {
+                setHeight(child, dp(activity, 44));
+            }
         }
 
         shrinkText(panel, 0.92f);

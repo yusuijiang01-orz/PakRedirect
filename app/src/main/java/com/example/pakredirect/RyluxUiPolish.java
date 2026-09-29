@@ -197,7 +197,9 @@ public final class RyluxUiPolish {
 
         ImageView portrait = new ImageView(activity);
         portrait.setImageResource(R.drawable.default_avatar);
-        portrait.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        portrait.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        portrait.setPadding(dp(activity, 3 * scale), dp(activity, 3 * scale),
+                dp(activity, 3 * scale), dp(activity, 3 * scale));
         if (Build.VERSION.SDK_INT >= 21) {
             portrait.setOutlineProvider(new ViewOutlineProvider() {
                 @Override
@@ -382,7 +384,9 @@ public final class RyluxUiPolish {
 
         ImageView avatar = new ImageView(activity);
         avatar.setImageResource(R.drawable.default_avatar);
-        avatar.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        avatar.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        avatar.setPadding(dp(activity, 3), dp(activity, 3), dp(activity, 3), dp(activity, 3));
+        avatar.setBackground(oval(SURFACE, BORDER_SOFT, dp(activity, 1)));
         if (Build.VERSION.SDK_INT >= 21) {
             avatar.setOutlineProvider(new ViewOutlineProvider() {
                 @Override
@@ -459,6 +463,14 @@ public final class RyluxUiPolish {
                         new LinearLayout.LayoutParams(-1, dp(activity, 46));
                 logoutLp.topMargin = dp(activity, 14);
                 panel.addView(logout, logoutLp);
+            } else if (child instanceof Button
+                    && (value((Button) child).startsWith("设备管理")
+                    || value((Button) child).startsWith("邀请好友"))) {
+                styleOutlineButton(activity, (Button) child, false);
+                LinearLayout.LayoutParams entryLp =
+                        new LinearLayout.LayoutParams(-1, dp(activity, 48));
+                entryLp.topMargin = dp(activity, 9);
+                panel.addView(child, entryLp);
             } else {
                 panel.addView(child);
             }

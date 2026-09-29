@@ -302,9 +302,16 @@ def referral_me(authorization: str | None = Header(default=None)):
         db.commit()
         counts = db.execute("SELECT COUNT(*) AS total,COALESCE(SUM(valid),0) AS valid FROM referrals WHERE inviter_user_id=?",
                             (auth["user_id"],)).fetchone()
+        invited = db.execute(
+            "SELECT u.username,r.created_at,r.valid FROM referrals r "
+            "JOIN app_users u ON u.id=r.invited_user_id "
+            "WHERE r.inviter_user_id=? ORDER BY r.created_at DESC,r.invited_user_id DESC",
+            (auth["user_id"],)).fetchall()
         awarded = reward_days_used(db, auth["user_id"])
     return {"invite_code": code, "total_invited": counts["total"], "valid_invited": counts["valid"],
-            "reward_days": awarded, "reward_cap_days": MAX_REWARD_DAYS}
+            "reward_days": awarded, "reward_cap_days": MAX_REWARD_DAYS,
+            "invited_users": [{"username": row["username"], "created_at": row["created_at"],
+                               "valid": bool(row["valid"])} for row in invited]}
 
 
 @router.get("/admin/api/agents")

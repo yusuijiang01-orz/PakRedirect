@@ -563,23 +563,6 @@ public class MainActivity extends Activity {
         panel.addView(state);
         panel.addView(infoRow("VIP 到期时间", formatExpiry(profile.expiresAt)));
 
-        TextView deviceTitle = text("已绑定设备", 16, TEXT, true);
-        deviceTitle.setPadding(0, dp(22), 0, dp(5));
-        panel.addView(deviceTitle);
-        TextView deviceSummary = text("正在获取设备信息…", 13, MUTED, false);
-        panel.addView(deviceSummary);
-        LinearLayout deviceList = new LinearLayout(this);
-        deviceList.setOrientation(LinearLayout.VERTICAL);
-        LinearLayout.LayoutParams deviceListLp = new LinearLayout.LayoutParams(-1, -2);
-        deviceListLp.topMargin = dp(8);
-        panel.addView(deviceList, deviceListLp);
-        Button refreshDevices = button("刷新设备列表", CARD_SOFT, TEXT);
-        LinearLayout.LayoutParams refreshDevicesLp = new LinearLayout.LayoutParams(-1, dp(42));
-        refreshDevicesLp.topMargin = dp(8);
-        panel.addView(refreshDevices, refreshDevicesLp);
-        refreshDevices.setOnClickListener(v -> loadUserDevices(
-                overlay, deviceSummary, deviceList, refreshDevices));
-
         Button refresh = button("刷新会员状态", CARD_SOFT, TEXT);
         refresh.setOnClickListener(v -> refreshMembershipFromPanel(refresh));
         LinearLayout.LayoutParams refreshLp = new LinearLayout.LayoutParams(-1, dp(46));
@@ -598,27 +581,17 @@ public class MainActivity extends Activity {
         redeemLp.topMargin = dp(10);
         panel.addView(redeem, redeemLp);
 
-        TextView referralTitle = text("邀请好友 · 赠送 VIP", 16, TEXT, true);
-        referralTitle.setPadding(0, dp(22), 0, dp(8));
-        panel.addView(referralTitle);
-        TextView referralRule = text("每 2 位有效新用户注册赠 1 天 VIP；好友购买 VIP 后，你也会获得相同天数，累计最多 365 天。", 13, MUTED, false);
-        referralRule.setLineSpacing(dp(2), 1f);
-        panel.addView(referralRule);
-        TextView referralCode = text("正在获取邀请码…", 16, TEXT, true);
-        referralCode.setTextIsSelectable(true);
-        panel.addView(referralCode);
-        TextView referralStats = text("", 13, MUTED, false);
-        referralStats.setPadding(0, dp(6), 0, dp(8));
-        panel.addView(referralStats);
-        Button copyInvite = button("复制邀请码", CARD_SOFT, TEXT);
-        copyInvite.setEnabled(false);
-        panel.addView(copyInvite, new LinearLayout.LayoutParams(-1, dp(46)));
-        Button refreshInvites = button("刷新邀请记录", CARD_SOFT, TEXT);
-        LinearLayout.LayoutParams inviteRefreshLp = new LinearLayout.LayoutParams(-1, dp(46));
-        inviteRefreshLp.topMargin = dp(8);
-        panel.addView(refreshInvites, inviteRefreshLp);
-        refreshInvites.setOnClickListener(v -> loadReferrals(overlay, referralCode, referralStats,
-                copyInvite, refreshInvites));
+        Button devices = button("设备管理（加载中）", CARD_SOFT, TEXT);
+        LinearLayout.LayoutParams devicesLp = new LinearLayout.LayoutParams(-1, dp(48));
+        devicesLp.topMargin = dp(18);
+        panel.addView(devices, devicesLp);
+        devices.setOnClickListener(v -> showDevicePanel());
+
+        Button invites = button("邀请好友  ›", CARD_SOFT, TEXT);
+        LinearLayout.LayoutParams invitesLp = new LinearLayout.LayoutParams(-1, dp(48));
+        invitesLp.topMargin = dp(8);
+        panel.addView(invites, invitesLp);
+        invites.setOnClickListener(v -> showInvitePanel());
 
         Button logout = button("退出登录", Color.rgb(68, 35, 38), Color.rgb(255, 185, 185));
         logout.setOnClickListener(v -> {
@@ -639,8 +612,124 @@ public class MainActivity extends Activity {
         accountScroll.addView(panel, new ScrollView.LayoutParams(-1, -2));
         overlay.addView(accountScroll, panelLp);
         attachOverlay(overlay, panel, false);
-        loadUserDevices(overlay, deviceSummary, deviceList, refreshDevices);
-        loadReferrals(overlay, referralCode, referralStats, copyInvite, refreshInvites);
+        loadDeviceCount(overlay, devices);
+    }
+
+    private void loadDeviceCount(FrameLayout overlay, Button entry) {
+        final String token = currentToken;
+        if (token == null || token.trim().isEmpty()) return;
+        new Thread(() -> {
+            AuthClient.DeviceBindingsResult result = AuthClient.devices(token);
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed() || activeOverlay != overlay || !token.equals(currentToken)) return;
+                entry.setText(result.success
+                        ? "设备管理（" + result.deviceCount + "/" + result.deviceLimit + "）  ›"
+                        : "设备管理  ›");
+            });
+        }, "RYLUX-DeviceCount").start();
+    }
+
+    private void showDevicePanel() {
+        if (overlayHost == null) return;
+        closeActiveOverlayImmediate();
+        FrameLayout overlay = overlay();
+        LinearLayout panel = panel();
+        panel.setPadding(dp(20), dp(18), dp(20), dp(20));
+        addAccountSubpageHeader(panel, "设备管理");
+        TextView summary = text("正在获取设备信息…", 14, MUTED, false);
+        summary.setPadding(0, dp(18), 0, dp(8));
+        panel.addView(summary);
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        panel.addView(list, new LinearLayout.LayoutParams(-1, -2));
+        Button refresh = button("刷新设备列表", CARD_SOFT, TEXT);
+        LinearLayout.LayoutParams refreshLp = new LinearLayout.LayoutParams(-1, dp(44));
+        refreshLp.topMargin = dp(14);
+        panel.addView(refresh, refreshLp);
+        refresh.setOnClickListener(v -> loadUserDevices(overlay, summary, list, refresh));
+        attachAccountSubpage(overlay, panel);
+        loadUserDevices(overlay, summary, list, refresh);
+    }
+
+    private void showInvitePanel() {
+        if (overlayHost == null) return;
+        closeActiveOverlayImmediate();
+        FrameLayout overlay = overlay();
+        LinearLayout panel = panel();
+        panel.setPadding(dp(20), dp(18), dp(20), dp(20));
+        addAccountSubpageHeader(panel, "邀请好友");
+        TextView intro = text("邀请好友使用 RYLUX", 16, TEXT, true);
+        intro.setPadding(0, dp(18), 0, dp(10));
+        panel.addView(intro);
+        panel.addView(inviteRewardRow("邀请注册", "每 2 位有效新用户，送 1 天 VIP"));
+        LinearLayout.LayoutParams purchaseLp = new LinearLayout.LayoutParams(-1, -2);
+        purchaseLp.topMargin = dp(7);
+        panel.addView(inviteRewardRow("好友购买 VIP", "你也获得相同天数"), purchaseLp);
+        TextView cap = text("奖励最多累计 365 天", 12, MUTED, false);
+        cap.setPadding(0, dp(8), 0, dp(14));
+        panel.addView(cap);
+        TextView code = text("正在获取邀请码…", 20, TEXT, true);
+        code.setTextIsSelectable(true);
+        panel.addView(code);
+        Button copy = button("复制邀请码", PRIMARY, Color.WHITE);
+        copy.setEnabled(false);
+        LinearLayout.LayoutParams copyLp = new LinearLayout.LayoutParams(-1, dp(46));
+        copyLp.topMargin = dp(10);
+        panel.addView(copy, copyLp);
+        TextView stats = text("", 14, MUTED, false);
+        stats.setPadding(0, dp(18), 0, dp(12));
+        panel.addView(stats);
+        panel.addView(text("邀请记录", 16, TEXT, true));
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams listLp = new LinearLayout.LayoutParams(-1, -2);
+        listLp.topMargin = dp(8);
+        panel.addView(list, listLp);
+        Button refresh = button("刷新邀请记录", CARD_SOFT, TEXT);
+        LinearLayout.LayoutParams refreshLp = new LinearLayout.LayoutParams(-1, dp(44));
+        refreshLp.topMargin = dp(14);
+        panel.addView(refresh, refreshLp);
+        refresh.setOnClickListener(v -> loadReferrals(overlay, code, stats, list, copy, refresh));
+        attachAccountSubpage(overlay, panel);
+        loadReferrals(overlay, code, stats, list, copy, refresh);
+    }
+
+    private void addAccountSubpageHeader(LinearLayout panel, String title) {
+        LinearLayout head = new LinearLayout(this);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        TextView back = text("‹", 30, TEXT, false);
+        back.setGravity(Gravity.CENTER);
+        back.setOnClickListener(v -> showUserPanel(currentProfile));
+        head.addView(back, new LinearLayout.LayoutParams(dp(40), dp(44)));
+        TextView heading = text(title, 20, TEXT, true);
+        LinearLayout.LayoutParams headingLp = new LinearLayout.LayoutParams(-1, -2);
+        headingLp.leftMargin = dp(12);
+        head.addView(heading, headingLp);
+        panel.addView(head);
+    }
+
+    private LinearLayout inviteRewardRow(String title, String detail) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setPadding(dp(12), dp(10), dp(12), dp(10));
+        row.setBackground(round(CARD_SOFT, 12));
+        row.addView(text(title, 13, TEXT, true));
+        TextView description = text(detail, 12, MUTED, false);
+        description.setPadding(0, dp(3), 0, 0);
+        row.addView(description);
+        return row;
+    }
+
+    private void attachAccountSubpage(FrameLayout overlay, LinearLayout panel) {
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(panel, new ScrollView.LayoutParams(-1, -2));
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(-1, -1);
+        lp.leftMargin = dp(16);
+        lp.rightMargin = dp(16);
+        lp.topMargin = dp(72);
+        lp.bottomMargin = dp(20);
+        overlay.addView(scroll, lp);
+        attachOverlay(overlay, panel, false);
     }
 
     private void loadUserDevices(FrameLayout overlay, TextView summary, LinearLayout list, Button refresh) {
@@ -659,7 +748,7 @@ public class MainActivity extends Activity {
                     summary.setText("暂时无法获取设备信息：" + result.message);
                     return;
                 }
-                String text = "已绑定 " + result.deviceCount + "/" + result.deviceLimit + " 台设备。每 24 小时最多自助解绑 1 台。";
+                String text = "已绑定 " + result.deviceCount + "/" + result.deviceLimit + " 台设备。点击设备右侧的解绑按钮即可释放名额。每 24 小时最多自助解绑 1 台。";
                 if (!result.canSelfUnbind && result.nextSelfUnbindAt != null) {
                     text += "\n下次可解绑时间：" + formatExpiry(result.nextSelfUnbindAt);
                 }
@@ -683,7 +772,9 @@ public class MainActivity extends Activity {
                     details.setOrientation(LinearLayout.VERTICAL);
                     LinearLayout.LayoutParams detailsLp = new LinearLayout.LayoutParams(0, -2, 1f);
                     row.addView(details, detailsLp);
-                    String label = "设备 " + (i + 1) + " · " + deviceKindLabel(item.deviceKind);
+                    boolean thisDevice = !item.deviceId.isEmpty() && item.deviceId.equals(deviceId());
+                    String label = "设备 " + (i + 1) + " · " + deviceKindLabel(item.deviceKind)
+                            + (thisDevice ? "（当前设备）" : "");
                     details.addView(text(label, 13, TEXT, true));
                     String shownId = item.deviceId.isEmpty()
                             ? "历史记录：原始设备 ID 不可恢复"
@@ -757,7 +848,7 @@ public class MainActivity extends Activity {
     }
 
     private void loadReferrals(FrameLayout overlay, TextView code, TextView stats,
-                               Button copy, Button refresh) {
+                               LinearLayout list, Button copy, Button refresh) {
         final String token = currentToken;
         if (token == null || token.trim().isEmpty()) return;
         refresh.setEnabled(false);
@@ -768,15 +859,35 @@ public class MainActivity extends Activity {
                 if (isFinishing() || isDestroyed() || activeOverlay != overlay || !token.equals(currentToken)) return;
                 refresh.setEnabled(true);
                 refresh.setText("刷新邀请记录");
+                list.removeAllViews();
                 if (!result.success) {
                     code.setText("暂时无法获取邀请记录");
                     stats.setText(result.message + "，请稍后刷新");
                     copy.setEnabled(false);
+                    list.addView(text("邀请名单暂时无法显示", 13, MUTED, false));
                     return;
                 }
-                code.setText("我的邀请码：" + result.inviteCode);
-                stats.setText("已邀请 " + result.totalInvited + " 人 · 有效邀请 " + result.validInvited
-                        + " 人\n已获赠 " + result.rewardDays + " 天 VIP · 累计上限 " + result.rewardCapDays + " 天");
+                code.setText("邀请码  " + result.inviteCode);
+                stats.setText("已邀请 " + result.totalInvited + " 人 · 有效 " + result.validInvited
+                        + " 人\n已获得 " + result.rewardDays + " / " + result.rewardCapDays + " 天 VIP");
+                if (result.invitedUsers.isEmpty()) {
+                    list.addView(text("还没有邀请记录", 13, MUTED, false));
+                } else {
+                    for (AuthClient.InvitedUser invited : result.invitedUsers) {
+                        LinearLayout row = new LinearLayout(this);
+                        row.setOrientation(LinearLayout.VERTICAL);
+                        row.setPadding(dp(12), dp(10), dp(12), dp(10));
+                        row.setBackground(round(CARD_SOFT, 12));
+                        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(-1, -2);
+                        rowLp.topMargin = dp(6);
+                        list.addView(row, rowLp);
+                        row.addView(text(invited.username + (invited.valid ? " · 有效" : " · 不计入奖励"),
+                                14, TEXT, true));
+                        TextView joined = text("注册时间：" + formatExpiry(invited.createdAt), 12, MUTED, false);
+                        joined.setPadding(0, dp(3), 0, 0);
+                        row.addView(joined);
+                    }
+                }
                 copy.setEnabled(true);
                 copy.setOnClickListener(v -> {
                     ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);

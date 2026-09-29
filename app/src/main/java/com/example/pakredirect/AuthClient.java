@@ -97,9 +97,19 @@ public final class AuthClient {
         if (!http.requestOk || !http.success) return ReferralResult.failure(http.message);
         String code = nullable(http.json.optString("invite_code", null));
         if (code == null) return ReferralResult.failure("邀请码数据异常");
+        List<InvitedUser> invitedUsers = new ArrayList<>();
+        org.json.JSONArray rows = http.json.optJSONArray("invited_users");
+        if (rows != null) {
+            for (int i = 0; i < rows.length(); i++) {
+                JSONObject item = rows.optJSONObject(i);
+                if (item == null) continue;
+                invitedUsers.add(new InvitedUser(item.optString("username", ""),
+                        nullable(item.optString("created_at", null)), item.optBoolean("valid", false)));
+            }
+        }
         return new ReferralResult(true, code, http.json.optInt("total_invited", 0),
                 http.json.optInt("valid_invited", 0), http.json.optInt("reward_days", 0),
-                http.json.optInt("reward_cap_days", 365), "");
+                http.json.optInt("reward_cap_days", 365), invitedUsers, "");
     }
 
     public static DeviceBindingsResult devices(String token) {
@@ -392,21 +402,35 @@ public final class AuthClient {
         public final int validInvited;
         public final int rewardDays;
         public final int rewardCapDays;
+        public final List<InvitedUser> invitedUsers;
         public final String message;
 
         ReferralResult(boolean success, String inviteCode, int totalInvited, int validInvited,
-                       int rewardDays, int rewardCapDays, String message) {
+                       int rewardDays, int rewardCapDays, List<InvitedUser> invitedUsers, String message) {
             this.success = success;
             this.inviteCode = inviteCode;
             this.totalInvited = totalInvited;
             this.validInvited = validInvited;
             this.rewardDays = rewardDays;
             this.rewardCapDays = rewardCapDays;
+            this.invitedUsers = invitedUsers;
             this.message = message;
         }
 
         static ReferralResult failure(String message) {
-            return new ReferralResult(false, "", 0, 0, 0, 365, message);
+            return new ReferralResult(false, "", 0, 0, 0, 365, new ArrayList<>(), message);
+        }
+    }
+
+    public static final class InvitedUser {
+        public final String username;
+        public final String createdAt;
+        public final boolean valid;
+
+        InvitedUser(String username, String createdAt, boolean valid) {
+            this.username = username;
+            this.createdAt = createdAt;
+            this.valid = valid;
         }
     }
 
