@@ -104,9 +104,11 @@ async function handleGameRelay(request, env, target) {
       return jsonResponse("game relay upstream rejected target", 502);
     }
     initialUpstreamData = greeting;
-  } catch (_) {
+  } catch (error) {
     if (socket) try { await socket.close(); } catch (_) {}
-    return jsonResponse("target connection failed", 502);
+    const diagnostic = new URL(request.url).searchParams.get("diag") === "1";
+    const detail = String(error).replaceAll(upstreamHost, "[upstream]").slice(0, 160);
+    return jsonResponse(diagnostic ? "target connection failed: " + detail : "target connection failed", 502);
   }
 
   const pair = new WebSocketPair();
