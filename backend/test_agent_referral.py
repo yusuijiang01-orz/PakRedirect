@@ -89,16 +89,18 @@ def test_agent_scope_balance_and_paid_referrals(setup_backend):
             (invalid.json()["user"]["id"],),
         ).fetchone()
     assert referral_row is not None and referral_row["valid"] == 0
+    third = register(client, "invitee-three", "device-three", "10.0.0.6", code)
+    assert third.status_code == 200
     stats = client.get("/api/v1/referrals/me", headers=agent_token).json()
-    assert (stats["total_invited"], stats["valid_invited"], stats["reward_days"]) == (3, 2, 1)
+    assert (stats["total_invited"], stats["valid_invited"], stats["reward_days"]) == (4, 3, 21)
     owned = client.get("/agent/api/users", headers=agent_token).json()
-    assert owned["total"] == 3
+    assert owned["total"] == 4
 
     outsider = register(client, "outsider", "device-outside", "10.0.0.5")
     outsider_id = outsider.json()["user"]["id"]
     denied = client.post(f"/agent/api/users/{outsider_id}/extend", json={"days": 30}, headers=agent_token)
     assert denied.status_code == 404
-    assert client.get("/admin/api/users", headers=admin_auth).json()["total"] == 5
+    assert client.get("/admin/api/users", headers=admin_auth).json()["total"] == 6
 
     cards = client.post("/agent/api/licenses/generate", json={"days": 30, "quantity": 2, "paid": True}, headers=agent_token)
     assert cards.status_code == 200, cards.text
@@ -118,7 +120,7 @@ def test_agent_scope_balance_and_paid_referrals(setup_backend):
     buyer_token = bearer(first)
     redeemed = client.post("/api/v1/redeem", json={"code": cards.json()["keys"][0]}, headers=buyer_token)
     assert redeemed.status_code == 200, redeemed.text
-    assert client.get("/api/v1/referrals/me", headers=agent_token).json()["reward_days"] == 31
+    assert client.get("/api/v1/referrals/me", headers=agent_token).json()["reward_days"] == 51
     assert client.post("/api/v1/redeem", json={"code": cards.json()["keys"][0]}, headers=buyer_token).status_code == 409
 
     # An invalid registration cannot trigger the paid-card referral bonus.
@@ -126,7 +128,7 @@ def test_agent_scope_balance_and_paid_referrals(setup_backend):
     assert client.post("/api/v1/redeem", json={"code": cards.json()["keys"][1]}, headers=bad_token).status_code == 400
     assert client.post(f"/agent/api/licenses/{unused_card['id']}/toggle", json={"enabled": True}, headers=agent_token).status_code == 200
     assert client.post("/api/v1/redeem", json={"code": cards.json()["keys"][1]}, headers=bad_token).status_code == 200
-    assert client.get("/api/v1/referrals/me", headers=agent_token).json()["reward_days"] == 31
+    assert client.get("/api/v1/referrals/me", headers=agent_token).json()["reward_days"] == 51
 
 
 def test_admin_paid_flag_and_permission_revocation(setup_backend):

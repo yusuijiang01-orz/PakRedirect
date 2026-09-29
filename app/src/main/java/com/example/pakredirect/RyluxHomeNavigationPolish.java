@@ -111,7 +111,7 @@ public final class RyluxHomeNavigationPolish {
         int widthDp = c.screenWidthDp;
         float scale = homeScale(activity);
         // Preserve the reference phone's single-row account header on compact
-        // high-density screens; proportional scaling keeps its contents fitting.
+        // high-density screens; the account row uses readable fixed dp sizes.
         boolean narrow = widthDp < 280;
 
         root.setPadding(
@@ -148,27 +148,25 @@ public final class RyluxHomeNavigationPolish {
         identityRow.setGravity(Gravity.CENTER_VERTICAL);
         identityRow.setBaselineAligned(false);
 
-        int avatarSize = dp(activity, (widthDp <= 360 ? 60 : (narrow ? 66 : 72)) * scale);
+        // screenWidthDp already accounts for display density. Scaling these
+        // dimensions again made the account entry tiny on 480dpi devices.
+        int avatarSize = dp(activity, widthDp <= 360 ? 64 : 72);
         LinearLayout.LayoutParams avatarLp = new LinearLayout.LayoutParams(avatarSize, avatarSize);
-        avatarLp.rightMargin = dp(activity, (widthDp <= 360 ? 9 : 12) * scale);
+        avatarLp.rightMargin = dp(activity, widthDp <= 360 ? 10 : 12);
         identityRow.addView(avatar, avatarLp);
 
         LinearLayout accountText = new LinearLayout(activity);
         accountText.setOrientation(LinearLayout.VERTICAL);
         accountText.setGravity(Gravity.CENTER_VERTICAL);
 
-        TextView accountTitle = label(activity, "账号中心", (widthDp <= 360 ? 14.5f : 16.5f) * scale, TEXT, true);
+        TextView accountTitle = label(activity, "账号中心", widthDp <= 360 ? 16 : 17, TEXT, true);
         accountTitle.setSingleLine(true);
         accountText.addView(accountTitle, new LinearLayout.LayoutParams(-1, -2));
 
-        String hintText = widthDp <= 340
-                ? "会员状态 · 兑换码 · 退出"
-                : "会员状态 · 兑换码 · 退出登录";
-        TextView accountHint = label(activity, hintText, (widthDp <= 360 ? 10.5f : 12) * scale, MUTED, false);
-        accountHint.setSingleLine(true);
-        accountHint.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        TextView accountHint = label(activity, "会员状态 · 兑换码 · 退出登录", widthDp <= 360 ? 12 : 13, MUTED, false);
+        accountHint.setMaxLines(2);
         LinearLayout.LayoutParams hintLp = new LinearLayout.LayoutParams(-1, -2);
-        hintLp.topMargin = dp(activity, 4 * scale);
+        hintLp.topMargin = dp(activity, 4);
         accountText.addView(accountHint, hintLp);
         identityRow.addView(accountText, new LinearLayout.LayoutParams(0, -2, 1f));
 
@@ -176,12 +174,12 @@ public final class RyluxHomeNavigationPolish {
             Button accountButton = smallButton(activity, "查看");
             accountButton.setOnClickListener(v -> avatar.performClick());
             LinearLayout.LayoutParams accountButtonLp =
-                    new LinearLayout.LayoutParams(dp(activity, (widthDp >= 600 ? 78 : 68) * scale), dp(activity, 38 * scale));
-            accountButtonLp.leftMargin = dp(activity, 10 * scale);
+                    new LinearLayout.LayoutParams(dp(activity, (widthDp >= 600 ? 78 : 68)), dp(activity, 42));
+            accountButtonLp.leftMargin = dp(activity, 10);
             identityRow.addView(accountButton, accountButtonLp);
         }
 
-        accountRegion.addView(identityRow, new LinearLayout.LayoutParams(-1, avatarSize));
+        accountRegion.addView(identityRow, new LinearLayout.LayoutParams(-1, -2));
 
         if (narrow) {
             Button accountButton = smallButton(activity, "查看账号");
@@ -284,7 +282,7 @@ public final class RyluxHomeNavigationPolish {
     }
 
     private static Button smallButton(Activity activity, String text) {
-        float scale = homeScale(activity);
+        float scale = 1f;
         Button button = new Button(activity);
         button.setText(text);
         button.setAllCaps(false);

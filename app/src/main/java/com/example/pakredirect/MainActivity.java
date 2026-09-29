@@ -661,7 +661,7 @@ public class MainActivity extends Activity {
         TextView intro = text("邀请好友使用 RYLUX", 16, TEXT, true);
         intro.setPadding(0, dp(18), 0, dp(10));
         panel.addView(intro);
-        panel.addView(inviteRewardRow("邀请注册", "每 2 位有效新用户，送 1 天 VIP"));
+        panel.addView(inviteRewardRow("邀请注册", "每位有效新用户，送 7 天 VIP"));
         LinearLayout.LayoutParams purchaseLp = new LinearLayout.LayoutParams(-1, -2);
         purchaseLp.topMargin = dp(7);
         panel.addView(inviteRewardRow("好友购买 VIP", "你也获得相同天数"), purchaseLp);

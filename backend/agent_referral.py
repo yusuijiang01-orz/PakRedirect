@@ -207,10 +207,7 @@ def record_registration(db, user_id: int, code: str, trial_allowed: bool, device
     if inviter["role"] == "agent":
         db.execute("UPDATE app_users SET owner_agent_id=? WHERE id=?", (inviter["id"], user_id))
     if valid:
-        count = int(db.execute("SELECT COUNT(*) AS n FROM referrals WHERE inviter_user_id=? AND valid=1",
-                               (inviter["id"],)).fetchone()["n"])
-        if count % 2 == 0:
-            grant_reward(db, inviter["id"], 1, "signup", f"pair:{inviter['id']}:{count // 2}", now)
+        grant_reward(db, inviter["id"], 7, "signup", f"invite:{inviter['id']}:{user_id}", now)
 
 
 def reward_paid_purchase(db, buyer_id: int, days: int, reference: str, now) -> int:

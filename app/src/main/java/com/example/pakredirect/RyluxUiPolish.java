@@ -157,7 +157,10 @@ public final class RyluxUiPolish {
 
     private static void styleAvatar(Activity activity, FrameLayout shell) {
         if (!AVATAR_STYLED.add(shell)) return;
-        float scale = RyluxHomeNavigationPolish.homeScale(activity);
+        // This shell is resized by the home navigation row. Applying the
+        // screen-level compact scale again made the portrait appear clipped
+        // and undersized on high-density devices.
+        float scale = 1f;
 
         boolean admin = MainActivity.currentRole != null
                 && "admin".equalsIgnoreCase(MainActivity.currentRole.trim());
@@ -189,10 +192,10 @@ public final class RyluxUiPolish {
                 dp(activity, scale)
         ));
         FrameLayout.LayoutParams portraitFrameLp =
-                new FrameLayout.LayoutParams(dp(activity, 58 * scale), dp(activity, 58 * scale));
+                new FrameLayout.LayoutParams(dp(activity, 58), dp(activity, 58));
         portraitFrameLp.gravity = Gravity.BOTTOM | Gravity.START;
-        portraitFrameLp.leftMargin = dp(activity, scale);
-        portraitFrameLp.bottomMargin = dp(activity, scale);
+        portraitFrameLp.leftMargin = dp(activity, 1);
+        portraitFrameLp.bottomMargin = dp(activity, 1);
         shell.addView(portraitFrame, portraitFrameLp);
 
         ImageView portrait = new ImageView(activity);
