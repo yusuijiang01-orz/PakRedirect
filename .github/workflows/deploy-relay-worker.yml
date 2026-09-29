@@ -17,7 +17,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Deploy Worker and sync relay secret
+      - name: Verify relay deployment secrets are configured
+        shell: bash
+        env:
+          RYLUX_RELAY_TOKEN: ${{ secrets.RYLUX_RELAY_TOKEN }}
+          RYLUX_RELAY_UPSTREAM_HOST: ${{ secrets.RYLUX_RELAY_UPSTREAM_HOST }}
+        run: |
+          test -n "$RYLUX_RELAY_TOKEN" || { echo "RYLUX_RELAY_TOKEN is not configured"; exit 1; }
+          test -n "$RYLUX_RELAY_UPSTREAM_HOST" || { echo "RYLUX_RELAY_UPSTREAM_HOST is not configured"; exit 1; }
+
+      - name: Deploy Worker and sync relay secrets
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -28,8 +37,10 @@ jobs:
           preCommands: npx wrangler whoami
           postCommands: |
             printf '%s' "$RYLUX_RELAY_TOKEN" | npx wrangler secret put RYLUX_RELAY_TOKEN --name rylux-cdn
+            printf '%s' "$RYLUX_RELAY_UPSTREAM_HOST" | npx wrangler secret put RYLUX_RELAY_UPSTREAM_HOST --name rylux-cdn
         env:
           RYLUX_RELAY_TOKEN: ${{ secrets.RYLUX_RELAY_TOKEN }}
+          RYLUX_RELAY_UPSTREAM_HOST: ${{ secrets.RYLUX_RELAY_UPSTREAM_HOST }}
 
       - name: Verify relay routes and upstream TCP handshake
         shell: bash
