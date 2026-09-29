@@ -93,7 +93,7 @@ jobs:
           print("GitHub runner completed direct VPS relay handshake.")
 
           host = "relay.lovenom.eu.org"
-          for path in ("/rylux-game/103.206.217.28/5622",):
+          for path in ("/rylux-game/103.206.217.28/5622?diag=1",):
               request = (
                   f"GET {path} HTTP/1.1\r\n"
                   f"Host: {host}\r\n"
@@ -116,7 +116,8 @@ jobs:
                           response.extend(chunk)
               status_line = bytes(response).split(b"\r\n", 1)[0].decode("ascii", "replace")
               if not status_line.startswith("HTTP/1.1 101 "):
-                  print(f"Expected WebSocket 101 for {path}, got {status_line or 'no response'}")
+                  body = bytes(response).partition(b"\\r\\n\\r\\n")[2].decode("utf-8", "replace").strip()
+                  print(f"Expected WebSocket 101 for {path}, got {status_line or 'no response'}; body={body}")
                   raise SystemExit(1)
               print(f"Approved relay route {path} accepted WebSocket handshake (101).")
           PY
