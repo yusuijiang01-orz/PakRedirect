@@ -13,7 +13,7 @@ from admin_v2 import (
     require_csrf,
     require_ready,
 )
-from user_v1 import iso, open_db, parse_iso, utc_now
+from user_v1 import MAX_BOUND_DEVICES, iso, open_db, parse_iso, utc_now
 
 router = APIRouter()
 WEB_DIR = Path(__file__).with_name("admin_web")
@@ -134,6 +134,7 @@ def admin_user_unbind_device(user_id: int, request: Request):
             "UPDATE app_users SET last_device_hash='',updated_at=? WHERE id=?",
             (now_text, user_id),
         )
+        db.execute("DELETE FROM app_device_bindings WHERE user_id=?", (user_id,))
         db.commit()
 
     log_action(
@@ -167,12 +168,13 @@ def admin_user_sessions(user_id: int, request: Request, limit: int = 20):
             """,
             (user_id, limit),
         ).fetchall()
-
-    def device_hint(value: str | None) -> str:
-        value = (value or "").strip()
-        if not value:
-            return ""
-        return value[:8] + "…" + value[-8:]
+        bindings = {
+            row["device_hash"]: dict(row)
+            for row in db.execute(
+                "SELECT device_hash,device_id,device_kind FROM app_device_bindings WHERE user_id=?",
+                (user_id,),
+            ).fetchall()
+        }
 
     return {
         "user": {
@@ -180,7 +182,8 @@ def admin_user_sessions(user_id: int, request: Request, limit: int = 20):
             "username": user["username"],
             "last_login_at": user["last_login_at"],
             "last_login_ip": user["last_login_ip"] or "",
-            "device_hint": device_hint(user["last_device_hash"]),
+            "device_id": (bindings.get(user["last_device_hash"]) or {}).get("device_id", ""),
+            "device_kind": (bindings.get(user["last_device_hash"]) or {}).get("device_kind", "legacy"),
         },
         "items": [
             {
@@ -189,12 +192,105 @@ def admin_user_sessions(user_id: int, request: Request, limit: int = 20):
                 "last_seen_at": row["last_seen_at"],
                 "expires_at": row["expires_at"],
                 "ip_address": row["ip_address"] or "",
-                "device_hint": device_hint(row["device_hash"]),
+                "device_id": (bindings.get(row["device_hash"]) or {}).get("device_id", ""),
+                "device_kind": (bindings.get(row["device_hash"]) or {}).get("device_kind", "legacy"),
                 "revoked": bool(row["revoked"]),
             }
             for row in rows
         ],
     }
+
+
+@router.get("/admin/api/users/{user_id}/devices")
+def admin_user_devices(user_id: int, request: Request):
+    require_ready(request)
+    with open_db() as db:
+        user = db.execute(
+            "SELECT id,username FROM app_users WHERE id=?",
+            (user_id,),
+        ).fetchone()
+        if user is None:
+            raise HTTPException(status_code=404, detail="用户不存在")
+        rows = db.execute(
+            """
+            SELECT b.id,b.device_hash,b.device_id,b.device_kind,b.ip_address,
+                   b.bound_at,b.last_login_at,
+                   (SELECT COUNT(*) FROM app_sessions s
+                    WHERE s.user_id=b.user_id AND s.device_hash=b.device_hash
+                      AND s.revoked=0 AND s.expires_at>?) AS active_sessions
+            FROM app_device_bindings b
+            WHERE b.user_id=?
+            ORDER BY b.last_login_at DESC,b.id DESC
+            """,
+            (iso(utc_now()), user_id),
+        ).fetchall()
+    return {
+        "user": {"id": int(user["id"]), "username": user["username"]},
+        "device_limit": MAX_BOUND_DEVICES,
+        "device_count": len(rows),
+        "items": [
+            {
+                "id": int(row["id"]),
+                "device_id": row["device_id"] or "",
+                "device_kind": row["device_kind"],
+                "ip_address": row["ip_address"] or "",
+                "bound_at": row["bound_at"],
+                "last_login_at": row["last_login_at"],
+                "active_sessions": int(row["active_sessions"] or 0),
+            }
+            for row in rows
+        ],
+    }
+
+
+@router.post("/admin/api/users/{user_id}/devices/{binding_id}/unbind")
+def admin_user_unbind_one_device(
+    user_id: int,
+    binding_id: int,
+    request: Request,
+):
+    token = require_ready(request)
+    require_csrf(request, token)
+    now_text = iso(utc_now())
+    with open_db() as db:
+        db.execute("BEGIN IMMEDIATE")
+        user = db.execute(
+            "SELECT id,username,last_device_hash FROM app_users WHERE id=?",
+            (user_id,),
+        ).fetchone()
+        if user is None:
+            raise HTTPException(status_code=404, detail="用户不存在")
+        binding = db.execute(
+            "SELECT id,device_hash FROM app_device_bindings WHERE id=? AND user_id=?",
+            (binding_id, user_id),
+        ).fetchone()
+        if binding is None:
+            raise HTTPException(status_code=404, detail="设备绑定不存在")
+        revoked = db.execute(
+            """
+            UPDATE app_sessions SET revoked=1,last_seen_at=?
+            WHERE user_id=? AND device_hash=? AND revoked=0
+            """,
+            (now_text, user_id, binding["device_hash"]),
+        ).rowcount
+        db.execute("DELETE FROM app_device_bindings WHERE id=?", (binding_id,))
+        if user["last_device_hash"] == binding["device_hash"]:
+            replacement = db.execute(
+                "SELECT device_hash FROM app_device_bindings WHERE user_id=? ORDER BY last_login_at DESC,id DESC LIMIT 1",
+                (user_id,),
+            ).fetchone()
+            db.execute(
+                "UPDATE app_users SET last_device_hash=?,updated_at=? WHERE id=?",
+                (replacement["device_hash"] if replacement else "", now_text, user_id),
+            )
+        db.commit()
+    log_action(
+        "user_device_unbound",
+        f"user:{user_id}",
+        f"binding:{binding_id};revoked_sessions={revoked}",
+        request_ip(request),
+    )
+    return {"ok": True, "revoked_sessions": int(revoked)}
 
 
 @router.delete("/admin/api/users/{user_id}")

@@ -657,6 +657,7 @@ def agent_unbind_user(user_id: int, request: Request,
                              (now, user_id)).rowcount
         db.execute("UPDATE app_users SET last_device_hash='',updated_at=? WHERE id=? AND owner_agent_id=?",
                    (now, user_id, auth["user_id"]))
+        db.execute("DELETE FROM app_device_bindings WHERE user_id=?", (user_id,))
         record_agent_action(db, auth["user_id"], "user_device_unbound", f"user:{user_id}",
                             f"revoked_sessions={revoked}", request_ip(request))
         db.commit()

@@ -19,6 +19,7 @@ from user_v1 import (
     iso,
     open_db,
     password_hash,
+    record_device_login,
     username_key,
     utc_now,
     validate_username,
@@ -27,10 +28,11 @@ from agent_referral import record_registration
 
 router = APIRouter()
 
-# Device identity is the primary anti-abuse signal. IP is only an auxiliary
-# risk signal so shared Wi-Fi / carrier NAT does not block account creation.
+# Trial awards are capped independently by device and IP. Shared IPs can still
+# register accounts after their free-trial quota is reached.
 IP_TRIAL_WINDOW_HOURS = 48
 IP_TRIAL_MAX_AWARDS = 3
+DEVICE_TRIAL_MAX_AWARDS = 3
 CAPTCHA_TTL_SECONDS = 180
 CAPTCHA_MAX_ATTEMPTS = 5
 CAPTCHA_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -131,21 +133,20 @@ def init_registration_guard_v1() -> None:
 
 
 def _trial_allowed(db, device_hash: str, ip_hash: str, cutoff_text: str) -> bool:
-    # A known device can receive a trial only once. When the client cannot
-    # provide a device ID, the rolling IP quota is the fallback signal.
+    # Apply the same rolling 48-hour quota independently to each signal.
+    # A missing device ID falls back to the IP quota.
     if not device_hash and not ip_hash:
         return False
 
     if device_hash:
-        used_device = db.execute(
+        recent_device_awards = db.execute(
             """
-            SELECT 1 FROM trial_claims
-            WHERE device_hash=? AND awarded=1
-            LIMIT 1
+            SELECT COUNT(*) AS n FROM trial_claims
+            WHERE device_hash=? AND awarded=1 AND created_at>?
             """,
-            (device_hash,),
+            (device_hash, cutoff_text),
         ).fetchone()
-        if used_device is not None:
+        if recent_device_awards is not None and int(recent_device_awards["n"] or 0) >= DEVICE_TRIAL_MAX_AWARDS:
             return False
 
     # Shared IPs may have multiple legitimate devices, so cap only the number
@@ -374,6 +375,13 @@ def guarded_register(payload: GuardedRegisterPayload, request: Request):
             raise HTTPException(status_code=409, detail="用户名已存在")
 
         user_id = int(cur.lastrowid)
+        binding_hash = record_device_login(
+            db, user_id, payload.device_id, ip, iso(now)
+        )
+        db.execute(
+            "UPDATE app_users SET last_device_hash=? WHERE id=?",
+            (binding_hash, user_id),
+        )
         db.execute(
             """
             INSERT INTO trial_claims
@@ -403,7 +411,7 @@ def guarded_register(payload: GuardedRegisterPayload, request: Request):
 
         record_registration(db, user_id, payload.invite_code, trial_allowed, device_hash, ip_hash, now)
 
-        token, session_expires = create_session(db, user_id, ip, device_hash)
+        token, session_expires = create_session(db, user_id, ip, binding_hash)
         db.commit()
 
     return {

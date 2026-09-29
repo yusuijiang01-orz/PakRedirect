@@ -19,6 +19,7 @@ router = APIRouter()
 PASSWORD_ITERATIONS = 310_000
 SESSION_DAYS = 30
 TRIAL_HOURS = 24
+MAX_BOUND_DEVICES = 3
 VIP_PRESETS = (1, 7, 30, 90, 180, 365)
 TARGET_PACKAGE = "com.tepaylink.tamgioiphantranhmobile"
 RELAY_TOKEN = os.environ.get("RYLUX_RELAY_TOKEN", "").strip()
@@ -155,6 +156,66 @@ def digest_device(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def device_binding_key(value: str, user_id: int) -> str:
+    """Return a stable per-user key even for legacy clients with no device ID."""
+    digest = digest_device(value)
+    if digest:
+        return digest
+    return hashlib.sha256(f"missing-device:{int(user_id)}".encode("ascii")).hexdigest()
+
+
+def record_device_login(
+    db: sqlite3.Connection,
+    user_id: int,
+    device_id: str,
+    ip: str,
+    now_text: str,
+) -> str:
+    """Bind a device on first use, update its details, and enforce the 3-device cap."""
+    raw_id = (device_id or "").strip()
+    if not raw_id:
+        raise HTTPException(
+            status_code=400,
+            detail="无法识别设备 ID，请升级 RYLUX 或重试后再登录",
+        )
+    key = device_binding_key(raw_id, user_id)
+    device_kind = "random_fingerprint" if raw_id.startswith("rylux-install:") else "android_id"
+    existing = db.execute(
+        "SELECT id FROM app_device_bindings WHERE user_id=? AND device_hash=?",
+        (user_id, key),
+    ).fetchone()
+    if existing is None:
+        count = db.execute(
+            "SELECT COUNT(*) AS n FROM app_device_bindings WHERE user_id=?",
+            (user_id,),
+        ).fetchone()
+        if int(count["n"] or 0) >= MAX_BOUND_DEVICES:
+            raise HTTPException(
+                status_code=409,
+                detail="此账号已绑定 3 台设备，请先解绑一台设备后再登录",
+            )
+        db.execute(
+            """
+            INSERT INTO app_device_bindings
+                (user_id,device_hash,device_id,device_kind,ip_address,bound_at,last_login_at)
+            VALUES(?,?,?,?,?,?,?)
+            """,
+            (user_id, key, raw_id, device_kind, (ip or "")[:64], now_text, now_text),
+        )
+    else:
+        db.execute(
+            """
+            UPDATE app_device_bindings
+            SET device_id=CASE WHEN ?<>'' THEN ? ELSE device_id END,
+                device_kind=CASE WHEN ?<>'' THEN ? ELSE device_kind END,
+                ip_address=?,last_login_at=?
+            WHERE id=?
+            """,
+            (raw_id, raw_id, raw_id, device_kind, (ip or "")[:64], now_text, existing["id"]),
+        )
+    return key
+
+
 def digest_code(value: str) -> str:
     return hashlib.sha256(value.strip().upper().encode("utf-8")).hexdigest()
 
@@ -194,6 +255,19 @@ def init_user_v1() -> None:
                 device_hash TEXT NOT NULL DEFAULT '',
                 revoked INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY (user_id) REFERENCES app_users(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS app_device_bindings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                device_hash TEXT NOT NULL,
+                device_id TEXT NOT NULL DEFAULT '',
+                device_kind TEXT NOT NULL DEFAULT 'legacy',
+                ip_address TEXT NOT NULL DEFAULT '',
+                bound_at TEXT NOT NULL,
+                last_login_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES app_users(id) ON DELETE CASCADE,
+                UNIQUE(user_id,device_hash)
             );
 
             CREATE TABLE IF NOT EXISTS vip_events (
@@ -258,6 +332,8 @@ def init_user_v1() -> None:
         }
         if "role" not in user_columns:
             db.execute("ALTER TABLE app_users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
+        if "last_self_unbound_at" not in user_columns:
+            db.execute("ALTER TABLE app_users ADD COLUMN last_self_unbound_at TEXT")
         db.execute(
             "UPDATE app_users SET role='user' WHERE role IS NULL OR role NOT IN ('user','admin','agent')"
         )
@@ -284,6 +360,50 @@ def init_user_v1() -> None:
             "DELETE FROM app_sessions WHERE expires_at<=? OR revoked=1",
             (now,),
         )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_app_device_bindings_user ON app_device_bindings(user_id)"
+        )
+        # Migrate the current device and still-live session devices. Older
+        # versions kept only SHA-256 hashes, so their original Android IDs are
+        # intentionally left blank until the same device logs in again.
+        legacy_users = db.execute(
+            """
+            SELECT id,last_device_hash,last_login_ip,last_login_at,created_at
+            FROM app_users WHERE COALESCE(last_device_hash,'')<>''
+            """
+        ).fetchall()
+        for user in legacy_users:
+            db.execute(
+                """
+                INSERT OR IGNORE INTO app_device_bindings
+                    (user_id,device_hash,device_id,device_kind,ip_address,bound_at,last_login_at)
+                VALUES(?,?, '', 'legacy',?,?,?)
+                """,
+                (user["id"], user["last_device_hash"], user["last_login_ip"] or "",
+                 user["created_at"], user["last_login_at"] or user["created_at"]),
+            )
+        legacy_sessions = db.execute(
+            """
+            SELECT s.user_id,s.device_hash,MIN(s.created_at) AS bound_at,
+                   MAX(s.last_seen_at) AS last_login_at,
+                   (SELECT s2.ip_address FROM app_sessions s2
+                    WHERE s2.user_id=s.user_id AND s2.device_hash=s.device_hash
+                    ORDER BY s2.last_seen_at DESC LIMIT 1) AS ip_address
+            FROM app_sessions s
+            WHERE COALESCE(s.device_hash,'')<>''
+            GROUP BY s.user_id,s.device_hash
+            """
+        ).fetchall()
+        for session in legacy_sessions:
+            db.execute(
+                """
+                INSERT OR IGNORE INTO app_device_bindings
+                    (user_id,device_hash,device_id,device_kind,ip_address,bound_at,last_login_at)
+                VALUES(?,?, '', 'legacy',?,?,?)
+                """,
+                (session["user_id"], session["device_hash"], session["ip_address"] or "",
+                 session["bound_at"], session["last_login_at"]),
+            )
         db.commit()
 
 
@@ -432,6 +552,13 @@ def register(payload: RegisterPayload, request: Request):
             raise HTTPException(status_code=409, detail="用户名已存在")
 
         user_id = int(cur.lastrowid)
+        binding_hash = record_device_login(
+            db, user_id, payload.device_id, ip, iso(now)
+        )
+        db.execute(
+            "UPDATE app_users SET last_device_hash=? WHERE id=?",
+            (binding_hash, user_id),
+        )
         db.execute(
             """
             INSERT INTO vip_events
@@ -440,7 +567,7 @@ def register(payload: RegisterPayload, request: Request):
             """,
             (user_id, "trial", TRIAL_HOURS * 3600, "new-user", None, iso(trial_expires), iso(now)),
         )
-        token, session_expires = create_session(db, user_id, ip, device_hash)
+        token, session_expires = create_session(db, user_id, ip, binding_hash)
         db.commit()
 
     return {
@@ -467,19 +594,32 @@ def register(payload: RegisterPayload, request: Request):
 def login(payload: LoginPayload, request: Request):
     key = username_key(payload.username)
     ip = request_ip(request)
-    device_hash = digest_device(payload.device_id)
     now = iso(utc_now())
 
+    with open_db() as lookup_db:
+        account = lookup_db.execute(
+            "SELECT * FROM app_users WHERE username_key=? LIMIT 1",
+            (key,),
+        ).fetchone()
+    if account is None or not verify_password(account["password_hash"], payload.password):
+        raise HTTPException(status_code=401, detail="账号或密码错误")
+    if int(account["status"]) != 1:
+        raise HTTPException(status_code=403, detail="账号已停用")
+
     with open_db() as db:
+        db.execute("BEGIN IMMEDIATE")
         row = db.execute(
             "SELECT * FROM app_users WHERE username_key=? LIMIT 1",
             (key,),
         ).fetchone()
-        if row is None or not verify_password(row["password_hash"], payload.password):
+        if row is None or row["password_hash"] != account["password_hash"]:
             raise HTTPException(status_code=401, detail="账号或密码错误")
         if int(row["status"]) != 1:
             raise HTTPException(status_code=403, detail="账号已停用")
 
+        device_hash = record_device_login(
+            db, int(row["id"]), payload.device_id, ip, now
+        )
         db.execute(
             """
             UPDATE app_users
@@ -519,6 +659,121 @@ def me(authorization: str | None = Header(default=None)):
     with open_db() as db:
         row = db.execute("SELECT * FROM app_users WHERE id=?", (auth["user_id"],)).fetchone()
     return {"user": serialize_user(row)}
+
+
+@router.get("/api/v1/me/devices")
+def my_devices(authorization: str | None = Header(default=None)):
+    auth, _ = require_user(authorization)
+    now = utc_now()
+    with open_db() as db:
+        user = db.execute(
+            "SELECT last_self_unbound_at FROM app_users WHERE id=?",
+            (auth["user_id"],),
+        ).fetchone()
+        rows = db.execute(
+            """
+            SELECT id,device_id,device_kind,ip_address,bound_at,last_login_at
+            FROM app_device_bindings WHERE user_id=?
+            ORDER BY last_login_at DESC,id DESC
+            """,
+            (auth["user_id"],),
+        ).fetchall()
+    last_unbound = parse_iso(user["last_self_unbound_at"] if user else None)
+    next_allowed = (
+        iso(last_unbound + timedelta(hours=24))
+        if last_unbound and last_unbound + timedelta(hours=24) > now
+        else None
+    )
+    return {
+        "device_limit": MAX_BOUND_DEVICES,
+        "device_count": len(rows),
+        "can_self_unbind": next_allowed is None,
+        "next_self_unbind_at": next_allowed,
+        "items": [
+            {
+                "id": int(row["id"]),
+                "device_id": row["device_id"] or "",
+                "device_kind": row["device_kind"],
+                "ip_address": row["ip_address"] or "",
+                "bound_at": row["bound_at"],
+                "last_login_at": row["last_login_at"],
+            }
+            for row in rows
+        ],
+    }
+
+
+@router.delete("/api/v1/me/devices/{binding_id}")
+def self_unbind_device(
+    binding_id: int,
+    request: Request,
+    authorization: str | None = Header(default=None),
+):
+    auth, _ = require_user(authorization)
+    now = utc_now()
+    now_text = iso(now)
+    with open_db() as db:
+        db.execute("BEGIN IMMEDIATE")
+        user = db.execute(
+            "SELECT last_self_unbound_at FROM app_users WHERE id=?",
+            (auth["user_id"],),
+        ).fetchone()
+        last_unbound = parse_iso(user["last_self_unbound_at"] if user else None)
+        if last_unbound and last_unbound + timedelta(hours=24) > now:
+            next_allowed = iso(last_unbound + timedelta(hours=24))
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "message": "每 24 小时只能自助解绑一台设备",
+                    "next_self_unbind_at": next_allowed,
+                },
+            )
+        binding = db.execute(
+            "SELECT id,device_hash FROM app_device_bindings WHERE id=? AND user_id=?",
+            (binding_id, auth["user_id"]),
+        ).fetchone()
+        if binding is None:
+            raise HTTPException(status_code=404, detail="设备绑定不存在")
+        db.execute(
+            "UPDATE app_sessions SET revoked=1,last_seen_at=? WHERE user_id=? AND device_hash=? AND revoked=0",
+            (now_text, auth["user_id"], binding["device_hash"]),
+        )
+        db.execute("DELETE FROM app_device_bindings WHERE id=?", (binding_id,))
+        if db.execute(
+            "SELECT 1 FROM app_users WHERE id=? AND last_device_hash=?",
+            (auth["user_id"], binding["device_hash"]),
+        ).fetchone():
+            replacement = db.execute(
+                "SELECT device_hash FROM app_device_bindings WHERE user_id=? ORDER BY last_login_at DESC,id DESC LIMIT 1",
+                (auth["user_id"],),
+            ).fetchone()
+            db.execute(
+                "UPDATE app_users SET last_device_hash=? WHERE id=?",
+                (replacement["device_hash"] if replacement else "", auth["user_id"]),
+            )
+        db.execute(
+            "UPDATE app_users SET last_self_unbound_at=?,updated_at=? WHERE id=?",
+            (now_text, now_text, auth["user_id"]),
+        )
+        remaining = int(
+            db.execute(
+                "SELECT COUNT(*) AS n FROM app_device_bindings WHERE user_id=?",
+                (auth["user_id"],),
+            ).fetchone()["n"]
+            or 0
+        )
+        db.commit()
+    log_action(
+        "self_device_unbound",
+        f"user:{auth['user_id']}",
+        f"binding:{binding_id}",
+        request_ip(request),
+    )
+    return {
+        "ok": True,
+        "device_count": remaining,
+        "next_self_unbind_at": iso(now + timedelta(hours=24)),
+    }
 
 
 @router.get("/api/v1/plans")
