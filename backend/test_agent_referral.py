@@ -79,10 +79,16 @@ def test_agent_scope_balance_and_paid_referrals(setup_backend):
     code = client.get("/api/v1/referrals/me", headers=agent_token).json()["invite_code"]
 
     first = register(client, "invitee-one", "device-one", "10.0.0.2", code)
-    invalid = register(client, "invitee-fake", "device-one", "10.0.0.3", code)
+    invalid = register(client, "invitee-fake", "device-agent", "10.0.0.3", code)
     second = register(client, "invitee-two", "device-two", "10.0.0.4", code)
     assert first.status_code == invalid.status_code == second.status_code == 200
-    assert invalid.json()["user"]["membership"]["active"] is False
+    assert invalid.json()["user"]["membership"]["active"] is True
+    with referral.open_db() as db:
+        referral_row = db.execute(
+            "SELECT valid FROM referrals WHERE invited_user_id=?",
+            (invalid.json()["user"]["id"],),
+        ).fetchone()
+    assert referral_row is not None and referral_row["valid"] == 0
     stats = client.get("/api/v1/referrals/me", headers=agent_token).json()
     assert (stats["total_invited"], stats["valid_invited"], stats["reward_days"]) == (3, 2, 1)
     owned = client.get("/agent/api/users", headers=agent_token).json()

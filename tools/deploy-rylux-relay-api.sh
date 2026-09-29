@@ -43,7 +43,8 @@ source_dir="${work_dir}/source/backend"
 
 echo "[2/4] Installing backend files..."
 for file in app.py admin_v2.py admin_key_access.py admin_code_v1.py \
-  user_v1.py registration_guard_v1.py agent_referral.py manage.py requirements.txt; do
+  user_v1.py registration_guard_v1.py admin_user_controls.py agent_referral.py \
+  manage.py requirements.txt; do
   install -o paklicense -g paklicense -m 0644 "${source_dir}/${file}" "${APP_DIR}/${file}"
 done
 

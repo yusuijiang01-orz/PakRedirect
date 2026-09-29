@@ -13,7 +13,7 @@ RYLUX V1 后端继续运行在现有 `verify.lovenom.eu.org`，使用 FastAPI + 
 - `modules`：游戏模块；
 - `module_access_logs`：模块启动授权日志。
 
-`registration_guard_v1.py` 会给 `app_users` 增量增加 `registration_ip_hash`。有设备 ID 且该设备未领过试用时，最多允许同一 IP 在 48 小时内领取 3 次试用；其余账号仍可注册，但不会领取试用。明文注册 IP 不新增持久化字段；原有最后登录 IP 字段继续按既有逻辑使用。
+`registration_guard_v1.py` 会给 `app_users` 增量增加 `registration_ip_hash`。同一设备和同一 IP 在滚动 48 小时内各最多领取 3 次试用；任一额度用尽后仍可注册，但不会领取试用。设备 ID 为空时只按 IP 额度判定。明文注册 IP 不新增持久化字段；原有最后登录 IP 字段继续按既有逻辑使用。
 
 现有 `licenses` 表继续保留，并增量加入：
 
@@ -37,7 +37,7 @@ GET  /api/v1/modules
 POST /api/v1/modules/sg_localization/authorize
 ```
 
-注册前先请求 `GET /api/v1/auth/captcha`，返回 3 分钟有效的一次性 PNG 验证码挑战。注册请求必须提交 `captcha_id` 与 `captcha_code`；验证码最多尝试 5 次，且绑定签发时的 IP。设备 ID 有值时，同一设备仅可领取一次试用；同一 IP 在滚动 48 小时内最多领取 3 次。设备 ID 为空时按 IP 额度判定；若设备 ID 与 IP 均不可用则不发试用。未获试用的账号仍可注册。登录会返回 Bearer Token；服务端数据库只保存 Token 的 SHA-256 摘要。旧版客户端未提交验证码字段时无法注册，需要更新客户端。
+注册前先请求 `GET /api/v1/auth/captcha`，返回 3 分钟有效的一次性 PNG 验证码挑战。注册请求必须提交 `captcha_id` 与 `captcha_code`；验证码最多尝试 5 次，且绑定签发时的 IP。同一设备、同一 IP 在滚动 48 小时内各最多领取 3 次试用。设备 ID 为空时按 IP 额度判定；若设备 ID 与 IP 均不可用则不发试用。未获试用的账号仍可注册。登录会返回 Bearer Token；服务端数据库只保存 Token 的 SHA-256 摘要。旧版客户端未提交验证码字段时无法注册，需要更新客户端。
 
 首个模块的用户可见名称为“封神榜汉化”；内部模块代码仍保持 `sg_localization`，避免破坏已有客户端接口。
 
@@ -170,10 +170,12 @@ curl -sS https://verify.lovenom.eu.org/healthz
 
 ## 注册测试
 
+先请求 `GET /api/v1/auth/captcha`，从返回的 `image_base64` 显示验证码图片并读出四位字符。注册时使用返回的 `challenge_id` 和图片中的字符，且两次请求使用同一 IP：
+
 ```bash
 curl -sS \
   -H 'Content-Type: application/json' \
-  -d '{"username":"testuser","password":"test123456","device_id":"manual-test"}' \
+  -d '{"username":"testuser","password":"test123456","device_id":"manual-test","captcha_id":"上一步返回的challenge_id","captcha_code":"图片中的四位字符"}' \
   https://verify.lovenom.eu.org/api/v1/auth/register
 ```
 
@@ -185,7 +187,7 @@ curl -sS \
   https://verify.lovenom.eu.org/api/v1/me
 ```
 
-同一设备再次注册仍返回成功，但 `membership.active=false`，不会计为有效邀请。
+在 IP 额度未用尽时，同一设备在滚动 48 小时内前三次可获批试用，第 4 次注册仍返回成功，但 `membership.active=false`。同一 IP 也独立按相同额度限制。使用与邀请者相同的设备或 IP 注册，即使获得试用，也不会计为有效邀请。
 
 ## V1 支付边界
 
