@@ -17,7 +17,7 @@ const BLOCKED_HEADERS = [
 ];
 
 const GAME_PATH = "/rylux-game";
-const GAME_UPSTREAM = { hostname: "verify.lovenom.eu.org", port: 9443 };
+const GAME_UPSTREAM_PORT = 9443;
 const GAME_UPSTREAM_TCP_MAGIC = new Uint8Array([82, 89, 76, 85, 88, 72, 89, 50, 1]); // RYLUXHY2 + TCP
 const GAME_UPSTREAM_UDP_MAGIC = new Uint8Array([82, 89, 76, 85, 88, 72, 89, 50, 2]); // RYLUXHY2 + UDP
 const GAME_UPSTREAM_ACK = new Uint8Array([82, 89, 76, 79, 75, 0]); // RYLOK + status=0
@@ -83,12 +83,17 @@ async function handleGameRelay(request, env, target) {
     });
   }
 
+  const upstreamHost = String(env.RYLUX_RELAY_UPSTREAM_HOST || "").trim();
+  if (!upstreamHost) {
+    return jsonResponse("relay upstream is not configured", 503);
+  }
+
   let socket;
   let upstreamReader;
   let upstreamWriter;
   let initialUpstreamData = new Uint8Array(0);
   try {
-    socket = connect(GAME_UPSTREAM, { secureTransport: "on", allowHalfOpen: true });
+    socket = connect({ hostname: upstreamHost, port: GAME_UPSTREAM_PORT }, { secureTransport: "on", allowHalfOpen: true });
     await socket.opened;
     upstreamWriter = socket.writable.getWriter();
     await upstreamWriter.write(encodeGameUpstreamHello(target, token));
