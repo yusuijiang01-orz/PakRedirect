@@ -109,14 +109,13 @@ public final class RyluxHomeNavigationPolish {
 
         Configuration c = activity.getResources().getConfiguration();
         int widthDp = c.screenWidthDp;
-        float scale = homeScale(activity);
         boolean narrow = widthDp < 280;
 
         root.setPadding(
-                dp(activity, (widthDp <= 360 ? 10 : 16) * scale),
-                dp(activity, 14 * scale),
-                dp(activity, (widthDp <= 360 ? 10 : 16) * scale),
-                dp(activity, 30 * scale)
+                dp(activity, widthDp <= 360 ? 10 : 16),
+                dp(activity, 14),
+                dp(activity, widthDp <= 360 ? 10 : 16),
+                dp(activity, 30)
         );
 
         TextView title = label(activity, "RYLUX 控制台", widthDp <= 360 ? 20 : 23, TEXT, true);
@@ -145,8 +144,6 @@ public final class RyluxHomeNavigationPolish {
         identityRow.setBaselineAligned(false);
         identityRow.setMinimumHeight(dp(activity, widthDp <= 360 ? 64 : 72));
 
-        // screenWidthDp already accounts for display density. Scaling these
-        // dimensions again made the account entry tiny on 480dpi devices.
         int avatarSize = dp(activity, widthDp <= 360 ? 64 : 72);
         LinearLayout.LayoutParams avatarLp = new LinearLayout.LayoutParams(avatarSize, avatarSize);
         avatarLp.rightMargin = dp(activity, widthDp <= 360 ? 10 : 12);
@@ -181,8 +178,8 @@ public final class RyluxHomeNavigationPolish {
         if (narrow) {
             Button accountButton = smallButton(activity, "查看账号");
             accountButton.setOnClickListener(v -> avatar.performClick());
-            LinearLayout.LayoutParams buttonLp = new LinearLayout.LayoutParams(-1, dp(activity, 40 * scale));
-            buttonLp.topMargin = dp(activity, 8 * scale);
+            LinearLayout.LayoutParams buttonLp = new LinearLayout.LayoutParams(-1, dp(activity, 40));
+            buttonLp.topMargin = dp(activity, 8);
             accountRegion.addView(accountButton, buttonLp);
         }
 
@@ -190,15 +187,15 @@ public final class RyluxHomeNavigationPolish {
         accountLp.bottomMargin = dp(activity, 18);
         root.addView(accountRegion, accountLp);
 
-        TextView gameSection = label(activity, "游戏服务", 16 * scale, TEXT, true);
+        TextView gameSection = label(activity, "游戏服务", 16, TEXT, true);
         LinearLayout.LayoutParams sectionLp = new LinearLayout.LayoutParams(-1, -2);
-        sectionLp.bottomMargin = dp(activity, 9 * scale);
+        sectionLp.bottomMargin = dp(activity, 9);
         root.addView(gameSection, sectionLp);
 
         FrameLayout heroShell = new FrameLayout(activity);
-        heroShell.setPadding(dp(activity, scale), dp(activity, scale), dp(activity, scale), dp(activity, scale));
-        heroShell.setBackground(round(activity, SURFACE_2, 22 * scale, BORDER, 1));
-        if (Build.VERSION.SDK_INT >= 21) heroShell.setElevation(dp(activity, 2 * scale));
+        heroShell.setPadding(dp(activity, 1), dp(activity, 1), dp(activity, 1), dp(activity, 1));
+        heroShell.setBackground(round(activity, SURFACE_2, 22, BORDER, 1));
+        if (Build.VERSION.SDK_INT >= 21) heroShell.setElevation(dp(activity, 2));
 
         FrameLayout.LayoutParams heroLp = new FrameLayout.LayoutParams(-1, -1);
         hero.setLayoutParams(heroLp);
@@ -206,33 +203,33 @@ public final class RyluxHomeNavigationPolish {
 
         int heroHeight = homeHeroHeight(activity);
         LinearLayout.LayoutParams heroShellLp = new LinearLayout.LayoutParams(-1, heroHeight);
-        heroShellLp.bottomMargin = dp(activity, 12 * scale);
+        heroShellLp.bottomMargin = dp(activity, 12);
         root.addView(heroShell, heroShellLp);
 
         LinearLayout flowCard = new LinearLayout(activity);
         flowCard.setOrientation(LinearLayout.VERTICAL);
-        flowCard.setPadding(dp(activity, 14 * scale), dp(activity, 12 * scale), dp(activity, 14 * scale), dp(activity, 12 * scale));
-        flowCard.setBackground(round(activity, SURFACE, 15 * scale, BORDER, 1));
+        flowCard.setPadding(dp(activity, 14), dp(activity, 12), dp(activity, 14), dp(activity, 12));
+        flowCard.setBackground(round(activity, SURFACE, 15, BORDER, 1));
 
-        TextView flowTitle = label(activity, "操作流程", 14 * scale, TEXT, true);
+        TextView flowTitle = label(activity, "操作流程", 14, TEXT, true);
         flowCard.addView(flowTitle, new LinearLayout.LayoutParams(-1, -2));
-        TextView flow = label(activity, "① 安装游戏   →   ② 启动游戏", (widthDp <= 360 ? 11.5f : 12.5f) * scale, MUTED, false);
+        TextView flow = label(activity, "① 安装游戏   →   ② 启动游戏", widthDp <= 360 ? 11.5f : 12.5f, MUTED, false);
         flow.setLineSpacing(0f, 1.15f);
         LinearLayout.LayoutParams flowLp = new LinearLayout.LayoutParams(-1, -2);
-        flowLp.topMargin = dp(activity, 6 * scale);
+        flowLp.topMargin = dp(activity, 6);
         flowCard.addView(flow, flowLp);
 
         LinearLayout.LayoutParams flowCardLp = new LinearLayout.LayoutParams(-1, -2);
-        flowCardLp.bottomMargin = dp(activity, 12 * scale);
+        flowCardLp.bottomMargin = dp(activity, 12);
         root.addView(flowCard, flowCardLp);
 
         Button enter = primaryButton(activity, "进入游戏详情");
         enter.setOnClickListener(v -> hero.performClick());
-        LinearLayout.LayoutParams enterLp = new LinearLayout.LayoutParams(-1, dp(activity, 52 * scale));
-        enterLp.bottomMargin = dp(activity, 8 * scale);
+        LinearLayout.LayoutParams enterLp = new LinearLayout.LayoutParams(-1, dp(activity, 52));
+        enterLp.bottomMargin = dp(activity, 8);
         root.addView(enter, enterLp);
 
-        TextView enterHint = label(activity, "安装和启动入口都在游戏详情中", 11.5f * scale, MUTED, false);
+        TextView enterHint = label(activity, "安装和启动入口都在游戏详情中", 11.5f, MUTED, false);
         enterHint.setGravity(Gravity.CENTER);
         root.addView(enterHint, new LinearLayout.LayoutParams(-1, -2));
 
@@ -243,17 +240,12 @@ public final class RyluxHomeNavigationPolish {
         Configuration c = activity.getResources().getConfiguration();
         int heightDp = c.screenHeightDp;
         boolean landscape = c.screenWidthDp > heightDp;
-        float baseHeight = landscape
-                ? Math.max(220, Math.min(300, heightDp * 0.50f))
-                : 340f;
-        return dp(activity, Math.max(180, Math.min(340, baseHeight * homeScale(activity))));
-    }
-
-    static float homeScale(Activity activity) {
-        Configuration c = activity.getResources().getConfiguration();
-        float widthScale = c.screenWidthDp / 450f;
-        float heightScale = c.screenHeightDp / 800f;
-        return Math.max(0.58f, Math.min(1f, Math.min(widthScale, heightScale)));
+        // Android has already converted physical pixels to dp. Keep the card
+        // readable and let MainActivity's ScrollView handle short viewports.
+        int heroHeightDp = landscape
+                ? Math.max(220, Math.min(300, Math.round(heightDp * 0.50f)))
+                : c.screenWidthDp < 320 ? 300 : 340;
+        return dp(activity, heroHeightDp);
     }
 
     private static FrameLayout findHomeAvatar(LinearLayout root, GlowFrameLayout hero) {
@@ -279,16 +271,15 @@ public final class RyluxHomeNavigationPolish {
     }
 
     private static Button smallButton(Activity activity, String text) {
-        float scale = 1f;
         Button button = new Button(activity);
         button.setText(text);
         button.setAllCaps(false);
-        button.setTextSize(13 * scale);
+        button.setTextSize(13);
         button.setTextColor(Color.rgb(218, 232, 255));
         button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         button.setGravity(Gravity.CENTER);
-        button.setPadding(dp(activity, 10 * scale), 0, dp(activity, 10 * scale), 0);
-        button.setBackground(round(activity, Color.rgb(24, 47, 87), 10 * scale, Color.rgb(64, 123, 219), 1));
+        button.setPadding(dp(activity, 10), 0, dp(activity, 10), 0);
+        button.setBackground(round(activity, Color.rgb(24, 47, 87), 10, Color.rgb(64, 123, 219), 1));
         if (Build.VERSION.SDK_INT >= 21) {
             button.setStateListAnimator(null);
             button.setElevation(0);
@@ -297,25 +288,24 @@ public final class RyluxHomeNavigationPolish {
     }
 
     private static Button primaryButton(Activity activity, String text) {
-        float scale = homeScale(activity);
         Button button = new Button(activity);
         button.setText(text);
         button.setAllCaps(false);
-        button.setTextSize(16 * scale);
+        button.setTextSize(16);
         button.setTextColor(Color.WHITE);
         button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         button.setGravity(Gravity.CENTER);
-        button.setPadding(dp(activity, 14 * scale), 0, dp(activity, 14 * scale), 0);
+        button.setPadding(dp(activity, 14), 0, dp(activity, 14), 0);
         GradientDrawable bg = new GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[]{BLUE_LIGHT, BLUE, BLUE_DARK}
         );
-        bg.setCornerRadius(dp(activity, 13 * scale));
+        bg.setCornerRadius(dp(activity, 13));
         bg.setStroke(dp(activity, 1), Color.rgb(104, 173, 255));
         button.setBackground(bg);
         if (Build.VERSION.SDK_INT >= 21) {
             button.setStateListAnimator(null);
-            button.setElevation(dp(activity, 2 * scale));
+            button.setElevation(dp(activity, 2));
         }
         return button;
     }

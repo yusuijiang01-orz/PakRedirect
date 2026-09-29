@@ -234,7 +234,6 @@ public final class RyluxUiPolish {
     }
 
     private static void buildHero(Activity activity, GlowFrameLayout hero) {
-        float scale = RyluxHomeNavigationPolish.homeScale(activity);
         hero.removeAllViews();
         hero.setPadding(0, 0, 0, 0);
         hero.setClipChildren(true);
@@ -293,25 +292,25 @@ public final class RyluxUiPolish {
 
         LinearLayout caption = new LinearLayout(activity);
         caption.setOrientation(LinearLayout.VERTICAL);
-        caption.setPadding(dp(activity, 22 * scale), 0, dp(activity, 22 * scale), dp(activity, 23 * scale));
+        caption.setPadding(dp(activity, 22), 0, dp(activity, 22), dp(activity, 23));
 
-        TextView title = label(activity, "封神榜（越南版）", 29 * scale, Color.rgb(246, 224, 186), true);
-        title.setShadowLayer(dp(activity, 8 * scale), 0, dp(activity, 2 * scale), Color.argb(190, 0, 0, 0));
+        TextView title = label(activity, "封神榜（越南版）", 29, Color.rgb(246, 224, 186), true);
+        title.setShadowLayer(dp(activity, 8), 0, dp(activity, 2), Color.argb(190, 0, 0, 0));
         caption.addView(title);
 
-        TextView supported = label(activity, "已支持汉化", 12 * scale, Color.rgb(155, 205, 255), true);
+        TextView supported = label(activity, "已支持汉化", 12, Color.rgb(155, 205, 255), true);
         supported.setGravity(Gravity.CENTER);
-        supported.setPadding(dp(activity, 9 * scale), 0, dp(activity, 9 * scale), 0);
+        supported.setPadding(dp(activity, 9), 0, dp(activity, 9), 0);
         supported.setBackground(round(
                 activity,
                 Color.argb(190, 19, 55, 99),
-                6 * scale,
+                6,
                 Color.rgb(49, 119, 203),
                 1
         ));
         LinearLayout.LayoutParams supportedLp =
-                new LinearLayout.LayoutParams(-2, dp(activity, 27 * scale));
-        supportedLp.topMargin = dp(activity, 8 * scale);
+                new LinearLayout.LayoutParams(-2, dp(activity, 27));
+        supportedLp.topMargin = dp(activity, 8);
         caption.addView(supported, supportedLp);
 
         FrameLayout.LayoutParams captionLp =

@@ -60,7 +60,7 @@ public final class RyluxAdaptiveLayoutFix {
         View home = findTagged(activity.getWindow().getDecorView(), HOME_TAG);
         if (home instanceof LinearLayout && !key.equals(LAST_HOME_KEY.get(home))) {
             LAST_HOME_KEY.put(home, key);
-            tuneHome(activity, (LinearLayout) home, widthDp, heightDp, landscape);
+            tuneHome(activity, (LinearLayout) home, widthDp, landscape);
         }
 
         TextView gameHeading = findGameDetailHeading(activity.getWindow().getDecorView());
@@ -75,16 +75,14 @@ public final class RyluxAdaptiveLayoutFix {
             Activity activity,
             LinearLayout root,
             int widthDp,
-            int heightDp,
             boolean landscape
     ) {
-        float scale = RyluxHomeNavigationPolish.homeScale(activity);
         int side = widthDp <= 360 ? 10 : (landscape ? 20 : 16);
         root.setPadding(
-                dp(activity, Math.round(side * scale)),
-                dp(activity, Math.round(14 * scale)),
-                dp(activity, Math.round(side * scale)),
-                dp(activity, Math.round(28 * scale))
+                dp(activity, side),
+                dp(activity, 14),
+                dp(activity, side),
+                dp(activity, 28)
         );
 
         FrameLayout heroShell = findHeroShell(root);
