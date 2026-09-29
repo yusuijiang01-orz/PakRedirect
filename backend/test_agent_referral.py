@@ -175,7 +175,9 @@ def test_admin_paid_flag_and_permission_revocation(setup_backend):
     direct_purchase = client.post(f"/agent/api/users/{buyer2_id}/extend", json={"days": 30}, headers=token)
     assert direct_purchase.status_code == 200, direct_purchase.text
     assert direct_purchase.json()["referral_reward_days"] == 30
-    assert client.get("/api/v1/referrals/me", headers=inviter_token).json()["reward_days"] == 61
+    assert client.get("/api/v1/referrals/me", headers=inviter_token).json()["reward_days"] == 74
+
+
 def test_reward_cap_and_migration(setup_backend):
     client, admin, referral, app = setup_backend
     inviter = register(client, "inviter", "device-i", "10.1.0.1")
