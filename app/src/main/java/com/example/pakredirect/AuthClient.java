@@ -9,6 +9,8 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 
 public final class AuthClient {
     private static final String API = "https://verify.lovenom.eu.org/api/v1";
@@ -98,6 +100,51 @@ public final class AuthClient {
         return new ReferralResult(true, code, http.json.optInt("total_invited", 0),
                 http.json.optInt("valid_invited", 0), http.json.optInt("reward_days", 0),
                 http.json.optInt("reward_cap_days", 365), "");
+    }
+
+    public static DeviceBindingsResult devices(String token) {
+        HttpResult http = request("GET", "/me/devices", token, null);
+        if (!http.requestOk) return DeviceBindingsResult.failure(http.message, false);
+        if (!http.success) return DeviceBindingsResult.failure(http.message, true);
+        try {
+            List<DeviceInfo> items = new ArrayList<>();
+            org.json.JSONArray rows = http.json.optJSONArray("items");
+            if (rows != null) {
+                for (int i = 0; i < rows.length(); i++) {
+                    JSONObject item = rows.optJSONObject(i);
+                    if (item == null) continue;
+                    items.add(new DeviceInfo(
+                            item.optLong("id", 0),
+                            item.optString("device_id", ""),
+                            item.optString("device_kind", "legacy"),
+                            item.optString("ip_address", ""),
+                            nullable(item.optString("bound_at", null)),
+                            nullable(item.optString("last_login_at", null))
+                    ));
+                }
+            }
+            return new DeviceBindingsResult(
+                    true,
+                    true,
+                    http.json.optInt("device_limit", 3),
+                    http.json.optInt("device_count", items.size()),
+                    http.json.optBoolean("can_self_unbind", false),
+                    nullable(http.json.optString("next_self_unbind_at", null)),
+                    items,
+                    ""
+            );
+        } catch (Throwable t) {
+            return DeviceBindingsResult.failure("设备列表数据异常", true);
+        }
+    }
+
+    public static ActionResult unbindDevice(String token, long deviceBindingId) {
+        HttpResult http = request("DELETE", "/me/devices/" + deviceBindingId, token, null);
+        if (!http.requestOk) return ActionResult.networkError(http.message);
+        if (!http.success) return ActionResult.failure(http.message);
+        return new ActionResult(true, true,
+                nullable(http.json.optString("next_self_unbind_at", null)),
+                http.json.optString("message", "设备已解绑"));
     }
 
     public static ActionResult redeem(String token, String code) {
@@ -203,7 +250,10 @@ public final class AuthClient {
             }
 
             if (code < 200 || code >= 300) {
-                String message = json.optString("detail", "请求失败 HTTP " + code);
+                Object detail = json.opt("detail");
+                String message = detail instanceof JSONObject
+                        ? ((JSONObject) detail).optString("message", "请求失败 HTTP " + code)
+                        : (detail == null ? "请求失败 HTTP " + code : String.valueOf(detail));
                 return new HttpResult(true, false, json, message, code);
             }
             return new HttpResult(true, true, json, "", code);
@@ -357,6 +407,54 @@ public final class AuthClient {
 
         static ReferralResult failure(String message) {
             return new ReferralResult(false, "", 0, 0, 0, 365, message);
+        }
+    }
+
+    public static final class DeviceInfo {
+        public final long id;
+        public final String deviceId;
+        public final String deviceKind;
+        public final String ipAddress;
+        public final String boundAt;
+        public final String lastLoginAt;
+
+        DeviceInfo(long id, String deviceId, String deviceKind, String ipAddress,
+                   String boundAt, String lastLoginAt) {
+            this.id = id;
+            this.deviceId = deviceId;
+            this.deviceKind = deviceKind;
+            this.ipAddress = ipAddress;
+            this.boundAt = boundAt;
+            this.lastLoginAt = lastLoginAt;
+        }
+    }
+
+    public static final class DeviceBindingsResult {
+        public final boolean requestOk;
+        public final boolean success;
+        public final int deviceLimit;
+        public final int deviceCount;
+        public final boolean canSelfUnbind;
+        public final String nextSelfUnbindAt;
+        public final List<DeviceInfo> items;
+        public final String message;
+
+        DeviceBindingsResult(boolean requestOk, boolean success, int deviceLimit, int deviceCount,
+                             boolean canSelfUnbind, String nextSelfUnbindAt,
+                             List<DeviceInfo> items, String message) {
+            this.requestOk = requestOk;
+            this.success = success;
+            this.deviceLimit = deviceLimit;
+            this.deviceCount = deviceCount;
+            this.canSelfUnbind = canSelfUnbind;
+            this.nextSelfUnbindAt = nextSelfUnbindAt;
+            this.items = items;
+            this.message = message;
+        }
+
+        static DeviceBindingsResult failure(String message, boolean requestOk) {
+            return new DeviceBindingsResult(requestOk, false, 3, 0, false, null,
+                    new ArrayList<>(), message);
         }
     }
 

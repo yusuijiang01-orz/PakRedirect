@@ -20,6 +20,71 @@
     return modal;
   }
 
+  function ensureDeviceModal(){
+    let modal=document.getElementById("userDeviceModal");
+    if(modal)return modal;
+    modal=document.createElement("div");
+    modal.id="userDeviceModal";
+    modal.className="modal-backdrop hidden";
+    modal.innerHTML=`<div class="modal" style="width:min(900px,calc(100vw - 32px));max-width:900px">
+      <div class="modal-head"><div><h3 id="userDeviceTitle">已绑定设备</h3><div class="muted" id="userDeviceSummary" style="margin-top:5px;font-size:12px"></div></div><button class="btn btn-ghost btn-sm" id="userDeviceClose">关闭</button></div>
+      <div class="modal-body" id="userDeviceList"></div>
+      <div class="modal-foot"><button class="btn btn-primary" id="userDeviceDone">完成</button></div>
+    </div>`;
+    document.body.appendChild(modal);
+    const close=()=>modal.classList.add("hidden");
+    document.getElementById("userDeviceClose").onclick=close;
+    document.getElementById("userDeviceDone").onclick=close;
+    modal.addEventListener("click",e=>{if(e.target===modal)close()});
+    return modal;
+  }
+
+  function deviceKindLabel(kind){
+    if(kind==="random_fingerprint")return "随机设备指纹";
+    if(kind==="legacy")return "历史设备";
+    if(kind==="missing")return "未读取到设备 ID";
+    return "Android ID";
+  }
+
+  function displayDeviceId(item){
+    if(item.device_id)return `${deviceKindLabel(item.device_kind)}：${item.device_id}`;
+    return "历史设备摘要，无法还原原始 Android ID";
+  }
+
+  async function showDeviceList(id,username){
+    const modal=ensureDeviceModal();
+    document.getElementById("userDeviceTitle").textContent=`${username} · 已绑定设备`;
+    modal.classList.remove("hidden");
+    await loadDeviceList(id,username);
+  }
+
+  async function loadDeviceList(id,username){
+    const modal=ensureDeviceModal();
+    const summary=document.getElementById("userDeviceSummary");
+    const list=document.getElementById("userDeviceList");
+    summary.textContent="正在加载设备列表…";
+    list.innerHTML="";
+    try{
+      const data=await api(`/admin/api/users/${id}/devices`);
+      if(modal.classList.contains("hidden"))return;
+      summary.textContent=`用户：${data.user.username} · 已绑定 ${data.device_count}/${data.device_limit} 台设备`;
+      if(!data.items.length){list.innerHTML='<div class="muted">当前没有已绑定设备。</div>';return}
+      list.innerHTML=data.items.map((item,index)=>`<div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;padding:12px 0;border-bottom:1px solid var(--border,#303641)">
+        <div style="min-width:0">
+          <div style="font-weight:600;margin-bottom:5px">设备 ${index+1} · ${esc(deviceKindLabel(item.device_kind))}</div>
+          <div style="font-size:12px;line-height:1.7;overflow-wrap:anywhere"><span class="muted">IP：</span>${esc(item.ip_address||"-")}<br><span class="muted">最近登录：</span>${esc(fmt(item.last_login_at))}<br><span class="muted">设备 ID：</span>${esc(item.device_id||"历史摘要无法还原原始 Android ID")}</div>
+        </div>
+        <button class="btn btn-danger btn-sm" data-unbind-device="${Number(item.id)}">解绑</button>
+      </div>`).join("");
+      list.querySelectorAll("[data-unbind-device]").forEach(button=>{
+        button.onclick=()=>unbindOneDevice(id,username,data.items.find(item=>String(item.id)===button.dataset.unbindDevice));
+      });
+    }catch(error){
+      summary.textContent="设备列表加载失败";
+      list.textContent=error.message;
+    }
+  }
+
   function ensureActionModal(){
     let modal=document.getElementById("userActionModal");
     if(modal)return modal;
@@ -98,7 +163,7 @@
       lines.push(`用户：${d.user.username}`);
       lines.push(`最后登录：${fmt(d.user.last_login_at)}`);
       lines.push(`最后登录 IP：${d.user.last_login_ip||"-"}`);
-      lines.push(`当前设备摘要：${d.user.device_hint||"-"}`);
+      lines.push(`当前设备 ID：${d.user.device_id||"历史摘要无法还原原始 Android ID"}`);
       lines.push("");
       lines.push("最近登录会话：");
       if(!d.items.length){
@@ -106,7 +171,7 @@
       }else{
         d.items.forEach((s,i)=>{
           lines.push(`${i+1}. IP=${s.ip_address||"-"}  创建=${fmt(s.created_at)}  最后活动=${fmt(s.last_seen_at)}  ${s.revoked?"已撤销":"有效"}`);
-          lines.push(`   设备=${s.device_hint||"-"}  会话到期=${fmt(s.expires_at)}`);
+          lines.push(`   设备=${s.device_id||"历史摘要无法还原原始 Android ID"}  会话到期=${fmt(s.expires_at)}`);
         });
       }
       const modal=ensureSessionModal();
@@ -163,19 +228,25 @@
   }
 
   async function unbindDevice(id,username){
+    await showDeviceList(id,username);
+  }
+
+  async function unbindOneDevice(id,username,device){
+    if(!device)return;
     const ok=await openActionDialog({
-      title:"解绑当前设备",
+      title:"解绑这台设备",
       subtitle:`用户：${username} · #${id}`,
       confirmText:"确认解绑",
       danger:true,
       bodyHtml:`
-        <div class="alert alert-warn" style="margin-top:0">解绑后，该用户当前登录会话会全部失效，需要重新登录。</div>
-        <div class="muted" style="line-height:1.8">此操作只清除当前设备绑定，不会清除免费体验领取记录，也不会修改会员到期时间。</div>`
+        <div class="alert alert-warn" style="margin-top:0">确认后只解绑所选设备，并撤销该设备的登录会话。其他设备不受影响。</div>
+        <div style="font-size:13px;line-height:1.8;overflow-wrap:anywhere"><strong>设备 ID：</strong>${esc(device.device_id||"历史摘要无法还原原始 Android ID")}<br><strong>IP：</strong>${esc(device.ip_address||"-")}<br><strong>最近登录：</strong>${esc(fmt(device.last_login_at))}</div>`
     });
     if(!ok)return;
     try{
-      const d=await api(`/admin/api/users/${id}/unbind-device`,{method:"POST",body:{}});
+      const d=await api(`/admin/api/users/${id}/devices/${device.id}/unbind`,{method:"POST",body:{}});
       alertMsg(`设备已解绑，撤销 ${d.revoked_sessions||0} 个会话`);
+      await loadDeviceList(id,username);
       loadUsers();
     }catch(e){alertMsg(e.message,"error")}
   }

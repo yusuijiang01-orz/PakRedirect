@@ -44,6 +44,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
+import java.util.UUID;
 
 public class MainActivity extends Activity {
     private static final String TARGET_PACKAGE = "com.tepaylink.tamgioiphantranhmobile";
@@ -53,6 +54,9 @@ public class MainActivity extends Activity {
     private static final String GAME_DESCRIPTION = "越南版封神榜，RYLUX 提供本地汉化、资源校验与本地 PAK 接管。";
     private static final String GAME_LAST_UPDATED = "2026-09-01";
     private static final String LOCALIZATION_PROGRESS = "持续更新中";
+    private static final String DEVICE_ID_PREFS = "rylux_device_identity";
+    private static final String DEVICE_ID_KEY = "fallback_device_id";
+    private static String cachedFallbackDeviceId;
 
     private static final int BG = Color.rgb(17, 19, 24);
     private static final int CARD = Color.rgb(28, 32, 40);
@@ -559,6 +563,23 @@ public class MainActivity extends Activity {
         panel.addView(state);
         panel.addView(infoRow("VIP 到期时间", formatExpiry(profile.expiresAt)));
 
+        TextView deviceTitle = text("已绑定设备", 16, TEXT, true);
+        deviceTitle.setPadding(0, dp(22), 0, dp(5));
+        panel.addView(deviceTitle);
+        TextView deviceSummary = text("正在获取设备信息…", 13, MUTED, false);
+        panel.addView(deviceSummary);
+        LinearLayout deviceList = new LinearLayout(this);
+        deviceList.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams deviceListLp = new LinearLayout.LayoutParams(-1, -2);
+        deviceListLp.topMargin = dp(8);
+        panel.addView(deviceList, deviceListLp);
+        Button refreshDevices = button("刷新设备列表", CARD_SOFT, TEXT);
+        LinearLayout.LayoutParams refreshDevicesLp = new LinearLayout.LayoutParams(-1, dp(42));
+        refreshDevicesLp.topMargin = dp(8);
+        panel.addView(refreshDevices, refreshDevicesLp);
+        refreshDevices.setOnClickListener(v -> loadUserDevices(
+                overlay, deviceSummary, deviceList, refreshDevices));
+
         Button refresh = button("刷新会员状态", CARD_SOFT, TEXT);
         refresh.setOnClickListener(v -> refreshMembershipFromPanel(refresh));
         LinearLayout.LayoutParams refreshLp = new LinearLayout.LayoutParams(-1, dp(46));
@@ -618,7 +639,121 @@ public class MainActivity extends Activity {
         accountScroll.addView(panel, new ScrollView.LayoutParams(-1, -2));
         overlay.addView(accountScroll, panelLp);
         attachOverlay(overlay, panel, false);
+        loadUserDevices(overlay, deviceSummary, deviceList, refreshDevices);
         loadReferrals(overlay, referralCode, referralStats, copyInvite, refreshInvites);
+    }
+
+    private void loadUserDevices(FrameLayout overlay, TextView summary, LinearLayout list, Button refresh) {
+        final String token = currentToken;
+        if (token == null || token.trim().isEmpty()) return;
+        refresh.setEnabled(false);
+        refresh.setText("正在加载…");
+        new Thread(() -> {
+            AuthClient.DeviceBindingsResult result = AuthClient.devices(token);
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed() || activeOverlay != overlay || !token.equals(currentToken)) return;
+                refresh.setEnabled(true);
+                refresh.setText("刷新设备列表");
+                list.removeAllViews();
+                if (!result.success) {
+                    summary.setText("暂时无法获取设备信息：" + result.message);
+                    return;
+                }
+                String text = "已绑定 " + result.deviceCount + "/" + result.deviceLimit + " 台设备。每 24 小时最多自助解绑 1 台。";
+                if (!result.canSelfUnbind && result.nextSelfUnbindAt != null) {
+                    text += "\n下次可解绑时间：" + formatExpiry(result.nextSelfUnbindAt);
+                }
+                summary.setText(text);
+                if (result.items.isEmpty()) {
+                    list.addView(text("当前没有已绑定设备。", 13, MUTED, false));
+                    return;
+                }
+                for (int i = 0; i < result.items.size(); i++) {
+                    AuthClient.DeviceInfo item = result.items.get(i);
+                    LinearLayout row = new LinearLayout(this);
+                    row.setOrientation(LinearLayout.HORIZONTAL);
+                    row.setGravity(Gravity.CENTER_VERTICAL);
+                    row.setPadding(dp(12), dp(10), dp(10), dp(10));
+                    row.setBackground(round(CARD_SOFT, 12));
+                    LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(-1, -2);
+                    rowLp.topMargin = dp(6);
+                    list.addView(row, rowLp);
+
+                    LinearLayout details = new LinearLayout(this);
+                    details.setOrientation(LinearLayout.VERTICAL);
+                    LinearLayout.LayoutParams detailsLp = new LinearLayout.LayoutParams(0, -2, 1f);
+                    row.addView(details, detailsLp);
+                    String label = "设备 " + (i + 1) + " · " + deviceKindLabel(item.deviceKind);
+                    details.addView(text(label, 13, TEXT, true));
+                    String shownId = item.deviceId.isEmpty()
+                            ? "历史记录：原始设备 ID 不可恢复"
+                            : "ID：" + shortDeviceId(item.deviceId);
+                    TextView idView = text(shownId, 11, MUTED, false);
+                    idView.setTextIsSelectable(true);
+                    idView.setPadding(0, dp(3), 0, 0);
+                    details.addView(idView);
+                    TextView lastLogin = text("最近登录：" + formatExpiry(item.lastLoginAt), 11, MUTED, false);
+                    lastLogin.setPadding(0, dp(2), 0, 0);
+                    details.addView(lastLogin);
+
+                    Button unbind = button("解绑", Color.rgb(68, 35, 38), Color.rgb(255, 185, 185));
+                    LinearLayout.LayoutParams unbindLp = new LinearLayout.LayoutParams(-2, dp(40));
+                    unbindLp.leftMargin = dp(8);
+                    row.addView(unbind, unbindLp);
+                    unbind.setEnabled(result.canSelfUnbind);
+                    unbind.setOnClickListener(v -> confirmSelfUnbind(
+                            overlay, summary, list, refresh, item));
+                }
+            });
+        }, "RYLUX-Devices").start();
+    }
+
+    private void confirmSelfUnbind(FrameLayout overlay, TextView summary, LinearLayout list,
+                                   Button refresh, AuthClient.DeviceInfo device) {
+        String deviceLabel = device.deviceId.isEmpty()
+                ? "历史设备（原始 ID 不可恢复）"
+                : deviceKindLabel(device.deviceKind) + "：" + shortDeviceId(device.deviceId);
+        new AlertDialog.Builder(this)
+                .setTitle("解绑这台设备？")
+                .setMessage(deviceLabel + "\n\n解绑后，该设备的登录会话会失效，并释放一个设备名额。解绑后 24 小时内不能再次自助解绑。")
+                .setNegativeButton("取消", null)
+                .setPositiveButton("确认解绑", (dialog, which) -> {
+                    final String token = currentToken;
+                    if (token == null || token.trim().isEmpty()) return;
+                    new Thread(() -> {
+                        AuthClient.ActionResult result = AuthClient.unbindDevice(token, device.id);
+                        runOnUiThread(() -> {
+                            if (isFinishing() || isDestroyed() || activeOverlay != overlay || !token.equals(currentToken)) return;
+                            if (!result.success) {
+                                toast(result.message);
+                                loadUserDevices(overlay, summary, list, refresh);
+                                return;
+                            }
+                            toast("设备已解绑");
+                            if (!device.deviceId.isEmpty() && device.deviceId.equals(deviceId())) {
+                                closeActiveOverlayImmediate();
+                                performLogout();
+                            } else {
+                                loadUserDevices(overlay, summary, list, refresh);
+                            }
+                        });
+                    }, "RYLUX-UnbindDevice").start();
+                })
+                .show();
+    }
+
+    private String deviceKindLabel(String kind) {
+        if ("random_fingerprint".equals(kind)) return "随机设备指纹";
+        if ("legacy".equals(kind)) return "历史设备";
+        if ("missing".equals(kind)) return "未读取到设备 ID";
+        return "Android ID";
+    }
+
+    private String shortDeviceId(String value) {
+        if (value == null || value.trim().isEmpty()) return "未知";
+        String id = value.trim();
+        if (id.length() <= 20) return id;
+        return id.substring(0, 10) + "…" + id.substring(id.length() - 8);
     }
 
     private void loadReferrals(FrameLayout overlay, TextView code, TextView stats,
@@ -1305,9 +1440,19 @@ public class MainActivity extends Activity {
     private String deviceId() {
         try {
             String value = Settings.Secure.getString(getContentResolver(), Settings.Secure.ANDROID_ID);
-            return value == null ? "" : value;
+            if (value != null && !value.trim().isEmpty()) return value.trim();
         } catch (Throwable ignored) {
-            return "";
+        }
+        synchronized (MainActivity.class) {
+            if (cachedFallbackDeviceId != null && !cachedFallbackDeviceId.isEmpty()) return cachedFallbackDeviceId;
+            android.content.SharedPreferences prefs = getSharedPreferences(DEVICE_ID_PREFS, MODE_PRIVATE);
+            String stored = prefs.getString(DEVICE_ID_KEY, "");
+            if (stored == null || stored.trim().isEmpty()) {
+                stored = "rylux-install:" + UUID.randomUUID();
+                prefs.edit().putString(DEVICE_ID_KEY, stored).commit();
+            }
+            cachedFallbackDeviceId = stored;
+            return stored;
         }
     }
 
