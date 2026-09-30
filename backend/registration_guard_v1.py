@@ -430,7 +430,7 @@ def guarded_register(payload: GuardedRegisterPayload, request: Request):
             },
         },
         "message": (
-            "注册成功，已获得 24 小时体验时间"
+            "注册成功，已获得 72 小时体验时间"
             if trial_allowed
             else "注册成功，本次未获得免费体验时间"
         ),

@@ -1846,7 +1846,7 @@ public class MainActivity extends Activity {
         boolean admin = isAdminRole(profile.role);
         boolean trial = profile.membershipActive && "trial".equals(profile.membershipKind);
         String label = admin ? "Admin 内测账号"
-                : (trial ? "24 小时体验" : (profile.membershipActive ? "VIP 会员" : "使用时间已到期"));
+                : (trial ? "72 小时体验" : (profile.membershipActive ? "VIP 会员" : "使用时间已到期"));
         int color = admin ? GREEN : (trial ? YELLOW : (profile.membershipActive ? GREEN : RED));
         TextView v = text(label, 14, color, true);
         v.setPadding(0, 0, 0, dp(6));

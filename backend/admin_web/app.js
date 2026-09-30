@@ -14,7 +14,7 @@ function membershipBadge(m,enabled=true,role="user"){
   if(!enabled)return `<span class="badge badge-disabled">账号禁用</span>`;
   if(role==="admin")return `<span class="badge badge-admin">Admin · 内测</span>`;
   if(!m||!m.active)return `<span class="badge badge-expired">已到期</span>`;
-  if(m.kind==="trial")return `<span class="badge badge-expired">24h 体验</span>`;
+  if(m.kind==="trial")return `<span class="badge badge-expired">72h 体验</span>`;
   return `<span class="badge badge-active">VIP 有效</span>`;
 }
 function alertMsg(msg,type="ok"){

@@ -6,7 +6,7 @@ RYLUX V1 后端继续运行在现有 `verify.lovenom.eu.org`，使用 FastAPI + 
 
 新增：
 
-- `app_users`：账号、密码哈希、状态、VIP 到期、24h 体验、最后登录/IP；
+- `app_users`：账号、密码哈希、状态、VIP 到期、72h 体验、最后登录/IP；
 - `app_sessions`：登录 Token 摘要、会话到期、设备哈希；
 - `vip_events`：体验、兑换、管理员续期流水；
 - `plans`：7 / 30 / 90 / 180 / 365 天套餐；
@@ -76,7 +76,7 @@ V1 增加：
 
 代理后台提供所属用户与 VIP 管理、自助添加用户、批量续期、登录设备查看与解绑、用户启用/停用及删除、本人卡密管理/导出、余额与操作流水。每项操作都按已授予的权限限制；发卡权限只能查看本人生成的卡，管理用户或续期只能作用于自己的所属用户。管理员仍可查看和管理全体用户、所有卡密及代理人。
 
-用户调用 `GET /api/v1/referrals/me` 获取邀请码及邀请统计。注册请求可传 `invite_code`。只有获批 24 小时试用、设备 ID 非空、且设备/IP 摘要与邀请者不同的注册计为有效；注册后立即过期的账号不计入。每位有效新用户为邀请者增加 **7 天 VIP**，累计邀请奖励最多 **365 天**。邀请关系在注册时固定，不能事后更换。
+用户调用 `GET /api/v1/referrals/me` 获取邀请码及邀请统计。注册请求可传 `invite_code`。只有获批 72 小时试用、设备 ID 非空、且设备/IP 摘要与邀请者不同的注册计为有效；注册后立即过期的账号不计入。每位有效新用户为邀请者增加 **7 天 VIP**，累计邀请奖励最多 **365 天**。邀请关系在注册时固定，不能事后更换。
 
 V1 尚未接在线支付。管理员发卡时勾选“已收款”，或代理人发卡时标记 `paid=true`，该卡兑换才视为付费购买；被邀请人兑换后，邀请者获得相同天数。代理人使用余额直接为所属用户续期也视为付费购买，并按续期天数奖励邀请者。普通/赠送卡、体验期和管理员人工续期不触发购买奖励。邀请奖励累计上限 **365 天**，包括有效注册奖励和付费购买奖励；超过上限的部分不再发放。流水写入 `referral_rewards` 和 `vip_events`，每张付费卡只能兑换一次，防止重复奖励。
 
@@ -113,6 +113,16 @@ PUT  /admin/api/users/{id}/agent          管理员分配用户归属
 上述管理员写接口沿用 Secure Cookie 与 CSRF。应用客户端需要在注册界面收集邀请码，并把它作为 `invite_code` 发给注册接口，用户才能在软件内参与活动。数据库迁移在服务启动时自动执行；部署时需同步 `agent_referral.py` 和 `agent_web/`。
 
 ## 已有 VPS 升级
+
+### 部署 72 小时新用户体验期限
+
+这项后端改动必须先推送到 GitHub `main`。在 VPS SSH 终端运行下面一条命令；脚本默认解析并部署当时 `main` 的最新提交，也可在 `sudo bash` 后追加一个完整 40 位 commit SHA 来固定版本：
+
+```bash
+curl -fsSLo /tmp/deploy-trial-72h.sh https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/tools/deploy-trial-72h.sh && sudo bash /tmp/deploy-trial-72h.sh
+```
+
+脚本仅更新 `/opt/pakredirect-license/user_v1.py`、`registration_guard_v1.py`、`admin_web/app.js` 和 `admin_web/index.html`，将文件安装为 `paklicense` 所有，并重启 `pakredirect-license.service`。它会校验源码与固定 commit 一致、检查 Python 语法和本机健康接口；部署前四个文件都会备份到 `/var/backups/pakredirect-license/trial-72h/`。安装、重启或健康检查失败时会恢复全部备份文件，再重启并检查服务。不会修改数据库、配置、Nginx 或依赖。Android 上的体验时长标签需要另行构建并发布 APK。
 
 ### 仅部署邀请名单接口变更
 

@@ -18,7 +18,7 @@ router = APIRouter()
 
 PASSWORD_ITERATIONS = 310_000
 SESSION_DAYS = 30
-TRIAL_HOURS = 24
+TRIAL_HOURS = 72
 MAX_BOUND_DEVICES = 3
 VIP_PRESETS = (1, 7, 30, 90, 180, 365)
 TARGET_PACKAGE = "com.tepaylink.tamgioiphantranhmobile"
@@ -586,7 +586,7 @@ def register(payload: RegisterPayload, request: Request):
                 "trial_expires_at": iso(trial_expires),
             },
         },
-        "message": "注册成功，已获得 24 小时体验时间",
+        "message": "注册成功，已获得 72 小时体验时间",
     }
 
 
