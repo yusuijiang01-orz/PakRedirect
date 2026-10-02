@@ -34,18 +34,18 @@ import java.util.WeakHashMap;
  * and references.
  */
 public final class RyluxUiPolish {
-    private static final int BG_TOP = Color.rgb(8, 14, 23);
-    private static final int BG_BOTTOM = Color.rgb(5, 8, 13);
-    private static final int PANEL_TOP = Color.rgb(20, 29, 43);
-    private static final int PANEL_BOTTOM = Color.rgb(13, 20, 31);
-    private static final int SURFACE = Color.rgb(16, 24, 36);
+    static final int BG_TOP = Color.rgb(8, 14, 23);
+    static final int BG_BOTTOM = Color.rgb(5, 8, 13);
+    static final int PANEL_TOP = Color.rgb(20, 29, 43);
+    static final int PANEL_BOTTOM = Color.rgb(13, 20, 31);
+    static final int SURFACE = Color.rgb(16, 24, 36);
     private static final int SURFACE_2 = Color.rgb(20, 31, 47);
-    private static final int BORDER = Color.rgb(49, 70, 99);
+    static final int BORDER = Color.rgb(49, 70, 99);
     private static final int BORDER_SOFT = Color.rgb(35, 50, 72);
-    private static final int TEXT = Color.rgb(241, 246, 252);
-    private static final int MUTED = Color.rgb(142, 157, 177);
+    static final int TEXT = Color.rgb(241, 246, 252);
+    static final int MUTED = Color.rgb(142, 157, 177);
     private static final int MUTED_2 = Color.rgb(102, 119, 142);
-    private static final int BLUE = Color.rgb(58, 129, 255);
+    static final int BLUE = Color.rgb(58, 129, 255);
     private static final int BLUE_LIGHT = Color.rgb(92, 161, 255);
     private static final int BLUE_DARK = Color.rgb(24, 79, 188);
     private static final int RED = Color.rgb(235, 70, 74);
@@ -343,29 +343,42 @@ public final class RyluxUiPolish {
     }
 
     private static void rebuildAccountPanel(Activity activity, LinearLayout panel) {
-        if (panel.getChildCount() < 9) {
-            styleFallbackPanel(activity, panel);
-            return;
-        }
-
         ArrayList<View> children = snapshot(panel);
-        View header = children.get(0);
-        TextView username = asText(children.get(1));
-        TextView state = asText(children.get(2));
-        View expiry = children.get(3);
-        Button refresh = asButton(children.get(4));
-        TextView redeemTitle = asText(children.get(5));
-        EditText code = asEdit(children.get(6));
-        Button redeem = asButton(children.get(7));
-        Button logout = null;
-        for (int i = 8; i < children.size(); i++) {
-            View child = children.get(i);
-            if (child instanceof Button && "退出登录".equals(value((Button) child))) {
-                logout = (Button) child;
-                break;
+        View header = null, expiry = null;
+        TextView username = null, state = null, redeemTitle = null;
+        EditText code = null;
+        Button refresh = null, purchase = null, redeem = null, logout = null;
+        // Match the original views rather than their positions: adding an account
+        // action must not replace an input/button and discard its listener.
+        for (View child : children) {
+            if (child instanceof Button) {
+                Button button = (Button) child;
+                String text = value(button);
+                if (text.contains("刷新会员")) refresh = button;
+                else if (text.startsWith("在线充值")) purchase = button;
+                else if ("兑换到当前账号".equals(text)) redeem = button;
+                else if ("退出登录".equals(text)) logout = button;
+            } else if (child instanceof EditText) {
+                code = (EditText) child;
+            } else if (child instanceof TextView) {
+                TextView text = (TextView) child;
+                if ("兑换码充值".equals(value(text))) redeemTitle = text;
+                else if (username == null) username = text;
+                else if (state == null) state = text;
+            } else if (child instanceof ViewGroup) {
+                ArrayList<View> nested = new ArrayList<>();
+                collect(child, nested);
+                for (View view : nested) {
+                    if (!(view instanceof TextView)) continue;
+                    String text = value((TextView) view);
+                    if ("账号中心".equals(text)) header = child;
+                    else if ("VIP 到期时间".equals(text)) expiry = child;
+                }
             }
         }
-        if (logout == null) {
+        if (header == null || username == null || state == null || expiry == null
+                || refresh == null || redeemTitle == null || code == null
+                || redeem == null || logout == null) {
             styleFallbackPanel(activity, panel);
             return;
         }
@@ -438,7 +451,18 @@ public final class RyluxUiPolish {
         profileLp.topMargin = dp(activity, 12);
         panel.addView(profileCard, profileLp);
 
-        redeemTitle.setText("✦  兑换码充值  ✦");
+        if (purchase != null) {
+            purchase.setText("在线充值 VIP");
+            stylePrimaryButton(activity, purchase);
+            purchase.setTextSize(16);
+            LinearLayout.LayoutParams purchaseLp =
+                    new LinearLayout.LayoutParams(-1, dp(activity, 48));
+            purchaseLp.topMargin = dp(activity, 14);
+            panel.addView(purchase, purchaseLp);
+        }
+
+        redeemTitle.setText("兑换码充值");
+        redeemTitle.setPadding(0, 0, 0, 0);
         redeemTitle.setGravity(Gravity.CENTER);
         redeemTitle.setTextSize(16);
         redeemTitle.setTextColor(TEXT);
@@ -457,8 +481,10 @@ public final class RyluxUiPolish {
         redeemLp.topMargin = dp(activity, 10);
         panel.addView(redeem, redeemLp);
 
-        for (int i = 8; i < children.size(); i++) {
-            View child = children.get(i);
+        for (View child : children) {
+            if (child == header || child == username || child == state || child == expiry
+                    || child == refresh || child == purchase || child == redeemTitle
+                    || child == code || child == redeem) continue;
             if (child == logout) {
                 styleDangerButton(activity, logout);
                 LinearLayout.LayoutParams logoutLp =
@@ -732,7 +758,7 @@ public final class RyluxUiPolish {
         ));
     }
 
-    private static void styleOutlineButton(Activity activity, Button button, boolean emphasized) {
+    static void styleOutlineButton(Activity activity, Button button, boolean emphasized) {
         button.setAllCaps(false);
         button.setTextSize(14);
         button.setTypeface(Typeface.DEFAULT, Typeface.NORMAL);
@@ -837,10 +863,6 @@ public final class RyluxUiPolish {
         return view instanceof TextView ? (TextView) view : new TextView(view.getContext());
     }
 
-    private static EditText asEdit(View view) {
-        return view instanceof EditText ? (EditText) view : new EditText(view.getContext());
-    }
-
     private static Button asButton(View view) {
         return view instanceof Button ? (Button) view : new Button(view.getContext());
     }
@@ -872,7 +894,7 @@ public final class RyluxUiPolish {
         return view;
     }
 
-    private static GradientDrawable verticalGradient(int top, int bottom, float radius) {
+    static GradientDrawable verticalGradient(int top, int bottom, float radius) {
         GradientDrawable drawable = new GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[]{top, bottom}
@@ -881,7 +903,7 @@ public final class RyluxUiPolish {
         return drawable;
     }
 
-    private static GradientDrawable round(
+    static GradientDrawable round(
             Activity activity,
             int fill,
             float radiusDp,

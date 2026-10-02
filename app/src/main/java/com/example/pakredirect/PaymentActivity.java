@@ -3,10 +3,12 @@ package com.example.pakredirect;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.SharedPreferences;
-import android.graphics.Color;
+import android.graphics.Typeface;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.view.Gravity;
+import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -28,6 +30,16 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+import static com.example.pakredirect.RyluxUiPolish.BG_TOP;
+import static com.example.pakredirect.RyluxUiPolish.BG_BOTTOM;
+import static com.example.pakredirect.RyluxUiPolish.PANEL_TOP;
+import static com.example.pakredirect.RyluxUiPolish.PANEL_BOTTOM;
+import static com.example.pakredirect.RyluxUiPolish.SURFACE;
+import static com.example.pakredirect.RyluxUiPolish.BORDER;
+import static com.example.pakredirect.RyluxUiPolish.TEXT;
+import static com.example.pakredirect.RyluxUiPolish.MUTED;
+import static com.example.pakredirect.RyluxUiPolish.BLUE;
+
 /** SDK responses are UI hints only. Entitlement always comes from our server. */
 public final class PaymentActivity extends Activity {
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -36,7 +48,7 @@ public final class PaymentActivity extends Activity {
     private SharedPreferences prefs;
     private String token, accountKey, orderId;
     private LinearLayout content, plansBox;
-    private TextView status;
+    private TextView status, intro;
     private boolean busy, querying, resumed;
     private int polls;
     private final Runnable poll = () -> queryOrder(false);
@@ -49,21 +61,38 @@ public final class PaymentActivity extends Activity {
         prefs = getSharedPreferences("rylux_payments", MODE_PRIVATE);
         accountKey = auth.loadUsername() + ":";
         orderId = prefs.getString(accountKey + "order", "");
-        getWindow().setStatusBarColor(Color.rgb(16, 20, 29));
+        getWindow().setStatusBarColor(BG_TOP);
+        getWindow().setNavigationBarColor(BG_BOTTOM);
+        getWindow().getDecorView().setSystemUiVisibility(0);
         ScrollView scroll = new ScrollView(this);
+        scroll.setBackground(RyluxUiPolish.verticalGradient(BG_TOP, BG_BOTTOM, 0));
+        scroll.setClipToPadding(false);
         content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(36, 36, 36, 48);
-        content.setBackgroundColor(Color.rgb(16, 20, 29));
+        content.setPadding(dp(22), dp(24), dp(22), dp(32));
         scroll.setFillViewport(true);
         scroll.addView(content);
         setContentView(scroll);
-        label("VIP 在线充值", 24);
-        label("支付后自动开通；有效会员续费会在原到期时间上顺延。", 15);
-        status = label("正在加载套餐…", 15);
+        TextView brand = label("RYLUX", 12);
+        brand.setTextColor(BLUE);
+        brand.setLetterSpacing(0.18f);
+        brand.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        TextView title = label("VIP 充值", 26);
+        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        intro = label("选好套餐和支付方式，付款后会员会自动开通。已有会员从当前到期时间继续续期。", 14);
+        intro.setTextColor(MUTED);
+        status = label("正在加载套餐…", 14);
+        status.setPadding(dp(16), dp(16), dp(16), dp(16));
+        status.setLineSpacing(dp(4), 1f);
+        status.setBackground(RyluxUiPolish.round(this, PANEL_TOP, 16, BORDER, 1));
         plansBox = new LinearLayout(this);
         plansBox.setOrientation(LinearLayout.VERTICAL);
-        content.addView(plansBox);
+        LinearLayout.LayoutParams plansLp = new LinearLayout.LayoutParams(-1, -2);
+        plansLp.topMargin = dp(6);
+        content.addView(plansBox, plansLp);
+        TextView ordersTitle = label("订单与记录", 12);
+        ordersTitle.setTextColor(MUTED);
+        ordersTitle.setPadding(0, dp(24), 0, dp(4));
         button(content, "查询当前订单", () -> { polls = 0; queryOrder(true); });
         button(content, "充值记录", this::loadHistory);
         button(content, "返回账号中心", this::finish);
@@ -72,17 +101,63 @@ public final class PaymentActivity extends Activity {
 
     private TextView label(String value, int size) {
         TextView view = new TextView(this);
-        view.setText(value); view.setTextColor(Color.WHITE); view.setTextSize(size);
-        view.setPadding(0, 12, 0, 20); content.addView(view);
+        view.setText(value); view.setTextColor(TEXT); view.setTextSize(size);
+        view.setIncludeFontPadding(false);
+        view.setPadding(0, dp(4), 0, dp(12)); content.addView(view);
         return view;
     }
 
     private Button button(LinearLayout parent, String title, Runnable action) {
         Button button = new Button(this);
         button.setText(title); button.setAllCaps(false);
+        button.setGravity(Gravity.CENTER);
+        button.setPadding(dp(16), dp(10), dp(16), dp(10));
+        button.setMinimumHeight(0);
+        button.setMinHeight(0);
+        RyluxUiPolish.styleOutlineButton(this, button, false);
         button.setOnClickListener(v -> action.run());
-        parent.addView(button, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(48));
+        lp.topMargin = dp(10);
+        parent.addView(button, lp);
         return button;
+    }
+
+    private int dp(float value) {
+        return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    private AlertDialog.Builder dialog(String title) {
+        TextView heading = new TextView(this);
+        heading.setText(title);
+        heading.setTextSize(18);
+        heading.setTextColor(TEXT);
+        heading.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        heading.setPadding(dp(22), dp(22), dp(22), dp(12));
+        return new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setCustomTitle(heading);
+    }
+
+    private void showDialog(AlertDialog.Builder builder) {
+        AlertDialog dialog = builder.create();
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(
+                    RyluxUiPolish.verticalGradient(PANEL_TOP, PANEL_BOTTOM, dp(18)));
+        }
+        TextView message = dialog.findViewById(android.R.id.message);
+        if (message != null) message.setTextColor(TEXT);
+        if (dialog.getListView() != null) dialog.getListView().setBackgroundColor(SURFACE);
+        Button primary = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+        if (primary != null) {
+            RyluxUiPolish.stylePrimaryButton(this, primary);
+            primary.setTextSize(14);
+            primary.setPadding(dp(16), 0, dp(16), 0);
+        }
+        Button cancel = dialog.getButton(AlertDialog.BUTTON_NEGATIVE);
+        if (cancel != null) {
+            RyluxUiPolish.styleOutlineButton(this, cancel, false);
+            cancel.setPadding(dp(16), 0, dp(16), 0);
+        }
     }
 
     private void ui(Runnable action) {
@@ -98,16 +173,27 @@ public final class PaymentActivity extends Activity {
                     JSONArray channels = catalog.optJSONArray("channels");
                     JSONArray plans = catalog.optJSONArray("plans");
                     if (!catalog.optBoolean("purchase_enabled") || channels == null || channels.length() == 0) {
-                        status.setText(catalog.optString("message", "在线支付暂未开放")); return;
+                        intro.setVisibility(View.GONE);
+                        status.setText("在线支付还没开通，可以先用兑换码开通会员。"); return;
                     }
-                    status.setText("选择套餐和支付方式");
+                    intro.setVisibility(View.VISIBLE);
+                    status.setText("选择套餐后即可支付");
                     if (plans == null) return;
                     for (int i = 0; i < plans.length(); i++) {
                         JSONObject plan = plans.optJSONObject(i);
                         if (plan == null) continue;
-                        String title = plan.optString("name") + " · " + plan.optInt("days") + " 天 · ¥"
+                        String title = plan.optString("name") + "\n" + plan.optInt("days") + " 天 · ¥"
                                 + String.format(Locale.CHINA, "%.2f", plan.optInt("amount_fen") / 100.0);
-                        purchaseButtons.add(button(plansBox, title, () -> chooseChannel(plan, channels, title)));
+                        Button purchase = button(plansBox, title, () -> chooseChannel(plan, channels, title));
+                        RyluxUiPolish.stylePrimaryButton(this, purchase);
+                        purchase.setTextSize(17);
+                        purchase.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+                        purchase.setPadding(dp(18), dp(10), dp(18), dp(10));
+                        LinearLayout.LayoutParams purchaseLp =
+                                (LinearLayout.LayoutParams) purchase.getLayoutParams();
+                        purchaseLp.height = dp(80);
+                        purchase.setLayoutParams(purchaseLp);
+                        purchaseButtons.add(purchase);
                     }
                 });
             } catch (Exception error) { ui(() -> status.setText("套餐加载失败：" + error.getMessage())); }
@@ -123,18 +209,22 @@ public final class PaymentActivity extends Activity {
                 codes.add(code); labels.add("alipay".equals(code) ? "支付宝支付" : "微信支付");
             }
         }
-        new AlertDialog.Builder(this).setTitle(title)
+        showDialog(dialog(title)
                 .setItems(labels.toArray(new String[0]), (dialog, index) ->
-                        new AlertDialog.Builder(this).setTitle("确认充值")
-                                .setMessage(title + "\n" + labels.get(index) + "\n请先在充值记录确认上一笔订单，避免重复购买。")
+                        showDialog(dialog("确认充值")
+                                .setMessage(title + "\n" + labels.get(index) + "\n如有未完成订单，请先查询充值记录。")
                                 .setPositiveButton("去支付", (d, which) -> create(plan.optString("code"), codes.get(index)))
-                                .setNegativeButton("取消", null).show())
-                .setNegativeButton("取消", null).show();
+                                .setNegativeButton("取消", null)))
+                .setNegativeButton("取消", null));
     }
 
     private void setBusy(boolean value) {
         busy = value;
-        for (Button button : purchaseButtons) button.setEnabled(!value);
+        for (Button button : purchaseButtons) {
+            button.setEnabled(!value);
+            RyluxUiPolish.stylePrimaryButton(this, button);
+            button.setTextSize(17);
+        }
     }
 
     private void create(String plan, String channel) {
@@ -170,7 +260,7 @@ public final class PaymentActivity extends Activity {
                 }
                 ui(() -> {
                     setBusy(false);
-                    status.setText("下单未确认：" + error.getMessage() + "\n重新选择同一套餐和渠道会重试原订单；也可查看充值记录。");
+                    status.setText("订单创建未确认：" + error.getMessage() + "\n请选择同一套餐和支付方式重试，或查看充值记录。");
                 });
             }
         });
@@ -183,8 +273,8 @@ public final class PaymentActivity extends Activity {
                 String hint;
                 try {
                     String result = new PayTask(this).payV2(payment.optString("order_string"), true).get("resultStatus");
-                    hint = "6001".equals(result) ? "已取消支付，正在确认订单状态。" : "已返回，正在向服务器确认支付结果。";
-                } catch (Exception error) { hint = "支付宝未能完成调起，请查询订单结果。"; }
+                    hint = "6001".equals(result) ? "已取消支付，正在确认订单状态。" : "正在确认支付结果…";
+                } catch (Exception error) { hint = "未能打开支付宝，请查询订单结果。"; }
                 final String message = hint;
                 ui(() -> { setBusy(false); status.setText(message); polls = 0; queryOrder(false); });
             });
@@ -200,7 +290,7 @@ public final class PaymentActivity extends Activity {
                 req.prepayId = payment.getString("prepayid"); req.packageValue = payment.getString("package");
                 req.nonceStr = payment.getString("noncestr"); req.timeStamp = payment.getString("timestamp");
                 req.sign = payment.getString("sign");
-                if (!api.sendReq(req)) throw new Exception("微信支付调起失败");
+                if (!api.sendReq(req)) throw new Exception("无法打开微信支付");
             } catch (Exception error) { status.setText(error.getMessage() + "，可查询当前订单。"); }
             setBusy(false);
             handler.postDelayed(poll, 5000);
@@ -227,10 +317,10 @@ public final class PaymentActivity extends Activity {
                     if ("pending".equals(order.optString("status")) && ++polls < 12 && resumed) {
                         handler.postDelayed(poll, 5000);
                     }
-                    if (!result.optBoolean("sync_ok", true)) status.append("\n支付平台查询暂不可用，请稍后重试。");
+                    if (!result.optBoolean("sync_ok", true)) status.append("\n暂时无法确认支付结果，请稍后查询。");
                 });
             } catch (Exception error) {
-                ui(() -> { querying = false; status.setText("查询失败：" + error.getMessage() + "\n请稍后查询，切勿重复支付。"); });
+                ui(() -> { querying = false; status.setText("查询失败：" + error.getMessage() + "\n如已扣款，请勿重复支付。"); });
             }
         });
     }
@@ -257,12 +347,12 @@ public final class PaymentActivity extends Activity {
                 }
                 ui(() -> {
                     if (labels.length == 0) { Toast.makeText(this, "暂无充值记录", Toast.LENGTH_SHORT).show(); return; }
-                    new AlertDialog.Builder(this).setTitle("最近 30 笔充值记录（点击查询）")
+                    showDialog(dialog("充值记录 · 点击查询")
                             .setItems(labels, (d, index) -> {
                                 orderId = orders.optJSONObject(index).optString("order_id"); polls = 0;
                                 prefs.edit().putString(accountKey + "order", orderId).apply();
                                 queryOrder(true);
-                            }).setNegativeButton("关闭", null).show();
+                            }).setNegativeButton("关闭", null));
                 });
             } catch (Exception error) { ui(() -> status.setText("充值记录加载失败：" + error.getMessage())); }
         });
