@@ -40,11 +40,11 @@ async function loadMe(){
 function showView(name){
   if(state.mustChange&&name!=="settings")name="settings";
   state.view=name;
-  ["overview","users","agents","licenses","logs","settings"].forEach(v=>$(`view-${v}`).classList.toggle("hidden",v!==name));
+  ["overview","users","agents","licenses","logs","payments","settings"].forEach(v=>$(`view-${v}`).classList.toggle("hidden",v!==name));
   qsa(".nav-btn").forEach(b=>b.classList.toggle("active",b.dataset.view===name));
-  const titles={overview:"数据概览",users:"用户 / VIP",agents:"代理人",licenses:"兑换码",logs:"操作日志",settings:"系统设置"};
+  const titles={overview:"数据概览",users:"用户 / VIP",agents:"代理人",licenses:"兑换码",logs:"操作日志",payments:"支付配置",settings:"系统设置"};
   $("pageTitle").textContent=titles[name];$("sidebar").classList.remove("open");
-  if(name==="overview")loadOverview();if(name==="users")loadUsers();if(name==="agents")loadAgents();if(name==="licenses")loadLicenses();if(name==="logs")loadLogs();
+  if(name==="overview")loadOverview();if(name==="users")loadUsers();if(name==="agents")loadAgents();if(name==="licenses")loadLicenses();if(name==="logs")loadLogs();if(name==="payments")loadPaymentSettings();
 }
 async function loadOverview(){
   try{
@@ -144,6 +144,37 @@ async function copyAllFilteredKeys(){
 async function loadLogs(){
   try{const d=await api(`/admin/api/logs?page=${state.logPage}&page_size=40`);state.logPages=d.pages;$("logBody").innerHTML=d.items.length?d.items.map(r=>`<tr><td>#${r.id}</td><td class="code">${esc(r.action)}</td><td>${esc(r.target||"-")}</td><td>${esc(r.details||"-")}</td><td>${esc(r.ip_address||"-")}</td><td>${fmt(r.created_at)}</td></tr>`).join(""):`<tr><td class="empty" colspan="6">暂无操作日志</td></tr>`;$("logPagerInfo").textContent=`第 ${d.page} / ${d.pages} 页 · 共 ${d.total} 条`;$("logPrevBtn").disabled=state.logPage<=1;$("logNextBtn").disabled=state.logPage>=state.logPages}catch(e){alertMsg(e.message,"error")}
 }
+async function loadPaymentSettings(){
+  try{
+    const data=await api("/admin/api/payments"),a=data.channels.alipay,w=data.channels.wechat;
+    $("paymentCallbackBase").value=data.callback_base_url||"https://verify.lovenom.eu.org";
+    $("alipayEnabled").checked=a.enabled;$("alipayAppId").value=a.app_id||"";$("alipaySellerId").value=a.merchant_id||"";
+    $("wechatEnabled").checked=w.enabled;$("wechatAppId").value=w.app_id||"";$("wechatMchId").value=w.merchant_id||"";
+    $("wechatCertSerial").value=w.cert_serial||"";$("wechatPublicKeyId").value=w.public_key_id||"";
+    $("alipayState").textContent=a.configured?`已${a.enabled?"开放":"配置但关闭"} · 私钥${a.has_private_key?"已配置":"缺失"} · 公钥${a.has_public_key?"已配置":"缺失"}`:"资料未完整，保存时选择开放将提示缺失项。";
+    $("wechatState").textContent=w.configured?`已${w.enabled?"开放":"配置但关闭"} · 私钥${w.has_private_key?"已配置":"缺失"} · 微信支付公钥${w.has_public_key?"已配置":"缺失"} · APIv3 密钥${w.has_api_v3_key?"已配置":"缺失"}`:"资料未完整，保存时选择开放将提示缺失项。";
+  }catch(e){alertMsg(e.message,"error")}
+}
+async function savePaymentSettings(){
+  const body={
+    payment_base_url:$("paymentCallbackBase").value.trim(),
+    alipay_enabled:$("alipayEnabled").checked,alipay_app_id:$("alipayAppId").value.trim(),alipay_seller_id:$("alipaySellerId").value.trim(),
+    alipay_private_key_pem:$("alipayPrivateKey").value,alipay_public_key_pem:$("alipayPublicKey").value,
+    clear_alipay_private_key:$("clearAlipayPrivateKey").checked,clear_alipay_public_key:$("clearAlipayPublicKey").checked,
+    wechat_enabled:$("wechatEnabled").checked,wechat_app_id:$("wechatAppId").value.trim(),wechat_mch_id:$("wechatMchId").value.trim(),
+    wechat_cert_serial:$("wechatCertSerial").value.trim(),wechat_private_key_pem:$("wechatPrivateKey").value,
+    wechat_public_key_id:$("wechatPublicKeyId").value.trim(),wechat_public_key_pem:$("wechatPublicKey").value,
+    wechat_api_v3_key:$("wechatApiV3Key").value,clear_wechat_private_key:$("clearWechatPrivateKey").checked,
+    clear_wechat_public_key:$("clearWechatPublicKey").checked,clear_wechat_api_v3_key:$("clearWechatApiV3Key").checked
+  };
+  const button=$("savePaymentSettings");button.disabled=true;
+  try{
+    await api("/admin/api/payments",{method:"PUT",body});
+    ["alipayPrivateKey","alipayPublicKey","wechatPrivateKey","wechatPublicKey","wechatApiV3Key"].forEach(id=>$(id).value="");
+    ["clearAlipayPrivateKey","clearAlipayPublicKey","clearWechatPrivateKey","clearWechatPublicKey","clearWechatApiV3Key"].forEach(id=>$(id).checked=false);
+    alertMsg("支付配置已保存并立即生效");await loadPaymentSettings();
+  }catch(e){alertMsg(e.message,"error")}finally{button.disabled=false}
+}
 function openModal(id){$(id).classList.remove("hidden")}function closeModal(id){$(id).classList.add("hidden")}
 async function generate(){
   const quantity=Number($("genQty").value),label=$("genLabel").value.trim();if(!Number.isInteger(quantity)||quantity<1||quantity>1000){alertMsg("生成数量必须为 1-1000","error");return}
@@ -203,6 +234,7 @@ async function assignAgent(){
 function bind(){
   $("agentSave").onclick=saveAgent;$("agentAssign").onclick=assignAgent;$("agentBalanceForm").onsubmit=adjustAgentBalance;$("agentBalanceId").oninput=()=>{const agent=agentItems.find(item=>String(item.id)===$("agentBalanceId").value);$("agentBalanceSelected").textContent=agent?`${agent.username} (#${agent.id}) · 当前余额 ${agentMoney(agent.balance_cents)}`:"请核对代理人 ID 后提交调整。"};
   qsa(".nav-btn").forEach(b=>b.onclick=()=>showView(b.dataset.view));qsa("[data-jump]").forEach(b=>b.onclick=()=>showView(b.dataset.jump));$("menuBtn").onclick=()=>$("sidebar").classList.toggle("open");$("logoutBtn").onclick=logout;
+  $("savePaymentSettings").onclick=savePaymentSettings;
   $("generateBtn").onclick=()=>openModal("generateModal");$("toggleRevealBtn").onclick=()=>{state.revealKeys=!state.revealKeys;loadLicenses()};$("copyAllBtn").onclick=copyAllFilteredKeys;qsa("[data-close]").forEach(b=>b.onclick=()=>closeModal(b.dataset.close));
   qsa(".day-btn").forEach(b=>b.onclick=(e)=>{e.preventDefault();state.days=Number(b.dataset.days);qsa(".day-btn").forEach(x=>x.classList.toggle("active",x===b))});$("confirmGenerate").onclick=generate;$("copyKeysBtn").onclick=copyKeys;$("downloadKeysBtn").onclick=downloadText;
   $("searchBtn").onclick=()=>{state.licensePage=1;loadLicenses()};$("resetSearchBtn").onclick=()=>{$("searchInput").value="";$("statusFilter").value="";state.licensePage=1;loadLicenses()};$("searchInput").addEventListener("keydown",e=>{if(e.key==="Enter")$("searchBtn").click()});

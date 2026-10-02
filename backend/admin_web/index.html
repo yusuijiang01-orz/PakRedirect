@@ -19,6 +19,7 @@
       <button class="nav-btn" data-view="agents">代理人</button>
       <button class="nav-btn" data-view="licenses">兑换码</button>
       <button class="nav-btn" data-view="logs">操作日志</button>
+      <button class="nav-btn" data-view="payments">支付配置</button>
       <button class="nav-btn" data-view="settings">系统设置</button>
     </nav>
     <div class="sidebar-footer">verify.lovenom.eu.org<br>RYLUX V1 · FastAPI + SQLite</div>
@@ -227,10 +228,46 @@
               <div class="info-row"><span class="muted">用户登录</span><span class="code">/api/v1/auth/login</span></div>
               <div class="info-row"><span class="muted">新用户体验</span><span>72 小时</span></div>
               <div class="info-row"><span class="muted">套餐</span><span>7 / 30 / 90 / 180 / 365 天</span></div>
-              <div class="info-row"><span class="muted">在线支付</span><span>V1 暂未开放</span></div>
+              <div class="info-row"><span class="muted">在线支付</span><span>在“支付配置”中设置商户信息</span></div>
               <div class="info-row"><span class="muted">首个模块</span><span>三国汉化 / localhost PAK</span></div>
               <div class="info-row"><span class="muted">旧卡密 API</span><span>保留兼容</span></div>
             </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-payments" class="hidden">
+        <div class="panel">
+          <div class="panel-head"><div><h3>在线支付配置</h3><p class="muted">填写商户资料并保存后立即生效，无需登录 VPS 或重启后端。</p></div></div>
+          <div class="panel-body">
+            <div class="alert alert-warn">私钥和 APIv3 密钥只会写入 VPS 的受限权限文件，不会回显或写入操作日志。请确认当前后台使用 HTTPS。</div>
+            <div class="form-group"><label>支付回调 HTTPS 域名</label><input class="input" id="paymentCallbackBase" type="url" required value="https://verify.lovenom.eu.org"><small class="muted">回调地址在域名后自动拼接；填写本后端的公网域名，需要有效 HTTPS 证书且可公网访问。</small></div>
+            <div class="settings-grid">
+              <section class="panel" style="margin:0">
+                <div class="panel-head"><h3>支付宝 App 支付</h3><label><input id="alipayEnabled" type="checkbox"> 保存后开放</label></div>
+                <div class="panel-body">
+                  <p class="muted" id="alipayState">正在读取配置…</p>
+                  <div class="form-group"><label>应用 AppID</label><input class="input" id="alipayAppId" maxlength="128" autocomplete="off"></div>
+                  <div class="form-group"><label>收款方 SELLER_ID</label><input class="input" id="alipaySellerId" maxlength="128" autocomplete="off"></div>
+                  <div class="form-group"><label>应用 RSA2 私钥 PEM</label><textarea class="input" id="alipayPrivateKey" rows="5" autocomplete="off" spellcheck="false" placeholder="留空保留已保存的密钥"></textarea><label><input id="clearAlipayPrivateKey" type="checkbox"> 清除已保存私钥</label></div>
+                  <div class="form-group"><label>支付宝公钥 PEM</label><textarea class="input" id="alipayPublicKey" rows="5" autocomplete="off" spellcheck="false" placeholder="留空保留已保存的密钥"></textarea><label><input id="clearAlipayPublicKey" type="checkbox"> 清除已保存公钥</label></div>
+                </div>
+              </section>
+              <section class="panel" style="margin:0">
+                <div class="panel-head"><h3>微信 App 支付</h3><label><input id="wechatEnabled" type="checkbox"> 保存后开放</label></div>
+                <div class="panel-body">
+                  <p class="muted" id="wechatState">正在读取配置…</p>
+                  <div class="form-group"><label>移动应用 AppID</label><input class="input" id="wechatAppId" maxlength="128" autocomplete="off"></div>
+                  <div class="form-group"><label>微信支付商户号 MCH_ID</label><input class="input" id="wechatMchId" maxlength="64" autocomplete="off"></div>
+                  <div class="form-group"><label>商户 API 证书序列号</label><input class="input" id="wechatCertSerial" maxlength="128" autocomplete="off"></div>
+                  <div class="form-group"><label>商户 API 私钥 PEM</label><textarea class="input" id="wechatPrivateKey" rows="5" autocomplete="off" spellcheck="false" placeholder="留空保留已保存的密钥"></textarea><label><input id="clearWechatPrivateKey" type="checkbox"> 清除已保存私钥</label></div>
+                  <div class="form-group"><label>微信支付公钥 ID</label><input class="input" id="wechatPublicKeyId" maxlength="128" autocomplete="off"></div>
+                  <div class="form-group"><label>微信支付公钥 PEM</label><textarea class="input" id="wechatPublicKey" rows="5" autocomplete="off" spellcheck="false" placeholder="留空保留已保存的密钥"></textarea><label><input id="clearWechatPublicKey" type="checkbox"> 清除已保存公钥</label></div>
+                  <div class="form-group"><label>APIv3 密钥（32 字节）</label><input class="input" id="wechatApiV3Key" type="password" maxlength="128" autocomplete="new-password" placeholder="留空保留已保存的密钥"><label><input id="clearWechatApiV3Key" type="checkbox"> 清除已保存 APIv3 密钥</label></div>
+                </div>
+              </section>
+            </div>
+            <div class="agent-form-actions"><button class="btn btn-primary" id="savePaymentSettings">保存支付配置</button><span class="muted">关闭开关会停止新下单，已创建订单仍可查单和接收回调。</span></div>
           </div>
         </div>
       </section>

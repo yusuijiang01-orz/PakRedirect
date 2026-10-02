@@ -200,6 +200,35 @@ public final class AuthClient {
         request("POST", "/auth/logout", token, new JSONObject());
     }
 
+    public static JSONObject paymentCatalog() throws Exception {
+        return paymentResponse(request("GET", "/plans", null, null));
+    }
+
+    public static JSONObject createPayment(String token, String channel, String plan, String requestId) throws Exception {
+        if (!"alipay".equals(channel) && !"wechat".equals(channel)) throw new Exception("无效支付方式");
+        JSONObject body = new JSONObject().put("plan_code", plan).put("request_id", requestId);
+        return paymentResponse(request("POST", "/payments/" + channel + "/orders", token, body));
+    }
+
+    public static JSONObject paymentOrder(String token, String orderId) throws Exception {
+        if (!orderId.matches("R[a-f0-9]{30}")) throw new Exception("无效订单编号");
+        return paymentResponse(request("GET", "/payments/orders/" + orderId, token, null));
+    }
+
+    public static JSONObject paymentHistory(String token) throws Exception {
+        return paymentResponse(request("GET", "/payments/orders", token, null));
+    }
+
+    private static JSONObject paymentResponse(HttpResult result) throws Exception {
+        if (!result.requestOk || !result.success) throw new PaymentException(result.message, result.statusCode);
+        return result.json;
+    }
+
+    public static final class PaymentException extends Exception {
+        public final int statusCode;
+        PaymentException(String message, int statusCode) { super(message); this.statusCode = statusCode; }
+    }
+
     private static AuthResult parseAuth(JSONObject json, String fallbackMessage) {
         String token = nullable(json.optString("token", null));
         JSONObject user = json.optJSONObject("user");
@@ -229,7 +258,7 @@ public final class AuthClient {
             connection = (HttpURLConnection) url.openConnection();
             connection.setRequestMethod(method);
             connection.setConnectTimeout(8000);
-            connection.setReadTimeout(8000);
+            connection.setReadTimeout(path.startsWith("/payments/") ? 20000 : 8000);
             connection.setUseCaches(false);
             connection.setRequestProperty("Accept", "application/json");
             connection.setRequestProperty("User-Agent", "RYLUX/2.0");

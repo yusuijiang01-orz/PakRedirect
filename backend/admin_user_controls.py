@@ -305,6 +305,8 @@ def admin_user_delete(user_id: int, request: Request):
         ).fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail="用户不存在")
+        if db.execute("SELECT 1 FROM payment_orders WHERE user_id=? LIMIT 1", (user_id,)).fetchone():
+            raise HTTPException(status_code=409, detail="该账号有支付订单，不能删除；请停用账号")
         username = row["username"]
         db.execute("DELETE FROM app_users WHERE id=?", (user_id,))
         db.commit()

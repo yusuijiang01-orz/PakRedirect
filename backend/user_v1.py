@@ -778,15 +778,8 @@ def self_unbind_device(
 
 @router.get("/api/v1/plans")
 def plans():
-    with open_db() as db:
-        rows = db.execute(
-            "SELECT code,name,days FROM plans WHERE enabled=1 ORDER BY sort_order,id",
-        ).fetchall()
-    return {
-        "purchase_enabled": False,
-        "message": "V1 暂未开放在线支付，可使用兑换码充值",
-        "plans": [dict(row) for row in rows],
-    }
+    from payment_v1 import payment_catalog
+    return payment_catalog()
 
 
 @router.get("/api/v1/modules")

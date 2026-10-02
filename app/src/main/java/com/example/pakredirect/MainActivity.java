@@ -136,6 +136,19 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == 7071) {
+            final String token = currentToken;
+            if (token != null) new Thread(() -> {
+                AuthClient.ProfileResult profile = AuthClient.me(token);
+                runOnUiThread(() -> {
+                    if (!isFinishing() && token.equals(currentToken) && profile.requestOk && profile.success) {
+                        closeActiveOverlayImmediate();
+                        showHome(profile);
+                    }
+                });
+            }, "RYLUX-Payment-Refresh").start();
+            return;
+        }
         if (requestCode != REQUEST_VPN_PERMISSION) return;
         Button button = pendingVpnButton;
         boolean useLocalization = pendingVpnLocalization;
@@ -437,7 +450,10 @@ public class MainActivity extends Activity {
         currentMembershipKind = profile.membershipKind == null ? "expired" : profile.membershipKind;
         currentExpiresAt = profile.expiresAt;
         currentUsername = profile.username;
-        if (!currentMembershipActive) LocalizationSettings.setEnabled(this, false);
+        if (!currentMembershipActive) {
+            LocalizationSettings.setEnabled(this, false);
+            stopInterceptModule();
+        }
         if (!isAdminRole(currentRole)) stopRelayVpn();
         clearTransientViews();
 
@@ -568,6 +584,12 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams refreshLp = new LinearLayout.LayoutParams(-1, dp(46));
         refreshLp.topMargin = dp(16);
         panel.addView(refresh, refreshLp);
+
+        Button purchase = button("在线充值 VIP  ›", PRIMARY, Color.WHITE);
+        purchase.setOnClickListener(v -> startActivityForResult(new Intent(this, PaymentActivity.class), 7071));
+        LinearLayout.LayoutParams purchaseLp = new LinearLayout.LayoutParams(-1, dp(48));
+        purchaseLp.topMargin = dp(12);
+        panel.addView(purchase, purchaseLp);
 
         TextView redeemTitle = text("兑换码充值", 16, TEXT, true);
         redeemTitle.setPadding(0, dp(22), 0, 0);
@@ -1034,6 +1056,14 @@ public class MainActivity extends Activity {
 
         String note = membershipActive ? "关闭后直接使用官方资源" : "会员已到期";
         control.addView(text(note, 10, MUTED, false), new LinearLayout.LayoutParams(-1, -2));
+        if (!membershipActive && !isAdminRole(currentRole)) {
+            Button activateVip = button("会员已过期 · 开通 VIP  ›", PRIMARY, Color.WHITE);
+            activateVip.setOnClickListener(v -> startActivityForResult(
+                    new Intent(this, PaymentActivity.class), 7071));
+            LinearLayout.LayoutParams activateLp = new LinearLayout.LayoutParams(-1, dp(40));
+            activateLp.topMargin = dp(6);
+            control.addView(activateVip, activateLp);
+        }
         return control;
     }
 
@@ -1187,6 +1217,8 @@ public class MainActivity extends Activity {
                             localizationSwitch.setChecked(false);
                             localizationSwitch.setEnabled(false);
                         }
+                        closeActiveOverlayImmediate();
+                        showHome(refreshed);
                         launchOfficialGame(button, true);
                     });
                     return;

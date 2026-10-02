@@ -12,6 +12,7 @@ android {
         targetSdk 35
         versionCode = (project.findProperty('ryluxVersionCode') ?: '29').toInteger()
         versionName = (project.findProperty('ryluxVersionName') ?: '2.4.7').toString()
+        manifestPlaceholders = [ryluxWechatAppId: (project.findProperty('ryluxWechatAppId') ?: 'wx_replace_with_merchant_appid').toString()]
     }
 
     sourceSets {
@@ -50,6 +51,8 @@ android {
 }
 
 dependencies {
+    implementation 'com.alipay.sdk:alipay-sdk-android:15.8.09'
+    implementation 'com.tencent.mm.opensdk:wechat-sdk-android:6.8.40'
     implementation 'androidx.core:core:1.13.1'
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
     implementation('com.zaneschepke:hevtunnel:1.0.0') {

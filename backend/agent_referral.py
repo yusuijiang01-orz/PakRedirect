@@ -676,6 +676,8 @@ def agent_delete_user(user_id: int, request: Request,
     with open_db() as db:
         db.execute("BEGIN IMMEDIATE")
         user = owned_user(db, auth["user_id"], user_id)
+        if db.execute("SELECT 1 FROM payment_orders WHERE user_id=? LIMIT 1", (user_id,)).fetchone():
+            raise HTTPException(status_code=409, detail="该账号有支付订单，不能删除；请停用账号")
         db.execute("DELETE FROM app_users WHERE id=? AND owner_agent_id=? AND role='user'",
                    (user_id, auth["user_id"]))
         record_agent_action(db, auth["user_id"], "user_deleted", f"user:{user_id}",
