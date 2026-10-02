@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 @pytest.fixture
 def setup_backend(monkeypatch, tmp_path):
     monkeypatch.setenv("PAKREDIRECT_LICENSE_DB", str(tmp_path / "licenses.db"))
-    for name in ("app", "agent_referral", "registration_guard_v1", "user_v1", "admin_v2", "admin_key_access", "admin_code_v1", "admin_user_controls", "protected_content"):
+    for name in ("app", "agent_referral", "registration_guard_v1", "user_v1", "admin_v2", "admin_key_access", "admin_code_v1", "admin_user_controls", "protected_content", "payment_v1"):
         sys.modules.pop(name, None)
     import app
     import admin_v2
