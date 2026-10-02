@@ -64,7 +64,7 @@ public final class ProtectedContentManager {
     }
 
     private interface DownloadProgress {
-        void onBytes(long bytesWritten);
+        void onBytes(long bytesWritten, int line, int lineCount);
     }
 
     public static File moduleDir(Context context) {
@@ -139,16 +139,16 @@ public final class ProtectedContentManager {
                         ? LINKSPAK
                         : slot.protectedEntry.name;
                 download(
-                        token,
                         slot.downloadName,
                         slot.stage,
                         slot.expectedSize,
                         slot.expectedSha,
                         remote.downloadBaseUrl,
-                        written -> {
+                        (written, line, lineCount) -> {
                             long overall = Math.min(totalBytes, base + written);
                             int percent = (int) Math.min(96L, (overall * 96L) / totalBytes);
-                            notifyProgress(listener, "正在下载 " + label + " · " + percent + "%", percent, false);
+                            notifyProgress(listener, "正在下载 " + label + "（线路 " + line + "/"
+                                    + lineCount + "）· " + percent + "%", percent, false);
                         }
                 );
                 if (!matches(slot.stage, slot.expectedSize, slot.expectedSha)) {
@@ -480,7 +480,6 @@ public final class ProtectedContentManager {
     }
 
     private static void download(
-            String token,
             String remoteName,
             File target,
             long expectedSize,
@@ -488,48 +487,31 @@ public final class ProtectedContentManager {
             String downloadBaseUrl,
             DownloadProgress progress
     ) throws Exception {
-        String[] publicUrls = CnDownloadRouter.publicRepoFileUrls(downloadBaseUrl, remoteName);
-        List<DownloadSource> sources = new ArrayList<>();
-        if (publicUrls.length > 0) sources.add(new DownloadSource(publicUrls[0], false));
-        if (publicUrls.length > 1) sources.add(new DownloadSource(publicUrls[1], false));
-        sources.add(new DownloadSource(
-                API + "/content/" + MODULE_CODE + "/files/" + remoteName,
-                true
-        ));
-        for (int i = 2; i < publicUrls.length; i++) {
-            sources.add(new DownloadSource(publicUrls[i], false));
-        }
+        // Use the same three routes as APK downloads. jsDelivr rejects large PAKs,
+        // and the compatibility API only redirects back to GitHub, so neither is
+        // an independent fallback. Bind the cache URL to the authorized hash.
+        String directUrl = downloadBaseUrl + remoteName + "?sha256=" + expectedSha;
+        String[] sources = CnDownloadRouter.largeGithubFileUrls(directUrl);
 
         Throwable last = null;
-        for (DownloadSource source : sources) {
+        for (int sourceIndex = 0; sourceIndex < sources.length; sourceIndex++) {
+            final int line = sourceIndex + 1;
             quietDelete(target);
             HttpURLConnection c = null;
             try {
-                c = (HttpURLConnection) new URL(source.url).openConnection();
+                if (progress != null) progress.onBytes(0L, line, sources.length);
+                c = (HttpURLConnection) new URL(sources[sourceIndex]).openConnection();
                 c.setRequestMethod("GET");
-                c.setConnectTimeout(source.authenticated ? 8000 : 6000);
-                c.setReadTimeout(source.authenticated ? 60000 : 45000);
+                c.setConnectTimeout(sourceIndex == 0 ? 6000 : 10000);
+                c.setReadTimeout(45000);
                 c.setUseCaches(false);
                 c.setInstanceFollowRedirects(true);
                 c.setRequestProperty("Accept", "application/octet-stream,*/*");
                 c.setRequestProperty("Cache-Control", "no-cache, no-store");
                 c.setRequestProperty("Pragma", "no-cache");
                 c.setRequestProperty("User-Agent", "RYLUX/2.3.0");
-                if (source.authenticated) {
-                    c.setRequestProperty("Authorization", "Bearer " + token.trim());
-                }
                 int code = c.getResponseCode();
                 if (code != 200) {
-                    if (source.authenticated) {
-                        String message = "资源下载失败 HTTP " + code;
-                        try {
-                            String text = readUtf8(c.getErrorStream(), 128 * 1024);
-                            JSONObject error = new JSONObject(text);
-                            message = error.optString("detail", message);
-                        } catch (Throwable ignored) {
-                        }
-                        throw new IllegalStateException(message);
-                    }
                     throw new IllegalStateException("HTTP " + code);
                 }
 
@@ -543,7 +525,7 @@ public final class ProtectedContentManager {
                         out.write(buffer, 0, n);
                         total += n;
                         if (total > expectedSize) throw new IllegalStateException("资源长度超过清单");
-                        if (progress != null) progress.onBytes(total);
+                        if (progress != null) progress.onBytes(total, line, sources.length);
                     }
                     out.getFD().sync();
                     if (total != expectedSize) throw new IllegalStateException("资源长度与清单不一致");
@@ -800,15 +782,6 @@ public final class ProtectedContentManager {
     private static final class NetworkException extends Exception {
         NetworkException(String message) { super(message); }
         NetworkException(String message, Throwable cause) { super(message, cause); }
-    }
-
-    private static final class DownloadSource {
-        final String url;
-        final boolean authenticated;
-        DownloadSource(String url, boolean authenticated) {
-            this.url = url;
-            this.authenticated = authenticated;
-        }
     }
 
     private static final class LinkspakEntry {
