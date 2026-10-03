@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from admin_v2 import generate_key, key_hash, key_hint, log_action, request_ip, require_csrf, require_ready
 from admin_key_access import serialize_license
 from user_v1 import (
-    TRIAL_HOURS, bearer_token, digest_token, iso, open_db, parse_iso, password_hash,
+    TRIAL_HOURS, bearer_token, create_session, digest_token, iso, open_db, parse_iso, password_hash,
     require_user, serialize_user, username_key, validate_username, verify_password, utc_now,
 )
 
@@ -31,6 +31,11 @@ class AgentConfig(BaseModel):
     can_manage_users: bool = False
     can_issue_cards: bool = False
     can_extend_vip: bool = False
+
+
+class AgentLogin(BaseModel):
+    username: str = Field(min_length=1, max_length=32)
+    password: str = Field(min_length=1, max_length=128)
 
 
 class BalanceAdjustment(BaseModel):
@@ -289,6 +294,47 @@ def agent_page():
 def agent_script():
     return Response((WEB_DIR / "app.js").read_text(encoding="utf-8"),
                     media_type="application/javascript", headers={"Cache-Control": "no-store"})
+
+
+@router.post("/agent/api/auth/login")
+def agent_login(payload: AgentLogin, request: Request):
+    key = username_key(payload.username)
+    ip = request_ip(request)
+    now = iso(utc_now())
+
+    with open_db() as lookup_db:
+        account = lookup_db.execute(
+            "SELECT id,password_hash FROM app_users WHERE username_key=? LIMIT 1",
+            (key,),
+        ).fetchone()
+    if account is None or not verify_password(account["password_hash"], payload.password):
+        raise HTTPException(status_code=401, detail="账号或密码错误")
+
+    with open_db() as db:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute(
+            "SELECT id,password_hash,status,role FROM app_users WHERE id=?",
+            (account["id"],),
+        ).fetchone()
+        if row is None or row["password_hash"] != account["password_hash"]:
+            raise HTTPException(status_code=401, detail="账号或密码错误")
+        if int(row["status"]) != 1:
+            raise HTTPException(status_code=403, detail="账号已停用")
+        if row["role"] != "agent" or db.execute(
+            "SELECT 1 FROM agents WHERE user_id=?", (row["id"],)
+        ).fetchone() is None:
+            raise HTTPException(status_code=403, detail="仅代理人可登录")
+
+        db.execute(
+            "UPDATE app_users SET last_login_at=?,last_login_ip=?,login_count=login_count+1,updated_at=? WHERE id=?",
+            (now, ip[:64], now, row["id"]),
+        )
+        token, session_expires = create_session(
+            db, int(row["id"]), ip, f"agent-portal:{int(row['id'])}"
+        )
+        db.commit()
+
+    return {"token": token, "session_expires_at": session_expires, "message": "登录成功"}
 
 
 @router.get("/api/v1/referrals/me")

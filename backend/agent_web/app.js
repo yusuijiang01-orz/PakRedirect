@@ -186,7 +186,7 @@ async function initialize(){
 }
 $("loginForm").onsubmit=async event=>{
   event.preventDefault();$("loginBtn").disabled=true;inlineError("loginAlert","");
-  try{const data=await api("/api/v1/auth/login","POST",{username:$("username").value.trim(),password:$("password").value});state.token=data.token;sessionStorage.setItem("rylux_agent_token",state.token);$("password").value="";await initialize()}
+  try{const data=await api("/agent/api/auth/login","POST",{username:$("username").value.trim(),password:$("password").value});state.token=data.token;sessionStorage.setItem("rylux_agent_token",state.token);$("password").value="";await initialize()}
   catch(error){resetSession();inlineError("loginAlert",error.message)}finally{$("loginBtn").disabled=false}
 };
 $("logoutBtn").onclick=async()=>{try{await api("/api/v1/auth/logout","POST",{})}catch{}resetSession()};

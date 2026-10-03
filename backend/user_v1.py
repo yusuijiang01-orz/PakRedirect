@@ -391,6 +391,7 @@ def init_user_v1() -> None:
                     ORDER BY s2.last_seen_at DESC LIMIT 1) AS ip_address
             FROM app_sessions s
             WHERE COALESCE(s.device_hash,'')<>''
+              AND s.device_hash NOT LIKE 'agent-portal:%'
             GROUP BY s.user_id,s.device_hash
             """
         ).fetchall()
