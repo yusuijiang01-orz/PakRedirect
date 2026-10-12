@@ -28,11 +28,11 @@ from agent_referral import record_registration
 
 router = APIRouter()
 
-# Trial awards are capped independently by device and IP. Shared IPs can still
-# register accounts after their free-trial quota is reached.
+# A device can receive one trial per rolling 72 hours. The existing shared-IP
+# quota remains independent, and registration succeeds when either gate withholds a trial.
+DEVICE_TRIAL_WINDOW_HOURS = 72
 IP_TRIAL_WINDOW_HOURS = 48
 IP_TRIAL_MAX_AWARDS = 3
-DEVICE_TRIAL_MAX_AWARDS = 3
 CAPTCHA_TTL_SECONDS = 180
 CAPTCHA_MAX_ATTEMPTS = 5
 CAPTCHA_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -132,21 +132,21 @@ def init_registration_guard_v1() -> None:
         db.commit()
 
 
-def _trial_allowed(db, device_hash: str, ip_hash: str, cutoff_text: str) -> bool:
-    # Apply the same rolling 48-hour quota independently to each signal.
-    # A missing device ID falls back to the IP quota.
+def _trial_allowed(db, device_hash: str, ip_hash: str, device_cutoff_text: str, ip_cutoff_text: str) -> bool:
+    # A missing device ID falls back to the existing IP quota.
     if not device_hash and not ip_hash:
         return False
 
     if device_hash:
-        recent_device_awards = db.execute(
+        recent_device_award = db.execute(
             """
-            SELECT COUNT(*) AS n FROM trial_claims
+            SELECT 1 FROM trial_claims
             WHERE device_hash=? AND awarded=1 AND created_at>?
+            LIMIT 1
             """,
-            (device_hash, cutoff_text),
+            (device_hash, device_cutoff_text),
         ).fetchone()
-        if recent_device_awards is not None and int(recent_device_awards["n"] or 0) >= DEVICE_TRIAL_MAX_AWARDS:
+        if recent_device_award is not None:
             return False
 
     # Shared IPs may have multiple legitimate devices, so cap only the number
@@ -157,7 +157,7 @@ def _trial_allowed(db, device_hash: str, ip_hash: str, cutoff_text: str) -> bool
             SELECT COUNT(*) AS n FROM trial_claims
             WHERE ip_hash=? AND awarded=1 AND created_at>?
             """,
-            (ip_hash, cutoff_text),
+            (ip_hash, ip_cutoff_text),
         ).fetchone()
         if recent_ip_awards is not None and int(recent_ip_awards["n"] or 0) >= IP_TRIAL_MAX_AWARDS:
             return False
@@ -338,13 +338,14 @@ def guarded_register(payload: GuardedRegisterPayload, request: Request):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    cutoff = now - timedelta(hours=IP_TRIAL_WINDOW_HOURS)
+    device_cutoff = now - timedelta(hours=DEVICE_TRIAL_WINDOW_HOURS)
+    ip_cutoff = now - timedelta(hours=IP_TRIAL_WINDOW_HOURS)
     device_hash = digest_device(payload.device_id)
 
     with open_db() as db:
         try:
             db.execute("BEGIN IMMEDIATE")
-            trial_allowed = _trial_allowed(db, device_hash, ip_hash, iso(cutoff))
+            trial_allowed = _trial_allowed(db, device_hash, ip_hash, iso(device_cutoff), iso(ip_cutoff))
             trial_expires = now + timedelta(hours=TRIAL_HOURS) if trial_allowed else now
 
             cur = db.execute(
@@ -429,9 +430,5 @@ def guarded_register(payload: GuardedRegisterPayload, request: Request):
                 "trial_expires_at": iso(trial_expires),
             },
         },
-        "message": (
-            "注册成功，已获得 72 小时体验时间"
-            if trial_allowed
-            else "注册成功，本次未获得免费体验时间"
-        ),
+        "message": "注册成功",
     }

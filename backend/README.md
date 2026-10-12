@@ -8,14 +8,14 @@ RYLUX V1 后端继续运行在现有 `verify.lovenom.eu.org`，使用 FastAPI + 
 
 新增：
 
-- `app_users`：账号、密码哈希、状态、VIP 到期、72h 体验、最后登录/IP；
+- `app_users`：账号、密码哈希、状态、VIP 到期、24h 体验、最后登录/IP；
 - `app_sessions`：登录 Token 摘要、会话到期、设备哈希；
 - `vip_events`：体验、兑换、管理员续期流水；
 - `plans`：7 / 30 / 90 / 180 / 365 天套餐；
 - `modules`：游戏模块；
 - `module_access_logs`：模块启动授权日志。
 
-`registration_guard_v1.py` 会给 `app_users` 增量增加 `registration_ip_hash`。同一设备和同一 IP 在滚动 48 小时内各最多领取 3 次试用；任一额度用尽后仍可注册，但不会领取试用。设备 ID 为空时只按 IP 额度判定。明文注册 IP 不新增持久化字段；原有最后登录 IP 字段继续按既有逻辑使用。
+`registration_guard_v1.py` 会给 `app_users` 增量增加 `registration_ip_hash`，并在服务端判定体验资格；不符合条件的账号仍可注册，注册提示统一为“注册成功”。明文注册 IP 不新增持久化字段；原有最后登录 IP 字段继续按既有逻辑使用。已发放账号的到期时间不会被修改。
 
 现有 `licenses` 表继续保留，并增量加入：
 
@@ -39,7 +39,7 @@ GET  /api/v1/modules
 POST /api/v1/modules/sg_localization/authorize
 ```
 
-注册前先请求 `GET /api/v1/auth/captcha`，返回 3 分钟有效的一次性 PNG 验证码挑战。注册请求必须提交 `captcha_id` 与 `captcha_code`；验证码最多尝试 5 次，且绑定签发时的 IP。同一设备、同一 IP 在滚动 48 小时内各最多领取 3 次试用。设备 ID 为空时按 IP 额度判定；若设备 ID 与 IP 均不可用则不发试用。未获试用的账号仍可注册。登录会返回 Bearer Token；服务端数据库只保存 Token 的 SHA-256 摘要。旧版客户端未提交验证码字段时无法注册，需要更新客户端。
+注册前先请求 `GET /api/v1/auth/captcha`，返回 3 分钟有效的一次性 PNG 验证码挑战。注册请求必须提交 `captcha_id` 与 `captcha_code`；验证码最多尝试 5 次，且绑定签发时的 IP。符合条件的新账号可获得 24 小时体验；未获体验的账号仍可注册。登录会返回 Bearer Token；服务端数据库只保存 Token 的 SHA-256 摘要。旧版客户端未提交验证码字段时无法注册，需要更新客户端。
 
 首个模块的用户可见名称为“封神榜汉化”；内部模块代码仍保持 `sg_localization`，避免破坏已有客户端接口。
 
@@ -78,7 +78,7 @@ V1 增加：
 
 代理后台提供所属用户与 VIP 管理、自助添加用户、批量续期、登录设备查看与解绑、用户启用/停用及删除、本人卡密管理/导出、余额与操作流水。每项操作都按已授予的权限限制；发卡权限只能查看本人生成的卡，管理用户或续期只能作用于自己的所属用户。管理员仍可查看和管理全体用户、所有卡密及代理人。
 
-用户调用 `GET /api/v1/referrals/me` 获取邀请码及邀请统计。注册请求可传 `invite_code`。只有获批 72 小时试用、设备 ID 非空、且设备/IP 摘要与邀请者不同的注册计为有效；注册后立即过期的账号不计入。每位有效新用户为邀请者增加 **7 天 VIP**，累计邀请奖励最多 **365 天**。邀请关系在注册时固定，不能事后更换。
+用户调用 `GET /api/v1/referrals/me` 获取邀请码及邀请统计。注册请求可传 `invite_code`。只有获批 24 小时试用、设备 ID 非空、且设备/IP 摘要与邀请者不同的注册计为有效；注册后立即过期的账号不计入。每位有效新用户为邀请者增加 **7 天 VIP**，累计邀请奖励最多 **365 天**。邀请关系在注册时固定，不能事后更换。
 
 支付宝/微信在线支付确认成功后视为付费购买，按购买天数奖励邀请者。管理员发卡时勾选“已收款”，或代理人发卡时标记 `paid=true`，该卡兑换也视为付费购买；被邀请人兑换后，邀请者获得相同天数。代理人使用余额直接为所属用户续期也视为付费购买，并按续期天数奖励邀请者。普通/赠送卡、体验期和管理员人工续期不触发购买奖励。邀请奖励累计上限 **365 天**，包括有效注册奖励和付费购买奖励；超过上限的部分不再发放。在线支付的邀请奖励与订单入账在同一事务中完成，重复回调不会重复发放。
 
@@ -116,15 +116,15 @@ PUT  /admin/api/users/{id}/agent          管理员分配用户归属
 
 ## 已有 VPS 升级
 
-### 部署 72 小时新用户体验期限
+### 部署 24 小时新用户体验规则
 
 这项后端改动必须先推送到 GitHub `main`。在 VPS SSH 终端运行下面一条命令；脚本默认解析并部署当时 `main` 的最新提交，也可在 `sudo bash` 后追加一个完整 40 位 commit SHA 来固定版本：
 
 ```bash
-curl -fsSLo /tmp/deploy-trial-72h.sh https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/tools/deploy-trial-72h.sh && sudo bash /tmp/deploy-trial-72h.sh
+curl -fsSLo /tmp/deploy-trial-24h.sh https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/tools/deploy-trial-24h.sh && sudo bash /tmp/deploy-trial-24h.sh
 ```
 
-脚本仅更新 `/opt/pakredirect-license/user_v1.py`、`registration_guard_v1.py`、`admin_web/app.js` 和 `admin_web/index.html`，将文件安装为 `paklicense` 所有，并重启 `pakredirect-license.service`。它会校验源码与固定 commit 一致、检查 Python 语法和本机健康接口；部署前四个文件都会备份到 `/var/backups/pakredirect-license/trial-72h/`。安装、重启或健康检查失败时会恢复全部备份文件，再重启并检查服务。不会修改数据库、配置、Nginx 或依赖。Android 上的体验时长标签需要另行构建并发布 APK。
+脚本仅更新 `/opt/pakredirect-license/user_v1.py`、`registration_guard_v1.py`、`admin_web/app.js` 和 `admin_web/index.html`，将文件安装为 `paklicense` 所有，并重启 `pakredirect-license.service`。它会校验源码与固定 commit 一致、检查 Python 语法和本机健康接口；部署前四个文件都会备份到 `/var/backups/pakredirect-license/trial-24h/`。安装、重启或健康检查失败时会恢复全部备份文件，再重启并检查服务。不会修改数据库、配置、Nginx 或依赖。Android 上的体验时长标签需要另行构建并发布 APK。
 
 ### 仅部署邀请名单接口变更
 
@@ -209,7 +209,7 @@ curl -sS \
   https://verify.lovenom.eu.org/api/v1/me
 ```
 
-在 IP 额度未用尽时，同一设备在滚动 48 小时内前三次可获批试用，第 4 次注册仍返回成功，但 `membership.active=false`。同一 IP 也独立按相同额度限制。使用与邀请者相同的设备或 IP 注册，即使获得试用，也不会计为有效邀请。
+不符合试用资格的注册仍会成功，但 `membership.active=false`。使用与邀请者相同的设备或 IP 注册，即使获得试用，也不会计为有效邀请。
 
 ## V1 支付边界
 
