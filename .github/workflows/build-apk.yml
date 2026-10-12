@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       version_name:
-        description: 'Version name, for example 2.4.15'
+        description: 'Version name, for example 2.4.16'
         required: true
-        default: '2.4.15'
+        default: '2.4.16'
       version_code:
         description: 'Monotonically increasing Android versionCode'
         required: true
-        default: '36'
+        default: '37'
 
 jobs:
   build-release:
