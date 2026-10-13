@@ -8,8 +8,8 @@ import java.util.List;
  * unavailable. Only public repository/API URLs are sent through the proxy/CDN;
  * authentication tokens are never attached to these requests.
  *
- * Download candidate order: 自建 Cloudflare Worker 反代 → 公共 gh-proxy → 原始直连。
- * 小文件（≤20MB）额外保留 jsDelivr 作为补充；大文件 jsDelivr 会失败，自动落到下一候选。
+ * GitHub fallback order: 自建 Cloudflare Worker 反代 → 公共 gh-proxy → 原始直连。
+ * 小文件（≤20MB）额外保留 jsDelivr 作为补充；大文件 jsDelivr 会失败。
  *
  * Every caller must still validate the downloaded bytes with its authoritative
  * SHA-256/size/signature metadata before accepting them.
@@ -17,6 +17,13 @@ import java.util.List;
 public final class CnDownloadRouter {
     private static final String OWNER_REPO = "yusuijiang01-orz/PakRedirect";
     private static final String BRANCH = "main";
+    private static final String GITEE_REPO = "perish-with-honor/rlyux";
+    private static final String GITEE_RAW_PAK =
+            "https://gitee.com/" + GITEE_REPO + "/raw/master/pak/";
+    // Publish protected .rpe files and linkspak.txt under this stable release tag.
+    // Gitee raw requires login for large files, so it cannot serve encrypted PAKs.
+    private static final String GITEE_PROTECTED_RELEASE =
+            "https://gitee.com/" + GITEE_REPO + "/releases/download/pak-latest/";
 
     /**
      * 自建 Cloudflare Worker 反代。
@@ -58,10 +65,16 @@ public final class CnDownloadRouter {
     }
 
     public static String[] publicRepoFileUrls(String path) {
-        return publicRepoFileUrls(
+        String safePath = normalizeRepoPath(path);
+        if (safePath.startsWith("pak/")) safePath = safePath.substring(4);
+        String[] github = publicRepoFileUrls(
                 "https://raw.githubusercontent.com/" + OWNER_REPO + "/" + BRANCH + "/pak/",
-                path
+                safePath
         );
+        String[] sources = new String[github.length + 1];
+        sources[0] = GITEE_RAW_PAK + safePath;
+        System.arraycopy(github, 0, sources, 1, github.length);
+        return sources;
     }
 
     /** Build mirrors from the directory selected by the authorized manifest. */
@@ -76,6 +89,22 @@ public final class CnDownloadRouter {
 
     public static String[] largeGithubFileUrls(String directUrl) {
         return acceleratedCandidates(directUrl);
+    }
+
+    /** Gitee Release first; authorized GitHub URL remains a verified fallback. */
+    public static String[] protectedPakFileUrls(String fileName, String githubUrl) {
+        String safeName = normalizeRepoPath(fileName);
+        if (safeName.contains("/")) throw new IllegalArgumentException("Invalid protected file name");
+        String[] github = largeGithubFileUrls(githubUrl);
+        String[] sources = new String[github.length + 1];
+        // Small index files can be served anonymously from the repository's raw
+        // endpoint. Large encrypted PAKs must be Release attachments because
+        // Gitee raw asks anonymous clients to log in for large files.
+        sources[0] = safeName.toLowerCase().endsWith(".rpe")
+                ? GITEE_PROTECTED_RELEASE + safeName
+                : GITEE_RAW_PAK + safeName;
+        System.arraycopy(github, 0, sources, 1, github.length);
+        return sources;
     }
 
     private static boolean isGithubUrl(String value) {

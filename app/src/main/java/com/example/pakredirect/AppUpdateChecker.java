@@ -19,6 +19,10 @@ import java.nio.charset.StandardCharsets;
 public final class AppUpdateChecker {
     private static final String LATEST_RELEASE_API =
             "https://api.github.com/repos/yusuijiang01-orz/PakRedirect/releases/latest";
+    private static final String GITEE_RELEASE_DOWNLOAD =
+            "https://gitee.com/perish-with-honor/rlyux/releases/download/";
+    private static final String GITHUB_RELEASES =
+            "https://github.com/yusuijiang01-orz/PakRedirect/releases";
 
     private AppUpdateChecker() {}
 
@@ -41,6 +45,10 @@ public final class AppUpdateChecker {
     }
 
     private static ReleaseInfo fetchLatest() {
+        return fetchGithubLatest();
+    }
+
+    private static ReleaseInfo fetchGithubLatest() {
         for (String apiUrl : CnDownloadRouter.githubApiUrls(LATEST_RELEASE_API)) {
             HttpURLConnection connection = null;
             try {
@@ -59,6 +67,7 @@ public final class AppUpdateChecker {
                 if (version.isEmpty()) continue;
 
                 String apkUrl = null;
+                String apkName = null;
                 JSONArray assets = json.optJSONArray("assets");
                 if (assets != null) {
                     for (int i = 0; i < assets.length(); i++) {
@@ -67,13 +76,18 @@ public final class AppUpdateChecker {
                         String name = asset.optString("name", "");
                         if (name.startsWith("RYLUX-") && name.toLowerCase().endsWith(".apk")) {
                             apkUrl = asset.optString("browser_download_url", null);
+                            apkName = name;
                             break;
                         }
                     }
                 }
                 if (apkUrl == null || apkUrl.trim().isEmpty()) apkUrl = json.optString("html_url", "");
                 if (apkUrl == null || apkUrl.trim().isEmpty()) continue;
-                return new ReleaseInfo(version, apkUrl, CnDownloadRouter.accelerated(apkUrl));
+                if (apkName != null && !tag.isEmpty()) {
+                    String giteeUrl = GITEE_RELEASE_DOWNLOAD + Uri.encode(tag) + "/" + Uri.encode(apkName);
+                    return new ReleaseInfo(version, giteeUrl, GITHUB_RELEASES, true);
+                }
+                return new ReleaseInfo(version, CnDownloadRouter.accelerated(apkUrl), apkUrl, false);
             } catch (Throwable ignored) {
             } finally {
                 if (connection != null) connection.disconnect();
@@ -84,12 +98,17 @@ public final class AppUpdateChecker {
 
     private static void showDialog(Activity activity, ReleaseInfo info) {
         if (activity.isFinishing()) return;
+        String message = info.fromGitee
+                ? "检测到新版 RYLUX。优先从 Gitee 下载；GitHub 发布页可作为备用。正式版本使用固定签名，可直接覆盖更新。"
+                : "检测到新版 RYLUX。国内网络建议优先使用加速下载；若加速节点异常，可改用 GitHub 直连。正式版本使用固定签名，可直接覆盖更新。";
         new AlertDialog.Builder(activity)
                 .setTitle("发现新版本 " + info.versionName)
-                .setMessage("检测到新版 RYLUX。国内网络建议优先使用加速下载；若加速节点异常，可改用 GitHub 直连。正式版本使用固定签名，可直接覆盖更新。")
+                .setMessage(message)
                 .setNegativeButton("稍后", null)
-                .setNeutralButton("GitHub直连", (dialog, which) -> open(activity, info.directUrl))
-                .setPositiveButton("加速下载", (dialog, which) -> open(activity, info.acceleratedUrl))
+                .setNeutralButton(info.fromGitee ? "GitHub发布页" : "GitHub直连",
+                        (dialog, which) -> open(activity, info.alternateUrl))
+                .setPositiveButton(info.fromGitee ? "Gitee下载" : "加速下载",
+                        (dialog, which) -> open(activity, info.primaryUrl))
                 .show();
     }
 
@@ -134,13 +153,15 @@ public final class AppUpdateChecker {
 
     private static final class ReleaseInfo {
         final String versionName;
-        final String directUrl;
-        final String acceleratedUrl;
+        final String primaryUrl;
+        final String alternateUrl;
+        final boolean fromGitee;
 
-        ReleaseInfo(String versionName, String directUrl, String acceleratedUrl) {
+        ReleaseInfo(String versionName, String primaryUrl, String alternateUrl, boolean fromGitee) {
             this.versionName = versionName;
-            this.directUrl = directUrl;
-            this.acceleratedUrl = acceleratedUrl;
+            this.primaryUrl = primaryUrl;
+            this.alternateUrl = alternateUrl;
+            this.fromGitee = fromGitee;
         }
     }
 }

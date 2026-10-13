@@ -21,7 +21,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.WeakHashMap;
 
-/** Keeps the game-detail patch date synchronized with the current GitHub patch. */
+/** Keeps the game-detail patch date synchronized with the current public patch manifest. */
 public final class PatchUpdateInfo {
     private static final String PREFS = "rylux_patch_update_info";
     private static final String KEY_DATE = "latest_patch_date";
@@ -82,9 +82,9 @@ public final class PatchUpdateInfo {
         }
         new Thread(() -> {
             String date = null;
-            try { date = fetchCommitDate(); } catch (Throwable ignored) {}
+            try { date = fetchManifestRevisionDate(); } catch (Throwable ignored) {}
             if (date == null) {
-                try { date = fetchManifestRevisionDate(); } catch (Throwable ignored) {}
+                try { date = fetchCommitDate(); } catch (Throwable ignored) {}
             }
             final String result = date;
             if (result != null) saveDate(activity, result, System.currentTimeMillis());

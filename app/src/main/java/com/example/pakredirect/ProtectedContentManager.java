@@ -487,11 +487,11 @@ public final class ProtectedContentManager {
             String downloadBaseUrl,
             DownloadProgress progress
     ) throws Exception {
-        // Use the same three routes as APK downloads. jsDelivr rejects large PAKs,
-        // and the compatibility API only redirects back to GitHub, so neither is
-        // an independent fallback. Bind the cache URL to the authorized hash.
+        // Gitee raw requires login for large files. Try the public pak-latest
+        // release attachment, then the GitHub routes from the authorized manifest.
+        // Every candidate must match the authorized size and SHA-256.
         String directUrl = downloadBaseUrl + remoteName + "?sha256=" + expectedSha;
-        String[] sources = CnDownloadRouter.largeGithubFileUrls(directUrl);
+        String[] sources = CnDownloadRouter.protectedPakFileUrls(remoteName, directUrl);
 
         Throwable last = null;
         for (int sourceIndex = 0; sourceIndex < sources.length; sourceIndex++) {
