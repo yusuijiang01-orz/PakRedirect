@@ -119,14 +119,14 @@ jobs:
           chmod 700 "$ASKPASS"
           git clone --depth 1 --single-branch --branch master https://gitee.com/perish-with-honor/rlyux.git "$GITEE_DIR"
           rsync -a --delete app/ "$GITEE_DIR/app/"
-          for path in .gitignore build.gradle gradle.properties gradle gradlew gradlew.bat settings.gradle; do
+          for path in .gitignore build.gradle gradle.properties settings.gradle; do
             if [[ -d "$path" ]]; then
               rsync -a --delete "$path/" "$GITEE_DIR/$path/"
-            else
+            elif [[ -f "$path" ]]; then
               cp -a "$path" "$GITEE_DIR/$path"
             fi
           done
-          git -C "$GITEE_DIR" add .gitignore app build.gradle gradle.properties gradle gradlew gradlew.bat settings.gradle
+          git -C "$GITEE_DIR" add -A -- .gitignore app build.gradle gradle.properties settings.gradle
           if ! git -C "$GITEE_DIR" diff --cached --quiet; then
             git -C "$GITEE_DIR" config user.name "GitHub Actions"
             git -C "$GITEE_DIR" config user.email "github-actions[bot]@users.noreply.github.com"
