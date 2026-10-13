@@ -141,7 +141,7 @@ jobs:
           BODY="$(printf 'Built and signed by the GitHub Actions RYLUX release workflow.\nVersion code: %s\nGitHub source commit: %s\nSHA-256: %s' "$VERSION_CODE" "$SOURCE_COMMIT" "$SHA256")"
           RELEASE_JSON="$RUNNER_TEMP/gitee-release.json"
           STATUS="$(curl --silent --show-error --output "$RELEASE_JSON" --write-out "%{http_code}" "$API/releases/tags/$TAG")"
-          if [[ "$STATUS" == "404" ]]; then
+          if [[ "$STATUS" == "404" ]] || { [[ "$STATUS" == "200" ]] && jq -e 'type == "null"' "$RELEASE_JSON" >/dev/null; }; then
             STATUS="$(curl --silent --show-error --output "$RELEASE_JSON" --write-out "%{http_code}" \
               --request POST "$API/releases" \
               --data-urlencode "access_token=$GITEE_RELEASE_TOKEN" \
@@ -151,7 +151,7 @@ jobs:
               --data-urlencode "target_commitish=master" \
               --data-urlencode "prerelease=false")"
             [[ "$STATUS" == "201" ]] || { echo "Gitee release creation failed (HTTP $STATUS)"; exit 1; }
-          elif [[ "$STATUS" == "200" ]]; then
+          elif [[ "$STATUS" == "200" ]] && jq -e 'type == "object" and (.id != null)' "$RELEASE_JSON" >/dev/null; then
             RELEASE_ID="$(jq -er '.id' "$RELEASE_JSON")"
             STATUS="$(curl --silent --show-error --output "$RELEASE_JSON" --write-out "%{http_code}" \
               --request PATCH "$API/releases/$RELEASE_ID" \
