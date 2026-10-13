@@ -111,7 +111,7 @@ jobs:
           cat > "$ASKPASS" <<'ASKPASS_EOF'
           #!/usr/bin/env bash
           case "${1:-}" in
-            *Username*) printf '%s\n' 'perish-with-honor' ;;
+            *Username*) printf '%s\n' 'oauth2' ;;
             *Password*) printf '%s\n' "$GITEE_RELEASE_TOKEN" ;;
             *) exit 1 ;;
           esac
