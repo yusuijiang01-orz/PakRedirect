@@ -264,6 +264,18 @@ public final class BundledPakServer {
             String line = lines[i];
             String[] fields = line.split(",", -1);
             if (fields.length >= 4) {
+                String originalUrl = fields[0].trim();
+                String giteeUrl = CnDownloadRouter.giteeHostedDownload(originalUrl);
+                if (giteeUrl != null && !giteeUrl.equals(originalUrl)) {
+                    fields[0] = leadingSpaces(fields[0]) + giteeUrl + trailingSpaces(fields[0]);
+                    StringBuilder rebuilt = new StringBuilder();
+                    for (int f = 0; f < fields.length; f++) {
+                        if (f > 0) rebuilt.append(',');
+                        rebuilt.append(fields[f]);
+                    }
+                    line = rebuilt.toString();
+                    changed++;
+                }
                 String pakName = fields[2].trim();
                 PakSource asset = pakAssets.get(pakName.toLowerCase(Locale.US));
                 if (asset != null && revisionMatches(asset, fields)) {

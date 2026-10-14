@@ -12,7 +12,6 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
 import android.provider.Settings;
-import android.util.Base64;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
@@ -30,30 +29,27 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.WeakHashMap;
 
 /**
- * Cloud-aware installer. The current Git LFS SHA-256/size is authoritative,
- * while public GitHub metadata and LFS bytes can use an accelerated route on
- * networks where GitHub is slow. Every accepted APK is still verified locally.
+ * Downloads the Gitee-hosted APK parts, verifies every part, joins them, then
+ * verifies the complete APK before opening Android's package installer.
  */
 public final class GameApkCloudInstaller {
     private static final String TARGET_PACKAGE = "com.tepaylink.tamgioiphantranhmobile";
     private static final String GAME_APK_NAME = "TamGioiPhanTranhMobile-587.apk";
-    private static final String META_URL =
-            "https://api.github.com/repos/yusuijiang01-orz/PakRedirect/contents/apk/"
-                    + GAME_APK_NAME + "?ref=main";
-    // 游戏 APK 本体迁移到 GitHub Release（tag=game-apk）分发，避开 Git LFS 每月 1GB 带宽配额；
-    // 校验元数据（sha256/size）仍来自仓库内 LFS 指针，上传到 Release 的文件必须与指针一致。
-    private static final String MEDIA_URL =
-            "https://github.com/yusuijiang01-orz/PakRedirect/releases/download/game-apk/"
-                    + GAME_APK_NAME;
+    private static final String GITEE_GAME_RELEASE =
+            "https://gitee.com/perish-with-honor/rlyux/releases/download/game-apk/";
+    private static final String GAME_APK_MANIFEST_URL = GITEE_GAME_RELEASE + "manifest.json";
+    private static final long MAX_PART_BYTES = 50_000_000L;
+    private static final long MAX_APK_BYTES = 2L * 1024L * 1024L * 1024L;
 
     private static final String PREFS = "rylux_game_installer_cloud_v2";
     private static final String KEY_PENDING_UNKNOWN = "pending_unknown_sources";
@@ -147,9 +143,6 @@ public final class GameApkCloudInstaller {
                     } else {
                         updateButton(activity, button, "本地无 APK，准备下载…");
                     }
-                    if (apk.exists() && !apk.delete()) {
-                        throw new IllegalStateException("无法删除旧的本地 APK");
-                    }
                     downloadApk(activity, button, apk, remote);
                     local = verify(apk, remote);
                     if (!local.valid) {
@@ -175,67 +168,57 @@ public final class GameApkCloudInstaller {
     }
 
     private static RemoteApkInfo fetchRemoteApkInfo() throws Exception {
-        Throwable last = null;
-        String[] urls = CnDownloadRouter.githubApiUrls(META_URL);
-        for (int i = 0; i < urls.length; i++) {
-            HttpURLConnection connection = null;
-            try {
-                connection = (HttpURLConnection) new URL(urls[i]).openConnection();
-                connection.setConnectTimeout(4500);
-                connection.setReadTimeout(8000);
-                connection.setUseCaches(false);
-                connection.setInstanceFollowRedirects(true);
-                connection.setRequestProperty("User-Agent", "RYLUX/2.3 cloud-integrity");
-                connection.setRequestProperty("Accept", "application/vnd.github+json");
-                connection.setRequestProperty("X-GitHub-Api-Version", "2022-11-28");
-                connection.setRequestProperty("Cache-Control", "no-cache");
-                connection.setRequestProperty("Pragma", "no-cache");
-
-                int code = connection.getResponseCode();
-                if (code < 200 || code >= 300) {
-                    throw new IllegalStateException("HTTP " + code);
-                }
-                return parseRemoteApkInfo(readUtf8(connection));
-            } catch (Throwable t) {
-                last = t;
-            } finally {
-                if (connection != null) connection.disconnect();
-            }
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(
+                    GAME_APK_MANIFEST_URL + "?rylux=" + System.currentTimeMillis()).openConnection();
+            connection.setConnectTimeout(8000);
+            connection.setReadTimeout(15000);
+            connection.setUseCaches(false);
+            connection.setInstanceFollowRedirects(true);
+            connection.setRequestProperty("User-Agent", "RYLUX/game-apk-installer");
+            connection.setRequestProperty("Accept", "application/json,text/plain,*/*");
+            connection.setRequestProperty("Cache-Control", "no-cache");
+            connection.setRequestProperty("Pragma", "no-cache");
+            int code = connection.getResponseCode();
+            if (code != 200) throw new IllegalStateException("Gitee 清单返回 HTTP " + code);
+            return parseRemoteApkInfo(readUtf8(connection));
+        } finally {
+            if (connection != null) connection.disconnect();
         }
-        throw new IllegalStateException(
-                "读取云端 APK 元数据失败，请检查网络后重试"
-                        + (last == null ? "" : "：" + safeMessage(last))
-        );
     }
 
     private static RemoteApkInfo parseRemoteApkInfo(String body) throws Exception {
         JSONObject json = new JSONObject(body);
-        String encoded = json.optString("content", "");
-        if (encoded == null || encoded.trim().isEmpty()) {
-            throw new IllegalStateException("云端 APK 元数据缺少 LFS 指针内容");
+        String sha256 = json.optString("sha256", "").trim().toLowerCase(Locale.US);
+        long size = json.optLong("sizeBytes", -1L);
+        org.json.JSONArray partsJson = json.optJSONArray("parts");
+        int expectedParts = json.optInt("partCount", -1);
+        if (json.optInt("schema", 0) != 1
+                || sha256.length() != 64 || !sha256.matches("[0-9a-f]{64}")
+                || size <= 0L || size > MAX_APK_BYTES
+                || partsJson == null || partsJson.length() < 2 || partsJson.length() > 20
+                || expectedParts != partsJson.length()) {
+            throw new IllegalStateException("Gitee APK 分片清单格式无效");
         }
-
-        byte[] decoded = Base64.decode(encoded.replace("\n", ""), Base64.DEFAULT);
-        String pointer = new String(decoded, StandardCharsets.UTF_8);
-        String sha256 = null;
-        long size = -1L;
-        for (String line : pointer.split("\\r?\\n")) {
-            String value = line == null ? "" : line.trim();
-            if (value.startsWith("oid sha256:")) {
-                sha256 = value.substring("oid sha256:".length()).trim().toLowerCase(Locale.US);
-            } else if (value.startsWith("size ")) {
-                try {
-                    size = Long.parseLong(value.substring("size ".length()).trim());
-                } catch (NumberFormatException ignored) {
-                    size = -1L;
-                }
+        List<ApkPart> parts = new ArrayList<>();
+        long sum = 0L;
+        for (int i = 0; i < partsJson.length(); i++) {
+            JSONObject item = partsJson.optJSONObject(i);
+            if (item == null) throw new IllegalStateException("Gitee APK 分片信息缺失");
+            String name = item.optString("fileName", "").trim();
+            String partSha = item.optString("sha256", "").trim().toLowerCase(Locale.US);
+            long partSize = item.optLong("sizeBytes", -1L);
+            if (!name.matches("part-[0-9]{3}\\.bin") || partSha.length() != 64
+                    || !partSha.matches("[0-9a-f]{64}") || partSize <= 0L
+                    || partSize > MAX_PART_BYTES) {
+                throw new IllegalStateException("Gitee APK 分片信息无效");
             }
+            sum += partSize;
+            parts.add(new ApkPart(name, partSha, partSize));
         }
-
-        if (sha256 == null || !sha256.matches("[0-9a-f]{64}") || size <= 0L) {
-            throw new IllegalStateException("无法解析云端 Git LFS 校验信息");
-        }
-        return new RemoteApkInfo(sha256, size);
+        if (sum != size) throw new IllegalStateException("Gitee APK 分片总大小与清单不一致");
+        return new RemoteApkInfo(sha256, size, parts);
     }
 
     private static String readUtf8(HttpURLConnection connection) throws Exception {
@@ -277,95 +260,97 @@ public final class GameApkCloudInstaller {
             File target,
             RemoteApkInfo remote
     ) throws Exception {
-        File part = new File(target.getParentFile(), target.getName() + ".part");
-        String direct = MEDIA_URL + "?sha256=" + remote.sha256;
-        String[] sources = CnDownloadRouter.largeGithubFileUrls(direct);
-        Throwable last = null;
-
-        for (int sourceIndex = 0; sourceIndex < sources.length; sourceIndex++) {
-            if (part.exists() && !part.delete()) {
-                throw new IllegalStateException("无法清理旧下载缓存");
+        File assembled = new File(target.getParentFile(), target.getName() + ".assembling");
+        File backup = new File(target.getParentFile(), target.getName() + ".previous");
+        if (assembled.exists() && !assembled.delete()) throw new IllegalStateException("无法清理旧的合并缓存");
+        if (backup.exists()) {
+            if (!target.exists()) {
+                if (!backup.renameTo(target)) throw new IllegalStateException("无法恢复上次保留的 APK");
+            } else if (!backup.delete()) {
+                throw new IllegalStateException("无法清理旧的 APK 备份");
             }
-            HttpURLConnection connection = null;
-            try {
-                final int line = sourceIndex + 1;
-                updateButton(activity, button, "正在下载游戏（线路 " + line + "/" + sources.length + "）… 0%");
-                connection = (HttpURLConnection) new URL(sources[sourceIndex]).openConnection();
-                connection.setConnectTimeout(sourceIndex == 0 ? 6000 : 10000);
-                connection.setReadTimeout(45_000);
-                connection.setUseCaches(false);
-                connection.setInstanceFollowRedirects(true);
-                connection.setRequestProperty("User-Agent", "RYLUX/2.3 cloud-integrity");
-                connection.setRequestProperty("Accept", "application/octet-stream,*/*");
-                connection.setRequestProperty("Cache-Control", "no-cache");
-                connection.setRequestProperty("Pragma", "no-cache");
+        }
 
-                int code = connection.getResponseCode();
-                if (code < 200 || code >= 300) {
-                    throw new IllegalStateException("下载服务器返回 HTTP " + code);
-                }
-
-                long read = 0L;
-                int lastPercent = -1;
-                try (BufferedInputStream in = new BufferedInputStream(connection.getInputStream(), 128 * 1024);
-                     FileOutputStream out = new FileOutputStream(part)) {
-                    byte[] buffer = new byte[128 * 1024];
-                    int n;
-                    while ((n = in.read(buffer)) != -1) {
-                        out.write(buffer, 0, n);
-                        read += n;
-                        if (read > remote.size) throw new IllegalStateException("下载内容长度超过云端元数据");
-                        int percent = remote.size > 0
-                                ? (int) Math.min(99L, (read * 100L) / remote.size)
-                                : 0;
-                        if (percent != lastPercent) {
-                            lastPercent = percent;
-                            updateButton(activity, button,
-                                    "正在下载游戏（线路 " + line + "/" + sources.length + "）… " + percent + "%");
+        MessageDigest wholeDigest = MessageDigest.getInstance("SHA-256");
+        long totalRead = 0L;
+        int lastPercent = -1;
+        try (FileOutputStream out = new FileOutputStream(assembled)) {
+            byte[] buffer = new byte[128 * 1024];
+            for (int partIndex = 0; partIndex < remote.parts.size(); partIndex++) {
+                ApkPart part = remote.parts.get(partIndex);
+                HttpURLConnection connection = null;
+                MessageDigest partDigest = MessageDigest.getInstance("SHA-256");
+                long partRead = 0L;
+                try {
+                    String url = GITEE_GAME_RELEASE + part.fileName + "?rylux=" + remote.sha256;
+                    connection = (HttpURLConnection) new URL(url).openConnection();
+                    connection.setConnectTimeout(10000);
+                    connection.setReadTimeout(60000);
+                    connection.setUseCaches(false);
+                    connection.setInstanceFollowRedirects(true);
+                    connection.setRequestProperty("User-Agent", "RYLUX/game-apk-installer");
+                    connection.setRequestProperty("Accept", "application/octet-stream,*/*");
+                    connection.setRequestProperty("Cache-Control", "no-cache");
+                    connection.setRequestProperty("Pragma", "no-cache");
+                    int code = connection.getResponseCode();
+                    if (code != 200) throw new IllegalStateException("Gitee 分片下载返回 HTTP " + code);
+                    updateButton(activity, button,
+                            "正在从 Gitee 下载并合并分片 " + (partIndex + 1) + "/" + remote.parts.size() + "…");
+                    try (BufferedInputStream in = new BufferedInputStream(connection.getInputStream(), buffer.length)) {
+                        int n;
+                        while ((n = in.read(buffer)) != -1) {
+                            partRead += n;
+                            totalRead += n;
+                            if (partRead > part.size || totalRead > remote.size) {
+                                throw new IllegalStateException("Gitee 分片内容超过清单大小");
+                            }
+                            partDigest.update(buffer, 0, n);
+                            wholeDigest.update(buffer, 0, n);
+                            out.write(buffer, 0, n);
+                            int percent = (int) Math.min(99L, (totalRead * 100L) / remote.size);
+                            if (percent != lastPercent) {
+                                lastPercent = percent;
+                                updateButton(activity, button, "正在下载并合并游戏分片… " + percent + "%");
+                            }
                         }
                     }
-                    out.getFD().sync();
+                    if (partRead != part.size) throw new IllegalStateException("分片大小不正确：" + part.fileName);
+                    if (!part.sha256.equals(toHex(partDigest.digest()))) {
+                        throw new IllegalStateException("分片 SHA-256 校验失败：" + part.fileName);
+                    }
+                } finally {
+                    if (connection != null) connection.disconnect();
                 }
-
-                if (read != remote.size) {
-                    throw new IllegalStateException("下载文件大小不正确：" + read + " 字节");
-                }
-                if (!remote.sha256.equalsIgnoreCase(digest(part, "SHA-256"))) {
-                    throw new IllegalStateException("下载线路返回的 APK SHA-256 不匹配");
-                }
-
-                if (target.exists() && !target.delete()) {
-                    throw new IllegalStateException("无法替换旧 APK");
-                }
-                if (!part.renameTo(target)) {
-                    copyFile(part, target);
-                    if (!part.delete()) part.deleteOnExit();
-                }
-                updateButton(activity, button, "正在校验 APK 内容…");
-                return;
-            } catch (Throwable t) {
-                last = t;
-                if (part.exists()) part.delete();
-                if (sourceIndex + 1 < sources.length) {
-                    updateButton(activity, button, "当前线路不可用，正在切换备用线路…");
-                }
-            } finally {
-                if (connection != null) connection.disconnect();
             }
+            out.getFD().sync();
+        } catch (Throwable t) {
+            if (assembled.exists()) assembled.delete();
+            if (t instanceof Exception) throw (Exception) t;
+            throw new IllegalStateException("APK 分片下载或合并失败", t);
         }
 
-        throw new IllegalStateException("所有 APK 下载线路均不可用"
-                + (last == null ? "" : "：" + safeMessage(last)));
+        if (totalRead != remote.size || !remote.sha256.equals(toHex(wholeDigest.digest()))) {
+            if (assembled.exists()) assembled.delete();
+            throw new IllegalStateException("合并后的 APK 大小或 SHA-256 校验失败");
+        }
+        updateButton(activity, button, "分片已合并，正在校验并准备安装…");
+        boolean hadTarget = target.isFile();
+        if (hadTarget && !target.renameTo(backup)) {
+            assembled.delete();
+            throw new IllegalStateException("无法暂存旧 APK，已保留原文件");
+        }
+        if (!assembled.renameTo(target)) {
+            if (hadTarget && backup.exists()) backup.renameTo(target);
+            assembled.delete();
+            throw new IllegalStateException("无法保存合并后的 APK");
+        }
+        if (backup.exists() && !backup.delete()) backup.deleteOnExit();
     }
 
-    private static void copyFile(File source, File target) throws Exception {
-        try (FileInputStream in = new FileInputStream(source);
-             FileOutputStream out = new FileOutputStream(target)) {
-            byte[] buffer = new byte[64 * 1024];
-            int n;
-            while ((n = in.read(buffer)) != -1) out.write(buffer, 0, n);
-            out.getFD().sync();
-        }
+    private static String toHex(byte[] bytes) {
+        StringBuilder out = new StringBuilder(bytes.length * 2);
+        for (byte b : bytes) out.append(String.format(Locale.US, "%02x", b & 0xff));
+        return out.toString();
     }
 
     private static String digest(File file, String algorithm) throws Exception {
@@ -608,8 +593,22 @@ public final class GameApkCloudInstaller {
     private static final class RemoteApkInfo {
         final String sha256;
         final long size;
+        final List<ApkPart> parts;
 
-        RemoteApkInfo(String sha256, long size) {
+        RemoteApkInfo(String sha256, long size, List<ApkPart> parts) {
+            this.sha256 = sha256;
+            this.size = size;
+            this.parts = parts;
+        }
+    }
+
+    private static final class ApkPart {
+        final String fileName;
+        final String sha256;
+        final long size;
+
+        ApkPart(String fileName, String sha256, long size) {
+            this.fileName = fileName;
             this.sha256 = sha256;
             this.size = size;
         }

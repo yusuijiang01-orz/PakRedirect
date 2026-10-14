@@ -45,7 +45,8 @@ public final class ProxyServer {
         void onHit(int count);
     }
 
-    public static final String DEFAULT_MANIFEST_URL = "https://cdn.tamgioipt.vn/linkspak.txt";
+    public static final String DEFAULT_MANIFEST_URL =
+            "https://gitee.com/perish-with-honor/rlyux/raw/master/pak/linkspak.txt";
     public static final String LOCAL_MANIFEST_PATH = "/linkspak.txt";
     public static final String LOCAL_PAK_PREFIX = "/pak/";
 
@@ -424,7 +425,15 @@ public final class ProxyServer {
         if (fields.length < 4) return line;
         String name = fields[2].trim();
         PakEntry entry = pakEntries.get(name.toLowerCase(Locale.US));
-        if (entry == null) return line;
+        String originalUrl = fields[0].trim();
+        String giteeUrl = CnDownloadRouter.giteeHostedDownload(originalUrl);
+        if (giteeUrl != null && !giteeUrl.equals(originalUrl)) {
+            fields[0] = leadingSpaces(fields[0]) + giteeUrl + trailingSpaces(fields[0]);
+        }
+        if (entry == null) {
+            if (giteeUrl == null || giteeUrl.equals(originalUrl)) return line;
+            return String.join(",", fields);
+        }
         try {
             URI uri = URI.create(fields[0].trim());
             if (uri.getHost() != null) pakHosts.add(uri.getHost().toLowerCase(Locale.US));

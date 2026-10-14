@@ -17,13 +17,10 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 
 public final class AppUpdateChecker {
-    private static final String LATEST_RELEASE_API =
-            "https://api.github.com/repos/yusuijiang01-orz/PakRedirect/releases/latest";
+    private static final String RELEASES_API =
+            "https://gitee.com/api/v5/repos/perish-with-honor/rlyux/releases?page=1&per_page=100";
     private static final String GITEE_RELEASE_DOWNLOAD =
             "https://gitee.com/perish-with-honor/rlyux/releases/download/";
-    private static final String GITHUB_RELEASES =
-            "https://github.com/yusuijiang01-orz/PakRedirect/releases";
-
     private AppUpdateChecker() {}
 
     public static void check(Activity activity) {
@@ -45,69 +42,57 @@ public final class AppUpdateChecker {
     }
 
     private static ReleaseInfo fetchLatest() {
-        return fetchGithubLatest();
-    }
-
-    private static ReleaseInfo fetchGithubLatest() {
-        for (String apiUrl : CnDownloadRouter.githubApiUrls(LATEST_RELEASE_API)) {
-            HttpURLConnection connection = null;
-            try {
-                connection = (HttpURLConnection) new URL(apiUrl).openConnection();
-                connection.setConnectTimeout(4500);
-                connection.setReadTimeout(7000);
-                connection.setUseCaches(false);
-                connection.setInstanceFollowRedirects(true);
-                connection.setRequestProperty("Accept", "application/vnd.github+json");
-                connection.setRequestProperty("User-Agent", "RYLUX/2.3");
-                if (connection.getResponseCode() != 200) continue;
-                String text = readAll(connection.getInputStream());
-                JSONObject json = new JSONObject(text);
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(RELEASES_API).openConnection();
+            connection.setConnectTimeout(6000);
+            connection.setReadTimeout(8000);
+            connection.setUseCaches(false);
+            connection.setInstanceFollowRedirects(true);
+            connection.setRequestProperty("Accept", "application/json");
+            connection.setRequestProperty("User-Agent", "RYLUX/Gitee-updater");
+            if (connection.getResponseCode() != 200) return null;
+            JSONArray releases = new JSONArray(readAll(connection.getInputStream()));
+            ReleaseInfo newest = null;
+            for (int releaseIndex = 0; releaseIndex < releases.length(); releaseIndex++) {
+                JSONObject json = releases.optJSONObject(releaseIndex);
+                if (json == null || json.optBoolean("prerelease", false)) continue;
                 String tag = json.optString("tag_name", "").trim();
                 String version = tag.startsWith("v") || tag.startsWith("V") ? tag.substring(1) : tag;
                 if (version.isEmpty()) continue;
-
-                String apkUrl = null;
-                String apkName = null;
                 JSONArray assets = json.optJSONArray("assets");
-                if (assets != null) {
-                    for (int i = 0; i < assets.length(); i++) {
-                        JSONObject asset = assets.optJSONObject(i);
-                        if (asset == null) continue;
-                        String name = asset.optString("name", "");
-                        if (name.startsWith("RYLUX-") && name.toLowerCase().endsWith(".apk")) {
-                            apkUrl = asset.optString("browser_download_url", null);
-                            apkName = name;
-                            break;
-                        }
+                if (assets == null) continue;
+                for (int i = 0; i < assets.length(); i++) {
+                    JSONObject asset = assets.optJSONObject(i);
+                    if (asset == null) continue;
+                    String name = asset.optString("name", "");
+                    if (!name.startsWith("RYLUX-") || !name.toLowerCase().endsWith(".apk")) continue;
+                    String direct = asset.optString("browser_download_url", "").trim();
+                    if (direct.isEmpty()) {
+                        direct = GITEE_RELEASE_DOWNLOAD + Uri.encode(tag) + "/" + Uri.encode(name);
                     }
+                    ReleaseInfo candidate = new ReleaseInfo(version, direct);
+                    if (newest == null || compareVersions(candidate.versionName, newest.versionName) > 0) {
+                        newest = candidate;
+                    }
+                    break;
                 }
-                if (apkUrl == null || apkUrl.trim().isEmpty()) apkUrl = json.optString("html_url", "");
-                if (apkUrl == null || apkUrl.trim().isEmpty()) continue;
-                if (apkName != null && !tag.isEmpty()) {
-                    String giteeUrl = GITEE_RELEASE_DOWNLOAD + Uri.encode(tag) + "/" + Uri.encode(apkName);
-                    return new ReleaseInfo(version, giteeUrl, GITHUB_RELEASES, true);
-                }
-                return new ReleaseInfo(version, CnDownloadRouter.accelerated(apkUrl), apkUrl, false);
-            } catch (Throwable ignored) {
-            } finally {
-                if (connection != null) connection.disconnect();
             }
+            return newest;
+        } catch (Throwable ignored) {
+        } finally {
+            if (connection != null) connection.disconnect();
         }
         return null;
     }
 
     private static void showDialog(Activity activity, ReleaseInfo info) {
         if (activity.isFinishing()) return;
-        String message = info.fromGitee
-                ? "检测到新版 RYLUX。优先从 Gitee 下载；GitHub 发布页可作为备用。正式版本使用固定签名，可直接覆盖更新。"
-                : "检测到新版 RYLUX。国内网络建议优先使用加速下载；若加速节点异常，可改用 GitHub 直连。正式版本使用固定签名，可直接覆盖更新。";
         new AlertDialog.Builder(activity)
                 .setTitle("发现新版本 " + info.versionName)
-                .setMessage(message)
+                .setMessage("检测到新版 RYLUX，将从 Gitee 下载。正式版本使用固定签名，可直接覆盖更新。")
                 .setNegativeButton("稍后", null)
-                .setNeutralButton(info.fromGitee ? "GitHub发布页" : "GitHub直连",
-                        (dialog, which) -> open(activity, info.alternateUrl))
-                .setPositiveButton(info.fromGitee ? "Gitee下载" : "加速下载",
+                .setPositiveButton("Gitee下载",
                         (dialog, which) -> open(activity, info.primaryUrl))
                 .show();
     }
@@ -129,6 +114,17 @@ public final class AppUpdateChecker {
             if (av != bv) return av > bv;
         }
         return false;
+    }
+
+    private static int compareVersions(String left, String right) {
+        int[] a = parse(left);
+        int[] b = parse(right);
+        for (int i = 0; i < Math.max(a.length, b.length); i++) {
+            int av = i < a.length ? a[i] : 0;
+            int bv = i < b.length ? b[i] : 0;
+            if (av != bv) return Integer.compare(av, bv);
+        }
+        return 0;
     }
 
     private static int[] parse(String value) {
@@ -154,14 +150,10 @@ public final class AppUpdateChecker {
     private static final class ReleaseInfo {
         final String versionName;
         final String primaryUrl;
-        final String alternateUrl;
-        final boolean fromGitee;
 
-        ReleaseInfo(String versionName, String primaryUrl, String alternateUrl, boolean fromGitee) {
+        ReleaseInfo(String versionName, String primaryUrl) {
             this.versionName = versionName;
             this.primaryUrl = primaryUrl;
-            this.alternateUrl = alternateUrl;
-            this.fromGitee = fromGitee;
         }
     }
 }
