@@ -276,13 +276,6 @@ index 3920757..6727829 100644
      }
  
      static String fixProcessName(String defProcessName, String processName) {
-@@ -861,4 +820,4 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
-             mComponentResolver.addAllComponents(value.pkg);
-         }
-     }
--}
-\ No newline at end of file
-+}
 diff --git a/Bcore/src/main/java/top/niunaijun/blackbox/core/system/pm/Settings.java b/Bcore/src/main/java/top/niunaijun/blackbox/core/system/pm/Settings.java
 index 33edc28..19e3bba 100644
 --- a/Bcore/src/main/java/top/niunaijun/blackbox/core/system/pm/Settings.java
