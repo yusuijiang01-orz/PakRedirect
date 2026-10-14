@@ -1,0 +1,16 @@
+diff --git a/Bcore/src/main/java/top/niunaijun/blackbox/core/system/pm/BPackageManagerService.java b/Bcore/src/main/java/top/niunaijun/blackbox/core/system/pm/BPackageManagerService.java
+index 3920757..05d7114 100644
+--- a/Bcore/src/main/java/top/niunaijun/blackbox/core/system/pm/BPackageManagerService.java
++++ b/Bcore/src/main/java/top/niunaijun/blackbox/core/system/pm/BPackageManagerService.java
+@@ -762,6 +762,11 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
+             // applicationInfo
+             pkg.applicationInfo = pi.applicationInfo;
+ 
++            // PackageParserFix uses PackageManager.getPackageArchiveInfo(),
++            // whose compatibility Package object doesn't set baseCodePath.
++            // CopyExecutor needs it to extract native libraries and store the APK.
++            pkg.baseCodePath = file;
++
+             // mSignatures — set via reflection (field may be private)
+             android.content.pm.Signature[] sigs =
+                 top.niunaijun.blackbox.utils.compat.PackageParserFix.getSignatures(pi);
