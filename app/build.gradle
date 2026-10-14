@@ -10,6 +10,11 @@ android {
         applicationId 'com.example.pakredirect'
         minSdk 26
         targetSdk 35
+        ndk {
+            // BlackBox's JNI core ships ARM binaries only. Avoid a transitive
+            // x86 tunnel library making x86 emulators select an unusable ABI.
+            abiFilters 'arm64-v8a', 'armeabi-v7a'
+        }
         versionCode = (project.findProperty('ryluxVersionCode') ?: '37').toInteger()
         versionName = (project.findProperty('ryluxVersionName') ?: '2.4.16').toString()
         manifestPlaceholders = [ryluxWechatAppId: (project.findProperty('ryluxWechatAppId') ?: 'wx_replace_with_merchant_appid').toString()]
