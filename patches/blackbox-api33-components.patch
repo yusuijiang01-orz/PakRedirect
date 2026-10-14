@@ -402,7 +402,7 @@ index 49778d6..0706692 100644
          if (Build.VERSION.SDK_INT >= 28) {
              flags |= PackageManager.GET_SIGNING_CERTIFICATES;
          } else {
-@@ -46,6 +66,257 @@ public class PackageParserFix {
+@@ -46,6 +66,255 @@ public class PackageParserFix {
          }
      }
  
@@ -569,8 +569,6 @@ index 49778d6..0706692 100644
 +                                                       Resources resources) throws Exception {
 +        IntentFilter filter = new IntentFilter();
 +        filter.setPriority(intAttribute(parser, resources, "priority", 0));
-+        filter.setOrder(intAttribute(parser, resources, "order", 0));
-+        filter.setAutoVerify(intAttribute(parser, resources, "autoVerify", 0) != 0);
 +        BPackage.IntentInfo info = new BPackage.IntentInfo(filter);
 +        info.labelRes = parser.getAttributeResourceValue(ANDROID, "label", 0);
 +        if (info.labelRes == 0) info.nonLocalizedLabel = stringAttribute(parser, resources, "label");
@@ -660,7 +658,7 @@ index 49778d6..0706692 100644
      @SuppressWarnings("deprecation")
      public static Signature[] getSignatures(PackageInfo pi) {
          if (pi == null) return new Signature[0];
-@@ -56,7 +327,7 @@ public class PackageParserFix {
+@@ -56,7 +325,7 @@ public class PackageParserFix {
          return pi.signatures != null ? pi.signatures : new Signature[0];
      }
  
