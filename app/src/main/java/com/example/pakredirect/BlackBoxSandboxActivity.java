@@ -7,6 +7,7 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.View;
@@ -31,6 +32,7 @@ import java.util.concurrent.Executors;
 /** A minimal, opt-in test surface for importing and launching apps in BlackBox. */
 public final class BlackBoxSandboxActivity extends Activity {
     private static final int PICK_APK = 6017;
+    private static final String LOCALIZED_GAME_PACKAGE = "com.tepaylink.tamgioiphantranhmobile";
     private static final int BG = Color.rgb(17, 19, 24);
     private static final int CARD = Color.rgb(28, 32, 40);
     private static final int SOFT = Color.rgb(34, 39, 48);
@@ -247,10 +249,31 @@ public final class BlackBoxSandboxActivity extends Activity {
             packageName.setPadding(0, dp(3), 0, dp(8));
             card.addView(packageName);
 
-            Button launch = button("启动", BLUE);
             String packageToLaunch = app.packageName;
-            launch.setOnClickListener(v -> launch(packageToLaunch));
-            card.addView(launch, new LinearLayout.LayoutParams(-1, dp(40)));
+            if (LOCALIZED_GAME_PACKAGE.equals(packageToLaunch)) {
+                TextView localization = label(
+                        "RYLUX 汉化：" + (LocalizationSettings.isEnabled(this) ? "已开启" : "已关闭"),
+                        11,
+                        MUTED,
+                        false
+                );
+                localization.setPadding(0, 0, 0, dp(8));
+                card.addView(localization);
+
+                Button localizedLaunch = button("汉化后启动", BLUE);
+                localizedLaunch.setOnClickListener(v -> launch(packageToLaunch, true));
+                card.addView(localizedLaunch, new LinearLayout.LayoutParams(-1, dp(40)));
+
+                Button directLaunch = button("直接启动（不使用汉化）", SOFT);
+                directLaunch.setOnClickListener(v -> launch(packageToLaunch, false));
+                LinearLayout.LayoutParams directLp = new LinearLayout.LayoutParams(-1, dp(40));
+                directLp.topMargin = dp(6);
+                card.addView(directLaunch, directLp);
+            } else {
+                Button launch = button("启动", BLUE);
+                launch.setOnClickListener(v -> launch(packageToLaunch, false));
+                card.addView(launch, new LinearLayout.LayoutParams(-1, dp(40)));
+            }
 
             LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(-1, -2);
             cardLp.bottomMargin = dp(8);
@@ -260,16 +283,59 @@ public final class BlackBoxSandboxActivity extends Activity {
         setBusy(false, "虚拟环境就绪 · " + count + " 个应用");
     }
 
-    private void launch(String packageName) {
-        setBusy(true, "正在启动 " + packageName + "…");
+    private void launch(String packageName, boolean withLocalization) {
+        setBusy(true, withLocalization ? "正在准备 RYLUX 汉化…" : "正在启动 " + packageName + "…");
         worker.execute(() -> {
             try {
+                if (withLocalization && LOCALIZED_GAME_PACKAGE.equals(packageName)) {
+                    if (!LocalizationSettings.isEnabled(this)) {
+                        throw new IllegalStateException("RYLUX 汉化开关已关闭，请在首页开启后重试");
+                    }
+                    if (!InterceptService.isRunning()) {
+                        LaunchProgress.begin("正在准备 RYLUX 汉化资源…");
+                        Intent service = new Intent(this, InterceptService.class)
+                                .setAction(InterceptService.ACTION_START);
+                        if (Build.VERSION.SDK_INT >= 26) startForegroundService(service);
+                        else startService(service);
+                        if (!waitForLocalizationReady()) {
+                            String error = LaunchProgress.error();
+                            if (error == null || error.trim().isEmpty()) {
+                                error = LaunchProgress.message();
+                            }
+                            throw new IllegalStateException(error == null || error.trim().isEmpty()
+                                    ? "RYLUX 汉化服务未能就绪" : error);
+                        }
+                    }
+                }
                 boolean launched = BlackBoxCore.get().launchApk(packageName, 0);
-                runOnUiThread(() -> setBusy(false, launched ? "已请求启动：" + packageName : "启动失败：" + packageName));
+                String result = launched
+                        ? (withLocalization ? "RYLUX 汉化已就绪，已请求在沙箱启动游戏" : "已请求启动：" + packageName)
+                        : "启动失败：" + packageName;
+                runOnUiThread(() -> setBusy(false, result));
             } catch (Throwable error) {
-                runOnUiThread(() -> setBusy(false, "启动失败：" + safe(error.getMessage())));
+                String prefix = withLocalization ? "汉化启动失败：" : "启动失败：";
+                runOnUiThread(() -> setBusy(false, prefix + safe(error.getMessage())));
             }
         });
+    }
+
+    private boolean waitForLocalizationReady() throws InterruptedException {
+        long deadline = System.currentTimeMillis() + 5L * 60L * 1000L;
+        String lastMessage = null;
+        while (System.currentTimeMillis() < deadline) {
+            if (InterceptService.isRunning()) return true;
+            String error = LaunchProgress.error();
+            if (!LaunchProgress.isStarting() && error != null && !error.trim().isEmpty()) return false;
+            String message = LaunchProgress.message();
+            if (message != null && !message.trim().isEmpty() && !message.equals(lastMessage)) {
+                lastMessage = message;
+                String progressMessage = message;
+                runOnUiThread(() -> setBusy(true, progressMessage));
+            }
+            Thread.sleep(200L);
+        }
+        LaunchProgress.fail("等待 RYLUX 汉化服务超时");
+        return false;
     }
 
     private void setBusy(boolean busy, String message) {
