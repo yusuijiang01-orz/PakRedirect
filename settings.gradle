@@ -1,5 +1,6 @@
 pluginManagement {
     repositories {
+        maven { url 'https://www.jitpack.io' }
         google()
         mavenCentral()
         gradlePluginPortal()
@@ -8,9 +9,14 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
+        maven { url 'https://www.jitpack.io' }
         google()
         mavenCentral()
     }
 }
 rootProject.name = 'PakRedirect'
-include ':app'
+include ':app', ':black-reflection', ':compiler', ':Bcore'
+
+project(':black-reflection').projectDir = file('vendor/BlackBoxReborn/black-reflection')
+project(':compiler').projectDir = file('vendor/BlackBoxReborn/compiler')
+project(':Bcore').projectDir = file('vendor/BlackBoxReborn/Bcore')

@@ -1,6 +1,7 @@
 package com.example.pakredirect;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -234,6 +235,20 @@ public final class RyluxHomeNavigationPolish {
         TextView enterHint = label(activity, "安装和启动入口都在游戏详情中", 11.5f, MUTED, false);
         enterHint.setGravity(Gravity.CENTER);
         root.addView(enterHint, new LinearLayout.LayoutParams(-1, -2));
+
+        Button sandbox = smallButton(activity, "BlackBox 游戏沙箱 · 测试版");
+        sandbox.setOnClickListener(v -> activity.startActivity(
+                new Intent(activity, BlackBoxSandboxActivity.class)
+        ));
+        LinearLayout.LayoutParams sandboxLp = new LinearLayout.LayoutParams(-1, dp(activity, 48));
+        sandboxLp.topMargin = dp(activity, 16);
+        root.addView(sandbox, sandboxLp);
+
+        TextView sandboxHint = label(activity, "导入 APK，在虚拟环境中尝试运行", 11.5f, MUTED, false);
+        sandboxHint.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams sandboxHintLp = new LinearLayout.LayoutParams(-1, -2);
+        sandboxHintLp.topMargin = dp(activity, 6);
+        root.addView(sandboxHint, sandboxHintLp);
 
         for (View child : preserved) root.addView(child);
     }

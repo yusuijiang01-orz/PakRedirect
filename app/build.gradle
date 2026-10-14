@@ -4,7 +4,7 @@ plugins {
 
 android {
     namespace 'com.example.pakredirect'
-    compileSdk 35
+    compileSdk 36
 
     defaultConfig {
         applicationId 'com.example.pakredirect'
@@ -51,6 +51,7 @@ android {
 }
 
 dependencies {
+    implementation project(':Bcore')
     implementation 'com.alipay.sdk:alipay-sdk-android:15.8.09@aar'
     implementation 'com.tencent.mm.opensdk:wechat-sdk-android:6.8.40'
     implementation 'androidx.core:core:1.13.1'

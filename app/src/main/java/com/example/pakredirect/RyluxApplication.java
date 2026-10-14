@@ -2,14 +2,55 @@ package com.example.pakredirect;
 
 import android.app.Activity;
 import android.app.Application;
+import android.content.Context;
 import android.os.Bundle;
+import android.util.Log;
+
+import top.niunaijun.blackbox.BlackBoxCore;
+import top.niunaijun.blackbox.app.configuration.ClientConfiguration;
 
 public class RyluxApplication extends Application {
+    private static final String BLACKBOX_TAG = "RYLUX-BlackBox";
+    private volatile boolean blackBoxReady;
+    private volatile String blackBoxError = "";
     private boolean updateChecked;
+
+    @Override
+    protected void attachBaseContext(Context base) {
+        super.attachBaseContext(base);
+        try {
+            BlackBoxCore core = BlackBoxCore.get();
+            core.closeCodeInit();
+            core.onBeforeMainApplicationAttach(this, base);
+            core.doAttachBaseContext(base, new ClientConfiguration() {
+                @Override
+                public String getHostPackageName() {
+                    return base.getPackageName();
+                }
+
+                @Override
+                public boolean isEnableLauncherActivity() {
+                    return false;
+                }
+            });
+            core.onAfterMainApplicationAttach(this, base);
+        } catch (Throwable error) {
+            blackBoxError = error.getClass().getSimpleName() + ": " + error.getMessage();
+            Log.e(BLACKBOX_TAG, "BlackBox attach failed", error);
+        }
+    }
 
     @Override
     public void onCreate() {
         super.onCreate();
+        try {
+            BlackBoxCore.get().doCreate();
+            blackBoxReady = true;
+            blackBoxError = "";
+        } catch (Throwable error) {
+            blackBoxError = error.getClass().getSimpleName() + ": " + error.getMessage();
+            Log.e(BLACKBOX_TAG, "BlackBox startup failed", error);
+        }
         registerActivityLifecycleCallbacks(new ActivityLifecycleCallbacks() {
             @Override public void onActivityResumed(Activity activity) {
                 if (activity instanceof MainActivity) {
@@ -43,5 +84,13 @@ public class RyluxApplication extends Application {
                 }
             }
         });
+    }
+
+    boolean isBlackBoxReady() {
+        return blackBoxReady;
+    }
+
+    String getBlackBoxError() {
+        return blackBoxError;
     }
 }

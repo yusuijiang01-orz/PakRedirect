@@ -1,4 +1,4 @@
-name: Build and Release RYLUX APK
+name: Build RYLUX APK (release optional)
 
 on:
   workflow_dispatch:
@@ -11,9 +11,14 @@ on:
         description: 'Monotonically increasing Android versionCode'
         required: true
         default: '37'
+      publish_release:
+        description: 'Publish GitHub and Gitee releases after building (leave off for a test build)'
+        required: true
+        type: boolean
+        default: false
 
 jobs:
-  build-release:
+  build-apk:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -27,8 +32,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          submodules: recursive
 
       - name: Check Gitee release credential
+        if: inputs.publish_release
         env:
           GITEE_RELEASE_TOKEN: ${{ secrets.GITEE_RELEASE_TOKEN }}
         shell: bash
@@ -38,15 +46,15 @@ jobs:
             exit 1
           }
 
-      - name: Setup Java 17
+      - name: Setup Java 21
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.9'
+          gradle-version: '8.13'
 
       - name: Install Android SDK packages
         shell: bash
@@ -56,7 +64,7 @@ jobs:
             SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n 1)"
           fi
           yes | "$SDKMANAGER" --licenses >/dev/null || true
-          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          "$SDKMANAGER" "platform-tools" "platforms;android-36" "build-tools;36.1.0" "ndk;29.0.13846066"
 
       - name: Restore persistent release keystore
         shell: bash
@@ -70,7 +78,7 @@ jobs:
           chmod 600 "$RUNNER_TEMP/rylux-release.jks"
           echo "RYLUX_KEYSTORE_PATH=$RUNNER_TEMP/rylux-release.jks" >> "$GITHUB_ENV"
 
-      - name: Build signed release APK
+      - name: Build signed APK
         shell: bash
         run: |
           set -euo pipefail
@@ -83,11 +91,21 @@ jobs:
         run: |
           set -euo pipefail
           APK="$(find app/build/outputs/apk/release -name '*.apk' | head -n 1)"
-          APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          APKSIGNER="$ANDROID_HOME/build-tools/36.1.0/apksigner"
           "$APKSIGNER" verify --verbose --print-certs "$APK"
           cp "$APK" "RYLUX-v${{ inputs.version_name }}.apk"
 
+      - name: Upload non-release test APK artifact
+        if: ${{ !inputs.publish_release }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: RYLUX-v${{ inputs.version_name }}-test-${{ github.sha }}
+          path: RYLUX-v${{ inputs.version_name }}.apk
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Create GitHub Release
+        if: inputs.publish_release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ inputs.version_name }}
@@ -98,6 +116,7 @@ jobs:
             RYLUX-v${{ inputs.version_name }}.apk
 
       - name: Sync signed APK to Gitee Release
+        if: inputs.publish_release
         env:
           GITEE_RELEASE_TOKEN: ${{ secrets.GITEE_RELEASE_TOKEN }}
           VERSION_NAME: ${{ inputs.version_name }}
