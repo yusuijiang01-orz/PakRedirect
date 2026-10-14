@@ -5,3 +5,6 @@ local.properties
 *.keystore
 __pycache__/
 *.pyc
+game-agent/.venv/
+game-agent/data/
+game-agent/src/*.egg-info/
