@@ -1,0 +1,678 @@
+diff --git a/Bcore/src/main/java/top/niunaijun/blackbox/core/system/pm/BPackage.java b/Bcore/src/main/java/top/niunaijun/blackbox/core/system/pm/BPackage.java
+index 4ffcc08..0559d18 100644
+--- a/Bcore/src/main/java/top/niunaijun/blackbox/core/system/pm/BPackage.java
++++ b/Bcore/src/main/java/top/niunaijun/blackbox/core/system/pm/BPackage.java
+@@ -8,6 +8,7 @@ import android.content.pm.ConfigurationInfo;
+ import android.content.pm.FeatureInfo;
+ import android.content.pm.InstrumentationInfo;
+ import android.content.pm.PackageParser;
++import android.content.pm.PackageInfo;
+ import android.content.pm.PermissionGroupInfo;
+ import android.content.pm.PermissionInfo;
+ import android.content.pm.ProviderInfo;
+@@ -18,6 +19,7 @@ import android.os.Parcel;
+ import android.os.Parcelable;
+ 
+ import java.util.ArrayList;
++import java.util.Arrays;
+ 
+ import top.niunaijun.blackbox.entity.pm.InstallOption;
+ import top.niunaijun.blackbox.utils.compat.BuildCompat;
+@@ -54,6 +56,71 @@ public class BPackage implements Parcelable {
+ 
+     public InstallOption installOption;
+ 
++    /** Public archive-info path: do not create framework PackageParser objects on API 33+. */
++    public BPackage(PackageInfo info) {
++        packageName = info.packageName;
++        applicationInfo = info.applicationInfo;
++        baseCodePath = applicationInfo.sourceDir;
++        mAppMetaData = applicationInfo.metaData;
++        mVersionCode = info.versionCode;
++        mVersionName = info.versionName;
++        mSharedUserId = info.sharedUserId;
++        mSharedUserLabel = info.sharedUserLabel;
++        mSignatures = top.niunaijun.blackbox.utils.compat.PackageParserFix.getSignatures(info);
++        mSigningDetails = new SigningDetails(mSignatures);
++        if (info.requestedPermissions != null) {
++            requestedPermissions.addAll(Arrays.asList(info.requestedPermissions));
++        }
++        if (info.configPreferences != null) {
++            configPreferences = new ArrayList<>(Arrays.asList(info.configPreferences));
++        }
++        if (info.reqFeatures != null) {
++            reqFeatures = new ArrayList<>(Arrays.asList(info.reqFeatures));
++        }
++        if (info.activities != null) {
++            for (ActivityInfo value : info.activities) {
++                Activity component = new Activity(new ActivityInfo(value));
++                component.owner = this;
++                activities.add(component);
++            }
++        }
++        if (info.receivers != null) {
++            for (ActivityInfo value : info.receivers) {
++                Activity component = new Activity(new ActivityInfo(value));
++                component.owner = this;
++                receivers.add(component);
++            }
++        }
++        if (info.services != null) {
++            for (ServiceInfo value : info.services) {
++                Service component = new Service(new ServiceInfo(value));
++                component.owner = this;
++                services.add(component);
++            }
++        }
++        if (info.providers != null) {
++            for (ProviderInfo value : info.providers) {
++                Provider component = new Provider(new ProviderInfo(value));
++                component.owner = this;
++                providers.add(component);
++            }
++        }
++        if (info.instrumentation != null) {
++            for (InstrumentationInfo value : info.instrumentation) {
++                Instrumentation component = new Instrumentation(new InstrumentationInfo(value));
++                component.owner = this;
++                instrumentation.add(component);
++            }
++        }
++        if (info.permissions != null) {
++            for (PermissionInfo value : info.permissions) {
++                Permission component = new Permission(new PermissionInfo(value));
++                component.owner = this;
++                permissions.add(component);
++            }
++        }
++    }
++
+     public BPackage(PackageParser.Package aPackage) {
+         this.activities = new ArrayList<>(aPackage.activities.size());
+         for (PackageParser.Activity activity : aPackage.activities) {
+@@ -233,6 +300,11 @@ public class BPackage implements Parcelable {
+     public final static class Activity extends Component<ActivityIntentInfo> {
+         public ActivityInfo info;
+ 
++        public Activity(ActivityInfo info) {
++            super(info.name, info.metaData);
++            this.info = info;
++        }
++
+         public Activity(PackageParser.Activity activity) {
+             super(activity);
+             this.info = activity.info;
+@@ -260,6 +332,11 @@ public class BPackage implements Parcelable {
+     public static final class Service extends Component<ServiceIntentInfo> {
+         public ServiceInfo info;
+ 
++        public Service(ServiceInfo info) {
++            super(info.name, info.metaData);
++            this.info = info;
++        }
++
+         public Service(PackageParser.Service service) {
+             super(service);
+             info = service.info;
+@@ -287,6 +364,11 @@ public class BPackage implements Parcelable {
+     public static final class Provider extends Component<ProviderIntentInfo> {
+         public ProviderInfo info;
+ 
++        public Provider(ProviderInfo info) {
++            super(info.name, info.metaData);
++            this.info = info;
++        }
++
+         public Provider(PackageParser.Provider provider) {
+             super(provider);
+             info = provider.info;
+@@ -314,6 +396,11 @@ public class BPackage implements Parcelable {
+     public static final class Instrumentation extends Component<IntentInfo> {
+         public InstrumentationInfo info;
+ 
++        public Instrumentation(InstrumentationInfo info) {
++            super(info.name, info.metaData);
++            this.info = info;
++        }
++
+         public Instrumentation(PackageParser.Instrumentation instrumentation) {
+             super(instrumentation);
+             info = instrumentation.info;
+@@ -341,6 +428,11 @@ public class BPackage implements Parcelable {
+     public static final class Permission extends Component<IntentInfo> {
+         public PermissionInfo info;
+ 
++        public Permission(PermissionInfo info) {
++            super(info.name, info.metaData);
++            this.info = info;
++        }
++
+         public Permission(PackageParser.Permission permission) {
+             super(permission);
+             this.info = permission.info;
+@@ -433,6 +525,10 @@ public class BPackage implements Parcelable {
+ 
+         public static final PackageParser.SigningDetails UNKNOWN = null;
+ 
++        public SigningDetails(Signature[] signatures) {
++            this.signatures = signatures;
++        }
++
+         @Override
+         public int describeContents() {
+             return 0;
+@@ -477,6 +573,11 @@ public class BPackage implements Parcelable {
+         public int logo;
+         public int banner;
+ 
++        public IntentInfo(IntentFilter filter) {
++            intentFilter = filter;
++            hasDefault = filter.hasCategory(android.content.Intent.CATEGORY_DEFAULT);
++        }
++
+         public IntentInfo(PackageParser.IntentInfo intentInfo) {
+             this.intentFilter = intentInfo;
+             this.hasDefault = intentInfo.hasDefault;
+@@ -543,6 +644,12 @@ public class BPackage implements Parcelable {
+         public Bundle metaData;
+         public ComponentName componentName;
+ 
++        public Component(String className, Bundle metaData) {
++            this.className = className;
++            this.metaData = metaData;
++            this.intents = new ArrayList<>();
++        }
++
+         public Component(Parcel parcel) {
+             this.className = parcel.readString();
+             this.metaData = parcel.readBundle(Bundle.class.getClassLoader());
+diff --git a/Bcore/src/main/java/top/niunaijun/blackbox/core/system/pm/BPackageManagerService.java b/Bcore/src/main/java/top/niunaijun/blackbox/core/system/pm/BPackageManagerService.java
+index 3920757..6727829 100644
+--- a/Bcore/src/main/java/top/niunaijun/blackbox/core/system/pm/BPackageManagerService.java
++++ b/Bcore/src/main/java/top/niunaijun/blackbox/core/system/pm/BPackageManagerService.java
+@@ -688,7 +688,7 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
+                 return result.installError(packageArchiveInfo.packageName,
+                         msg + "\n" + (BlackBoxCore.is64Bit() ? "The box does not support 32-bit Application" : "The box does not support 64-bit Application"));
+             }
+-            PackageParser.Package aPackage = parserApk(apkFile.getAbsolutePath());
++            BPackage aPackage = parserApk(apkFile.getAbsolutePath());
+             if (aPackage == null) {
+                 return result.installError("parser apk error.");
+             }
+@@ -726,8 +726,8 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
+         return result;
+     }
+ 
+-    private PackageParser.Package parserApk(String file) {
+-        // Android 14+ (API 33+): PackageParser is removed. Use PackageParserFix.
++    private BPackage parserApk(String file) {
++        // Public archive info plus manifest filters, directly into the virtual model.
+         if (top.niunaijun.blackbox.utils.compat.PackageParserFix.needsFix()) {
+             return parserApkCompat(file);
+         }
+@@ -735,7 +735,7 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
+             PackageParser parser = PackageParserCompat.createParser(new File(file));
+             PackageParser.Package aPackage = PackageParserCompat.parsePackage(parser, new File(file), 0);
+             PackageParserCompat.collectCertificates(parser, aPackage, 0);
+-            return aPackage;
++            return new BPackage(aPackage);
+         } catch (Throwable t) {
+             t.printStackTrace();
+         }
+@@ -743,52 +743,11 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
+     }
+ 
+     /**
+-     * API 33+ replacement using pure reflection — avoids all PackageParser
+-     * inner classes (Activity, Service, etc.) which are also removed in API 34+.
++     * API 33+ must populate components and intent filters, not a framework shell.
+      */
+-    private PackageParser.Package parserApkCompat(String file) {
+-        try {
+-            android.content.pm.PackageInfo pi =
+-                top.niunaijun.blackbox.utils.compat.PackageParserFix.parseApk(
+-                    BlackBoxCore.getContext(), file);
+-            if (pi == null) return null;
+-
+-            // Instantiate PackageParser.Package via reflection (still exists as stub in API 33/34)
+-            Class<?> pkgClass = Class.forName("android.content.pm.PackageParser$Package");
+-            java.lang.reflect.Constructor<?> ctor = pkgClass.getDeclaredConstructor(String.class);
+-            ctor.setAccessible(true);
+-            PackageParser.Package pkg = (PackageParser.Package) ctor.newInstance(pi.packageName);
+-
+-            // applicationInfo
+-            pkg.applicationInfo = pi.applicationInfo;
+-
+-            // mSignatures — set via reflection (field may be private)
+-            android.content.pm.Signature[] sigs =
+-                top.niunaijun.blackbox.utils.compat.PackageParserFix.getSignatures(pi);
+-            try {
+-                java.lang.reflect.Field sigField = pkgClass.getDeclaredField("mSignatures");
+-                sigField.setAccessible(true);
+-                sigField.set(pkg, sigs);
+-            } catch (Exception e) {
+-                Slog.w(TAG, "mSignatures field not found: " + e.getMessage());
+-            }
+-
+-            // requestedPermissions
+-            if (pi.requestedPermissions != null) {
+-                for (String perm : pi.requestedPermissions) {
+-                    pkg.requestedPermissions.add(perm);
+-                }
+-            }
+-
+-            // Components via BPackageManagerService helper using PackageInfo directly
+-            // We inject them via the BPackage path which accepts PackageInfo on API 33+
+-            Slog.d(TAG, "parserApkCompat OK: " + pi.packageName + " sigs=" + sigs.length);
+-            return pkg;
+-        } catch (Throwable t) {
+-            Slog.e(TAG, "parserApkCompat failed: " + t.getMessage());
+-            t.printStackTrace();
+-            return null;
+-        }
++    private BPackage parserApkCompat(String file) {
++        return top.niunaijun.blackbox.utils.compat.PackageParserFix.parsePackage(
++                BlackBoxCore.getContext(), file);
+     }
+ 
+     static String fixProcessName(String defProcessName, String processName) {
+@@ -861,4 +820,4 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
+             mComponentResolver.addAllComponents(value.pkg);
+         }
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/Bcore/src/main/java/top/niunaijun/blackbox/core/system/pm/Settings.java b/Bcore/src/main/java/top/niunaijun/blackbox/core/system/pm/Settings.java
+index 33edc28..19e3bba 100644
+--- a/Bcore/src/main/java/top/niunaijun/blackbox/core/system/pm/Settings.java
++++ b/Bcore/src/main/java/top/niunaijun/blackbox/core/system/pm/Settings.java
+@@ -41,9 +41,13 @@ import top.niunaijun.blackbox.utils.compat.PackageParserCompat;
+     }
+ 
+     BPackageSettings getPackageLPw(String name, PackageParser.Package aPackage, InstallOption installOption) {
++        return getPackageLPw(name, new BPackage(aPackage), installOption);
++    }
++
++    BPackageSettings getPackageLPw(String name, BPackage aPackage, InstallOption installOption) {
+         BPackageSettings pkgSettings;
+         BPackageSettings origSettings = new BPackageSettings();
+-        origSettings.pkg = new BPackage(aPackage);
++        origSettings.pkg = aPackage;
+         origSettings.pkg.installOption = installOption;
+         origSettings.installOption = installOption;
+         origSettings.pkg.mExtras = origSettings;
+@@ -204,6 +208,22 @@ import top.niunaijun.blackbox.utils.compat.PackageParserCompat;
+             packageSettingsIn.setDataPosition(0);
+ 
+             BPackageSettings bPackageSettings = new BPackageSettings(packageSettingsIn);
++            // Earlier API 33+ imports persisted only a shell. Repair from the retained
++            // APK without changing the virtual UID, user state, or application data.
++            // A failed repair must not enter the destructive bad-package path below.
++            BPackage cached = bPackageSettings.pkg;
++            if (top.niunaijun.blackbox.utils.compat.PackageParserFix.needsFix()
++                    && cached.activities.isEmpty() && cached.receivers.isEmpty()
++                    && cached.services.isEmpty() && cached.providers.isEmpty()) {
++                BPackage repaired = top.niunaijun.blackbox.utils.compat.PackageParserFix.parsePackage(
++                        BlackBoxCore.getContext(), cached.baseCodePath);
++                if (repaired != null && packageName.equals(repaired.packageName)) {
++                    repaired.installOption = bPackageSettings.installOption;
++                    bPackageSettings.pkg = repaired;
++                } else {
++                    Slog.w(TAG, "Keeping cached package after component repair failed: " + packageName);
++                }
++            }
+             bPackageSettings.pkg.mExtras = bPackageSettings;
+             if (bPackageSettings.installOption.isFlag(InstallOption.FLAG_SYSTEM)) {
+                 PackageInfo packageInfo = BlackBoxCore.getPackageManager().getPackageInfo(packageName, PackageManager.GET_META_DATA);
+@@ -235,7 +255,7 @@ import top.niunaijun.blackbox.utils.compat.PackageParserCompat;
+ 
+     private BPackageSettings reInstallBySystem(PackageInfo systemPackageInfo, InstallOption option) throws Exception {
+         Slog.d(TAG, "reInstallBySystem: " + systemPackageInfo.packageName);
+-        PackageParser.Package aPackage = parserApk(systemPackageInfo.applicationInfo.sourceDir);
++        BPackage aPackage = parserApk(systemPackageInfo.applicationInfo.sourceDir);
+         if (aPackage == null) {
+             throw new RuntimeException("parser apk error.");
+         }
+@@ -247,12 +267,16 @@ import top.niunaijun.blackbox.utils.compat.PackageParserCompat;
+         mPackages.remove(packageName);
+     }
+ 
+-    private PackageParser.Package parserApk(String file) {
++    private BPackage parserApk(String file) {
++        if (top.niunaijun.blackbox.utils.compat.PackageParserFix.needsFix()) {
++            return top.niunaijun.blackbox.utils.compat.PackageParserFix.parsePackage(
++                    BlackBoxCore.getContext(), file);
++        }
+         try {
+             PackageParser parser = PackageParserCompat.createParser(new File(file));
+             PackageParser.Package aPackage = PackageParserCompat.parsePackage(parser, new File(file), 0);
+             PackageParserCompat.collectCertificates(parser, aPackage, 0);
+-            return aPackage;
++            return new BPackage(aPackage);
+         } catch (Throwable t) {
+             t.printStackTrace();
+         }
+diff --git a/Bcore/src/main/java/top/niunaijun/blackbox/utils/compat/PackageParserFix.java b/Bcore/src/main/java/top/niunaijun/blackbox/utils/compat/PackageParserFix.java
+index 49778d6..0706692 100644
+--- a/Bcore/src/main/java/top/niunaijun/blackbox/utils/compat/PackageParserFix.java
++++ b/Bcore/src/main/java/top/niunaijun/blackbox/utils/compat/PackageParserFix.java
+@@ -1,19 +1,34 @@
+ package top.niunaijun.blackbox.utils.compat;
+ 
+ import android.content.Context;
++import android.content.IntentFilter;
+ import android.content.pm.PackageInfo;
+ import android.content.pm.PackageManager;
+ import android.content.pm.Signature;
++import android.content.res.AssetManager;
++import android.content.res.Resources;
++import android.content.res.XmlResourceParser;
+ import android.os.Build;
++import android.os.PatternMatcher;
+ import android.util.Log;
+-import java.io.File;
++import android.util.TypedValue;
++
++import org.xmlpull.v1.XmlPullParser;
++import org.xmlpull.v1.XmlPullParserException;
++
++import java.util.ArrayList;
++
++import black.android.content.res.BRAssetManager;
++import top.niunaijun.blackbox.core.system.pm.BPackage;
+ 
+ /**
+- * PackageParserFix — replaces android.content.pm.PackageParser
+- * removed in Android 14 (API 34). Uses public PM APIs only.
++ * Archive information supplies component attributes; the compiled manifest supplies
++ * intent filters, which PackageManager.getPackageArchiveInfo does not expose.
++ * No framework PackageParser objects are needed on the API 33+ path.
+  */
+ public class PackageParserFix {
+     private static final String TAG = "PackageParserFix";
++    private static final String ANDROID = "http://schemas.android.com/apk/res/android";
+ 
+     @SuppressWarnings("deprecation")
+     private static int getFullFlags() {
+@@ -22,7 +37,12 @@ public class PackageParserFix {
+                 | PackageManager.GET_RECEIVERS
+                 | PackageManager.GET_PROVIDERS
+                 | PackageManager.GET_PERMISSIONS
+-                | PackageManager.GET_META_DATA;
++                | PackageManager.GET_META_DATA
++                | PackageManager.GET_INSTRUMENTATION
++                | PackageManager.GET_CONFIGURATIONS
++                | PackageManager.MATCH_DISABLED_COMPONENTS
++                | PackageManager.MATCH_DIRECT_BOOT_AWARE
++                | PackageManager.MATCH_DIRECT_BOOT_UNAWARE;
+         if (Build.VERSION.SDK_INT >= 28) {
+             flags |= PackageManager.GET_SIGNING_CERTIFICATES;
+         } else {
+@@ -46,6 +66,257 @@ public class PackageParserFix {
+         }
+     }
+ 
++    /** Parse an uninstalled APK; never query the host's launcher activities. */
++    public static BPackage parsePackage(Context context, String apkPath) {
++        AssetManager assets = null;
++        XmlResourceParser parser = null;
++        try {
++            PackageInfo info = parseApk(context, apkPath);
++            if (info == null || info.applicationInfo == null) {
++                throw new IllegalArgumentException("No archive application info: " + apkPath);
++            }
++            BPackage pkg = new BPackage(info);
++            // A private asset manager ensures AndroidManifest.xml comes from this
++            // archive, including when the same package is installed on the host.
++            assets = BRAssetManager.get()._new();
++            Integer cookie = BRAssetManager.get(assets).addAssetPath(apkPath);
++            if (cookie == null || cookie == 0) {
++                throw new IllegalArgumentException("Cannot open archive assets: " + apkPath);
++            }
++            Resources hostResources = context.getResources();
++            Resources resources = new Resources(assets, hostResources.getDisplayMetrics(),
++                    hostResources.getConfiguration());
++            parser = assets.openXmlResourceParser(cookie, "AndroidManifest.xml");
++            int event;
++            do {
++                event = parser.next();
++            } while (event != XmlPullParser.START_TAG && event != XmlPullParser.END_DOCUMENT);
++            if (event != XmlPullParser.START_TAG || !"manifest".equals(parser.getName())
++                    || !pkg.packageName.equals(parser.getAttributeValue(null, "package"))) {
++                throw new XmlPullParserException("Archive manifest package mismatch");
++            }
++            int manifestDepth = parser.getDepth();
++            boolean foundApplication = false;
++            while ((event = parser.next()) != XmlPullParser.END_DOCUMENT
++                    && !(event == XmlPullParser.END_TAG && parser.getDepth() == manifestDepth)) {
++                if (event == XmlPullParser.START_TAG && parser.getDepth() == manifestDepth + 1) {
++                    if ("application".equals(parser.getName())) {
++                        readApplication(parser, resources, pkg);
++                        foundApplication = true;
++                    } else {
++                        skipTag(parser);
++                    }
++                }
++            }
++            if (!foundApplication) {
++                throw new XmlPullParserException("Archive has no application element");
++            }
++            Log.d(TAG, "Parsed " + pkg.packageName + ": activities=" + pkg.activities.size()
++                    + " receivers=" + pkg.receivers.size() + " services=" + pkg.services.size()
++                    + " providers=" + pkg.providers.size());
++            return pkg;
++        } catch (Throwable e) {
++            // Do not persist a shell package that appears installed but cannot resolve
++            // its manifest components. Let the installer report a parse failure.
++            Log.e(TAG, "parsePackage failed: " + apkPath, e);
++            return null;
++        } finally {
++            if (parser != null) parser.close();
++            if (assets != null) assets.close();
++        }
++    }
++
++    private static void readApplication(XmlResourceParser parser, Resources resources,
++                                        BPackage pkg) throws Exception {
++        int depth = parser.getDepth();
++        int event;
++        while ((event = parser.next()) != XmlPullParser.END_DOCUMENT
++                && !(event == XmlPullParser.END_TAG && parser.getDepth() == depth)) {
++            if (event != XmlPullParser.START_TAG || parser.getDepth() != depth + 1) continue;
++            String tag = parser.getName();
++            BPackage.Component<?> component = null;
++            switch (tag) {
++                case "activity":
++                case "activity-alias":
++                    component = findComponent(pkg.activities, componentName(parser, resources, pkg));
++                    break;
++                case "receiver":
++                    component = findComponent(pkg.receivers, componentName(parser, resources, pkg));
++                    break;
++                case "service":
++                    component = findComponent(pkg.services, componentName(parser, resources, pkg));
++                    break;
++                case "provider":
++                    component = findComponent(pkg.providers, componentName(parser, resources, pkg));
++                    break;
++                case "uses-library":
++                    String name = stringAttribute(parser, resources, "name");
++                    if (name != null && !name.isEmpty()) {
++                        boolean required = intAttribute(parser, resources, "required", 1) != 0;
++                        if (required) {
++                            if (pkg.usesLibraries == null) pkg.usesLibraries = new ArrayList<>();
++                            pkg.usesLibraries.add(name);
++                        } else {
++                            if (pkg.usesOptionalLibraries == null) pkg.usesOptionalLibraries = new ArrayList<>();
++                            pkg.usesOptionalLibraries.add(name);
++                        }
++                    }
++                    skipTag(parser);
++                    continue;
++                default:
++                    skipTag(parser);
++                    continue;
++            }
++            if (component == null) {
++                throw new XmlPullParserException("Archive info omitted manifest " + tag + ": "
++                        + componentName(parser, resources, pkg));
++            }
++            readComponent(parser, resources, component);
++        }
++    }
++
++    private static String componentName(XmlResourceParser parser, Resources resources,
++                                         BPackage pkg) throws XmlPullParserException {
++        String name = stringAttribute(parser, resources, "name");
++        if (name == null || name.isEmpty()) throw new XmlPullParserException("Unnamed component");
++        if (name.charAt(0) == '.') return pkg.packageName + name;
++        return name.indexOf('.') < 0 ? pkg.packageName + "." + name : name;
++    }
++
++    private static BPackage.Component<?> findComponent(
++            ArrayList<? extends BPackage.Component<?>> components, String name) {
++        for (BPackage.Component<?> component : components) {
++            if (name.equals(component.className)) return component;
++        }
++        return null;
++    }
++
++    private static void readComponent(XmlResourceParser parser, Resources resources,
++                                       BPackage.Component<?> component) throws Exception {
++        int depth = parser.getDepth();
++        int event;
++        while ((event = parser.next()) != XmlPullParser.END_DOCUMENT
++                && !(event == XmlPullParser.END_TAG && parser.getDepth() == depth)) {
++            if (event != XmlPullParser.START_TAG || parser.getDepth() != depth + 1) continue;
++            if (!"intent-filter".equals(parser.getName())) {
++                // Metadata, alias target, provider authorities/path permissions, etc.
++                // already come from the platform's fully populated component info.
++                skipTag(parser);
++                continue;
++            }
++            BPackage.IntentInfo filter = readIntentFilter(parser, resources);
++            if (filter == null) continue;
++            if (component instanceof BPackage.Activity) {
++                BPackage.Activity activity = (BPackage.Activity) component;
++                BPackage.ActivityIntentInfo intent = new BPackage.ActivityIntentInfo(filter);
++                intent.activity = activity;
++                activity.intents.add(intent);
++            } else if (component instanceof BPackage.Service) {
++                BPackage.Service service = (BPackage.Service) component;
++                BPackage.ServiceIntentInfo intent = new BPackage.ServiceIntentInfo(filter);
++                intent.service = service;
++                service.intents.add(intent);
++            } else if (component instanceof BPackage.Provider) {
++                BPackage.Provider provider = (BPackage.Provider) component;
++                BPackage.ProviderIntentInfo intent = new BPackage.ProviderIntentInfo(filter);
++                intent.provider = provider;
++                provider.intents.add(intent);
++            }
++        }
++    }
++
++    private static BPackage.IntentInfo readIntentFilter(XmlResourceParser parser,
++                                                       Resources resources) throws Exception {
++        IntentFilter filter = new IntentFilter();
++        filter.setPriority(intAttribute(parser, resources, "priority", 0));
++        filter.setOrder(intAttribute(parser, resources, "order", 0));
++        filter.setAutoVerify(intAttribute(parser, resources, "autoVerify", 0) != 0);
++        BPackage.IntentInfo info = new BPackage.IntentInfo(filter);
++        info.labelRes = parser.getAttributeResourceValue(ANDROID, "label", 0);
++        if (info.labelRes == 0) info.nonLocalizedLabel = stringAttribute(parser, resources, "label");
++        info.icon = parser.getAttributeResourceValue(ANDROID, "icon", 0);
++        info.logo = parser.getAttributeResourceValue(ANDROID, "logo", 0);
++        info.banner = parser.getAttributeResourceValue(ANDROID, "banner", 0);
++        boolean unsupported = false;
++        int depth = parser.getDepth();
++        int event;
++        while ((event = parser.next()) != XmlPullParser.END_DOCUMENT
++                && !(event == XmlPullParser.END_TAG && parser.getDepth() == depth)) {
++            if (event != XmlPullParser.START_TAG || parser.getDepth() != depth + 1) continue;
++            String tag = parser.getName();
++            if ("action".equals(tag) || "category".equals(tag)) {
++                String name = stringAttribute(parser, resources, "name");
++                if (name == null || name.isEmpty()) {
++                    throw new XmlPullParserException("Unnamed intent-filter " + tag);
++                }
++                if ("action".equals(tag)) filter.addAction(name);
++                else filter.addCategory(name);
++            } else if ("data".equals(tag)) {
++                // Mime groups need dynamic expansion; a partial filter could match
++                // unrelated intents. Preserve the component, omit that whole filter.
++                if (stringAttribute(parser, resources, "mimeGroup") != null) unsupported = true;
++                String mimeType = stringAttribute(parser, resources, "mimeType");
++                if (mimeType != null) filter.addDataType(mimeType);
++                String scheme = stringAttribute(parser, resources, "scheme");
++                if (scheme != null) filter.addDataScheme(scheme);
++                String host = stringAttribute(parser, resources, "host");
++                if (host != null) filter.addDataAuthority(host, stringAttribute(parser, resources, "port"));
++                addPattern(parser, resources, filter, "path", PatternMatcher.PATTERN_LITERAL, false);
++                addPattern(parser, resources, filter, "pathPrefix", PatternMatcher.PATTERN_PREFIX, false);
++                addPattern(parser, resources, filter, "pathPattern", PatternMatcher.PATTERN_SIMPLE_GLOB, false);
++                addPattern(parser, resources, filter, "pathAdvancedPattern", PatternMatcher.PATTERN_ADVANCED_GLOB, false);
++                addPattern(parser, resources, filter, "pathSuffix", PatternMatcher.PATTERN_SUFFIX, false);
++                addPattern(parser, resources, filter, "ssp", PatternMatcher.PATTERN_LITERAL, true);
++                addPattern(parser, resources, filter, "sspPrefix", PatternMatcher.PATTERN_PREFIX, true);
++                addPattern(parser, resources, filter, "sspPattern", PatternMatcher.PATTERN_SIMPLE_GLOB, true);
++                addPattern(parser, resources, filter, "sspAdvancedPattern", PatternMatcher.PATTERN_ADVANCED_GLOB, true);
++                addPattern(parser, resources, filter, "sspSuffix", PatternMatcher.PATTERN_SUFFIX, true);
++            } else if ("uri-relative-filter-group".equals(tag)) {
++                // The legacy virtual resolver has no API 35 relative-URI group model.
++                // Do not broaden a constrained deep link into an unconstrained match.
++                unsupported = true;
++            }
++            skipTag(parser);
++        }
++        if (unsupported) {
++            Log.w(TAG, "Omitting unsupported constrained intent filter at " + parser.getPositionDescription());
++            return null;
++        }
++        info.hasDefault = filter.hasCategory(android.content.Intent.CATEGORY_DEFAULT);
++        return info;
++    }
++
++    private static void addPattern(XmlResourceParser parser, Resources resources,
++                                   IntentFilter filter, String name, int type, boolean ssp) {
++        String value = stringAttribute(parser, resources, name);
++        if (value != null) {
++            if (ssp) filter.addDataSchemeSpecificPart(value, type);
++            else filter.addDataPath(value, type);
++        }
++    }
++
++    private static String stringAttribute(XmlResourceParser parser, Resources resources, String name) {
++        int resourceId = parser.getAttributeResourceValue(ANDROID, name, 0);
++        return resourceId != 0 ? resources.getString(resourceId) : parser.getAttributeValue(ANDROID, name);
++    }
++
++    private static int intAttribute(XmlResourceParser parser, Resources resources, String name, int fallback) {
++        int resourceId = parser.getAttributeResourceValue(ANDROID, name, 0);
++        if (resourceId == 0) return parser.getAttributeIntValue(ANDROID, name, fallback);
++        TypedValue value = new TypedValue();
++        resources.getValue(resourceId, value, true);
++        return value.data;
++    }
++
++    private static void skipTag(XmlResourceParser parser) throws Exception {
++        int depth = parser.getDepth();
++        int event;
++        while ((event = parser.next()) != XmlPullParser.END_DOCUMENT
++                && !(event == XmlPullParser.END_TAG && parser.getDepth() == depth)) {
++            // Consume this subtree only; the caller owns the following sibling.
++        }
++    }
++
+     @SuppressWarnings("deprecation")
+     public static Signature[] getSignatures(PackageInfo pi) {
+         if (pi == null) return new Signature[0];
+@@ -56,7 +327,7 @@ public class PackageParserFix {
+         return pi.signatures != null ? pi.signatures : new Signature[0];
+     }
+ 
+-    /** True on API 33+ where PackageParser is deprecated/removed */
++    /** Use public archive info and our virtual model on API 33+. */
+     public static boolean needsFix() {
+         return Build.VERSION.SDK_INT >= 33;
+     }

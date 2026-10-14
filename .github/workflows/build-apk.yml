@@ -35,9 +35,9 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Apply BlackBox Android compatibility patch
+      - name: Apply BlackBox Android component compatibility patch
         shell: bash
-        run: git -C vendor/BlackBoxReborn apply "$GITHUB_WORKSPACE/patches/blackbox-api34-base-code-path.patch"
+        run: git -C vendor/BlackBoxReborn apply "$GITHUB_WORKSPACE/patches/blackbox-api33-components.patch"
 
       - name: Check Gitee release credential
         if: inputs.publish_release
