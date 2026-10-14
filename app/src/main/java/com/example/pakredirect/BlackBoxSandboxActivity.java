@@ -20,6 +20,10 @@ import android.widget.Toast;
 import top.niunaijun.blackbox.BlackBoxCore;
 import top.niunaijun.blackbox.entity.pm.InstallResult;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -158,8 +162,10 @@ public final class BlackBoxSandboxActivity extends Activity {
         }
         setBusy(true, "正在将 APK 安装到虚拟环境…");
         worker.execute(() -> {
+            File stagedApk = null;
             try {
-                InstallResult result = BlackBoxCore.get().installPackageAsUser(apkUri, 0);
+                stagedApk = stageApkForImport(apkUri);
+                InstallResult result = BlackBoxCore.get().installPackageAsUser(stagedApk, 0);
                 runOnUiThread(() -> {
                     setBusy(false, result.success
                             ? "导入成功：" + safe(result.packageName)
@@ -172,8 +178,33 @@ public final class BlackBoxSandboxActivity extends Activity {
                     setBusy(false, "导入失败：" + safe(error.getMessage()));
                     Toast.makeText(this, "导入失败，请查看状态说明", Toast.LENGTH_LONG).show();
                 });
+            } finally {
+                if (stagedApk != null) stagedApk.delete();
             }
         });
+    }
+
+    private File stageApkForImport(Uri apkUri) throws IOException {
+        File importDir = new File(getCacheDir(), "blackbox-import");
+        if (!importDir.isDirectory() && !importDir.mkdirs()) {
+            throw new IOException("无法创建 APK 暂存目录");
+        }
+        File stagedApk = File.createTempFile("selected-", ".apk", importDir);
+        try (InputStream input = getContentResolver().openInputStream(apkUri)) {
+            if (input == null) throw new IOException("无法读取所选 APK");
+            try (FileOutputStream output = new FileOutputStream(stagedApk)) {
+                byte[] buffer = new byte[64 * 1024];
+                int count;
+                while ((count = input.read(buffer)) != -1) {
+                    output.write(buffer, 0, count);
+                }
+                output.getFD().sync();
+            }
+            return stagedApk;
+        } catch (IOException | RuntimeException error) {
+            stagedApk.delete();
+            throw error;
+        }
     }
 
     private void refreshApps() {
