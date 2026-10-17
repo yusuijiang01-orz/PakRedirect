@@ -2,8 +2,11 @@ package com.example.pakredirect;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
+import android.net.Uri;
+import android.os.Build;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -24,6 +27,7 @@ import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.provider.Settings;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -217,11 +221,45 @@ public final class ScriptToolsActivity extends Activity {
         Button preflight = button("查看配置与运行前检查", BLUE);
         preflight.setOnClickListener(v -> showPreflight());
         addButton(run, preflight);
+        Button previewOverlay = button("预览 RYLUX 脚本悬浮窗", SOFT);
+        previewOverlay.setOnClickListener(v -> showOverlayPreview());
+        addButton(run, previewOverlay);
+        run.addView(label("实际脚本启动成功后，由运行宿主自动显示悬浮窗。此处预览不会启动游戏或脚本。", 12, MUTED, false));
         Button start = button("启动脚本 · 运行宿主未接入", SOFT);
         start.setEnabled(false);
         start.setAlpha(0.55f);
         addButton(run, start);
         setContentView(page);
+    }
+
+    private void showOverlayPreview() {
+        if (Build.VERSION.SDK_INT >= 23 && !Settings.canDrawOverlays(this)) {
+            new AlertDialog.Builder(this).setTitle("需要悬浮窗权限")
+                    .setMessage("启用权限后才能显示脚本控制悬浮窗。预览只显示界面，不会启动游戏或脚本。")
+                    .setNegativeButton("取消", null)
+                    .setPositiveButton("前往设置", (dialog, which) -> {
+                        Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                Uri.parse("package:" + getPackageName()));
+                        startActivityForResult(intent, 417);
+                    }).show();
+            return;
+        }
+        startOverlayPreviewService();
+    }
+
+    private void startOverlayPreviewService() {
+        Intent intent = new Intent(this, ScriptControlOverlayService.class)
+                .setAction(ScriptControlOverlayService.ACTION_PREVIEW);
+        if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent);
+        else startService(intent);
+        Toast.makeText(this, "悬浮窗预览已打开；脚本运行宿主尚未接入", Toast.LENGTH_LONG).show();
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == 417 && Build.VERSION.SDK_INT >= 23 && Settings.canDrawOverlays(this)) {
+            startOverlayPreviewService();
+        }
     }
 
     private LinearLayout section(String title, String description) {
