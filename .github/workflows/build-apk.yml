@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       version_name:
-        description: 'Version name, for example 2.4.16'
+        description: 'Version name, for example 2.4.26-test'
         required: true
-        default: '2.4.16'
+        default: '2.4.26-test'
       version_code:
         description: 'Monotonically increasing Android versionCode'
         required: true
-        default: '37'
+        default: '47'
       publish_release:
         description: 'Publish GitHub and Gitee releases after building (leave off for a test build)'
         required: true
