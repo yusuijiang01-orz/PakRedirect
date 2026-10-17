@@ -162,10 +162,10 @@ public final class BlackBoxSandboxActivity extends Activity {
         scriptsCard.setPadding(dp(14), dp(14), dp(14), dp(14));
         scriptsCard.setBackground(round(CARD, 14, BORDER));
         scriptsCard.addView(label("脚本工具", 16, TEXT, true));
-        TextView scriptNote = label("9 个反编译重建模块 · 执行环境待接入", 13, MUTED, false);
+        TextView scriptNote = label("9 个只读重建模块 · 配置方案与运行前检查 · 执行环境待接入", 13, MUTED, false);
         scriptNote.setPadding(0, dp(7), 0, dp(12));
         scriptsCard.addView(scriptNote);
-        Button openScripts = button("查看脚本模块", SOFT);
+        Button openScripts = button("打开脚本工作台", SOFT);
         openScripts.setOnClickListener(v -> startActivity(new Intent(this, ScriptToolsActivity.class)));
         scriptsCard.addView(openScripts, new LinearLayout.LayoutParams(-1, dp(46)));
         root.addView(scriptsCard, new LinearLayout.LayoutParams(-1, -2));
