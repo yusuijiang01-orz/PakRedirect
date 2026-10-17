@@ -15,6 +15,7 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
+import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -45,6 +46,7 @@ public final class BlackBoxSandboxActivity extends Activity {
     private LinearLayout appList;
     private TextView status;
     private ProgressBar progress;
+    private Switch localizationToggle;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -74,11 +76,22 @@ public final class BlackBoxSandboxActivity extends Activity {
         super.onDestroy();
     }
 
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (localizationToggle != null) {
+            localizationToggle.setChecked(LocalizationSettings.isEnabled(this));
+        }
+    }
+
     private void buildUi() {
+        ScrollView page = new ScrollView(this);
+        page.setFillViewport(true);
+        page.setBackgroundColor(BG);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(18), dp(14), dp(18), dp(20));
-        root.setBackgroundColor(BG);
+        page.addView(root, new ScrollView.LayoutParams(-1, -2));
 
         Button back = button("‹  返回 RYLUX", SOFT);
         back.setOnClickListener(v -> finish());
@@ -129,17 +142,34 @@ public final class BlackBoxSandboxActivity extends Activity {
 
         appList = new LinearLayout(this);
         appList.setOrientation(LinearLayout.VERTICAL);
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(false);
-        scroll.addView(appList, new ScrollView.LayoutParams(-1, -2));
-        root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        root.addView(appList, new LinearLayout.LayoutParams(-1, -2));
 
         Button refresh = button("刷新列表", SOFT);
         refresh.setOnClickListener(v -> refreshApps());
         LinearLayout.LayoutParams refreshLp = new LinearLayout.LayoutParams(-1, dp(44));
         refreshLp.topMargin = dp(10);
         root.addView(refresh, refreshLp);
-        setContentView(root);
+
+        View divider = new View(this);
+        divider.setBackgroundColor(BORDER);
+        LinearLayout.LayoutParams dividerLp = new LinearLayout.LayoutParams(-1, dp(1));
+        dividerLp.topMargin = dp(24);
+        dividerLp.bottomMargin = dp(20);
+        root.addView(divider, dividerLp);
+
+        LinearLayout scriptsCard = new LinearLayout(this);
+        scriptsCard.setOrientation(LinearLayout.VERTICAL);
+        scriptsCard.setPadding(dp(14), dp(14), dp(14), dp(14));
+        scriptsCard.setBackground(round(CARD, 14, BORDER));
+        scriptsCard.addView(label("脚本工具", 16, TEXT, true));
+        TextView scriptNote = label("9 个反编译重建模块 · 执行环境待接入", 13, MUTED, false);
+        scriptNote.setPadding(0, dp(7), 0, dp(12));
+        scriptsCard.addView(scriptNote);
+        Button openScripts = button("查看脚本模块", SOFT);
+        openScripts.setOnClickListener(v -> startActivity(new Intent(this, ScriptToolsActivity.class)));
+        scriptsCard.addView(openScripts, new LinearLayout.LayoutParams(-1, dp(46)));
+        root.addView(scriptsCard, new LinearLayout.LayoutParams(-1, -2));
+        setContentView(page);
     }
 
     private void pickApk() {
@@ -228,6 +258,7 @@ public final class BlackBoxSandboxActivity extends Activity {
     }
 
     private void showApps(List<ApplicationInfo> apps) {
+        localizationToggle = null;
         appList.removeAllViews();
         int count = 0;
         for (ApplicationInfo app : apps) {
@@ -251,24 +282,24 @@ public final class BlackBoxSandboxActivity extends Activity {
 
             String packageToLaunch = app.packageName;
             if (LOCALIZED_GAME_PACKAGE.equals(packageToLaunch)) {
-                TextView localization = label(
-                        "RYLUX 汉化：" + (LocalizationSettings.isEnabled(this) ? "已开启" : "已关闭"),
-                        11,
-                        MUTED,
-                        false
-                );
-                localization.setPadding(0, 0, 0, dp(8));
-                card.addView(localization);
+                LinearLayout toggleRow = new LinearLayout(this);
+                toggleRow.setGravity(Gravity.CENTER_VERTICAL);
+                toggleRow.addView(label("RYLUX 汉化", 13, TEXT, true),
+                        new LinearLayout.LayoutParams(0, -2, 1));
+                localizationToggle = new Switch(this);
+                localizationToggle.setContentDescription("RYLUX 汉化");
+                localizationToggle.setChecked(LocalizationSettings.isEnabled(this));
+                localizationToggle.setOnCheckedChangeListener((view, enabled) ->
+                        LocalizationSettings.setEnabled(this, enabled));
+                toggleRow.addView(localizationToggle);
+                LinearLayout.LayoutParams toggleLp = new LinearLayout.LayoutParams(-1, dp(44));
+                toggleLp.bottomMargin = dp(6);
+                card.addView(toggleRow, toggleLp);
 
-                Button localizedLaunch = button("汉化后启动", BLUE);
-                localizedLaunch.setOnClickListener(v -> launch(packageToLaunch, true));
-                card.addView(localizedLaunch, new LinearLayout.LayoutParams(-1, dp(40)));
-
-                Button directLaunch = button("直接启动（不使用汉化）", SOFT);
-                directLaunch.setOnClickListener(v -> launch(packageToLaunch, false));
-                LinearLayout.LayoutParams directLp = new LinearLayout.LayoutParams(-1, dp(40));
-                directLp.topMargin = dp(6);
-                card.addView(directLaunch, directLp);
+                Button launch = button("启动游戏", BLUE);
+                launch.setOnClickListener(v -> launch(packageToLaunch,
+                        LocalizationSettings.isEnabled(this)));
+                card.addView(launch, new LinearLayout.LayoutParams(-1, dp(40)));
             } else {
                 Button launch = button("启动", BLUE);
                 launch.setOnClickListener(v -> launch(packageToLaunch, false));

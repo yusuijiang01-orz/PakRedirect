@@ -40,6 +40,7 @@
         <activity android:name=".PaymentActivity" android:exported="false" />
         <activity android:name=".AuthorWeChatActivity" android:exported="false" />
         <activity android:name=".BlackBoxSandboxActivity" android:exported="false" />
+        <activity android:name=".ScriptToolsActivity" android:exported="false" />
         <activity
             android:name=".wxapi.WXPayEntryActivity"
             android:exported="true"
