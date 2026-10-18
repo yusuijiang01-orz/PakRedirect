@@ -341,14 +341,22 @@ _ENV["去商店_卖货_出售红蓝"] = L0_1
 function L0_1(要做的处理, 当前处理的药数量)
   local 购买数量 = 0
   if 要做的处理 == "买蓝" then
+    购买数量 = tonumberEx(_ENV["界面数据"]["购买蓝的数量"])
+    if 购买数量 < 1 then
+      toast("蓝药购买数量小于1，已跳过")
+      return false
+    end
     _ENV["点击"]("@@点蓝", 394, 139, 1000)
     _ENV["点击"]("@@购买", 927, 351, 1000)
-    购买数量 = tonumberEx(_ENV["界面数据"]["购买蓝的数量"])
   end
   if 要做的处理 == "买红" then
+    购买数量 = tonumberEx(_ENV["界面数据"]["购买红的数量"])
+    if 购买数量 < 1 then
+      toast("红药购买数量小于1，已跳过")
+      return false
+    end
     _ENV["点击"]("@@点红", 142, 139, 1000)
     _ENV["点击"]("@@购买", 927, 351, 1000)
-    购买数量 = tonumberEx(_ENV["界面数据"]["购买红的数量"])
   end
   if _ENV["找到"](tz["商店买货确定页面"]) then
     for i = 1, tonumber(购买数量) - 1 do

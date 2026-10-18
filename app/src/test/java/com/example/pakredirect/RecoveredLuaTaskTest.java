@@ -935,6 +935,19 @@ public final class RecoveredLuaTaskTest {
         assertTrue("The recovered purchase flow must submit the selected quantity",
                 clicks.contains("@@确定购买数量"));
         assertTrue("A blue purchase must never click the red supply tab", !clicks.contains("@@点红"));
+
+        clicks.clear();
+        config.set("购买红的数量", LuaValue.valueOf("0"));
+        globals.get("去卖货_卖货_执行红蓝处理").checkfunction().call(LuaValue.valueOf("买红"));
+        assertTrue("A configured quantity of zero must never reach the game's default one-item purchase",
+                clicks.isEmpty());
+
+        config.set("购买红的数量", LuaValue.valueOf("2"));
+        globals.get("去卖货_卖货_执行红蓝处理").checkfunction().call(LuaValue.valueOf("买红"));
+        assertTrue("A positive red purchase should choose the red supply tab", clicks.contains("@@点红"));
+        assertEquals("Quantity 2 should add exactly one unit after the first", 1,
+                java.util.Collections.frequency(clicks, "@@购买+1"));
+        assertTrue("A valid red purchase should submit its selected quantity", clicks.contains("@@确定购买数量"));
     }
 
     @Test public void recoveredInventorySkipsTransactionsWhenQuickslotOcrIsInvalid() throws Exception {
