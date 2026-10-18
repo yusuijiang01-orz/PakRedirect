@@ -106,13 +106,13 @@ final class LegacyLuaRuntime {
             }
         });
         globals.set("tickCount", new ZeroFunction() {
-            @Override LuaValue invoke() { control.checkpoint(); return LuaValue.valueOf(SystemClock.uptimeMillis()); }
+            @Override public LuaValue invoke() { control.checkpoint(); return LuaValue.valueOf(SystemClock.uptimeMillis()); }
         });
         globals.set("keepCapture", new ZeroFunction() {
-            @Override LuaValue invoke() { control.checkpoint(); captureHeld.set(true); refreshFrame(); return LuaValue.NONE; }
+            @Override public LuaValue invoke() { control.checkpoint(); captureHeld.set(true); refreshFrame(); return LuaValue.NONE; }
         });
         globals.set("releaseCapture", new ZeroFunction() {
-            @Override LuaValue invoke() { captureHeld.set(false); releaseFrame(); return LuaValue.NONE; }
+            @Override public LuaValue invoke() { captureHeld.set(false); releaseFrame(); return LuaValue.NONE; }
         });
         globals.set("getPixelColor", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) {
@@ -226,7 +226,7 @@ final class LegacyLuaRuntime {
             }
         });
         globals.set("frontAppName", new ZeroFunction() {
-            @Override LuaValue invoke() { return LuaValue.valueOf(ScriptGameAdapter.foregroundPackage()); }
+            @Override public LuaValue invoke() { return LuaValue.valueOf(ScriptGameAdapter.foregroundPackage()); }
         });
         globals.set("findColor", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) { return findPattern(args, false); }
@@ -269,7 +269,7 @@ final class LegacyLuaRuntime {
         globals.set("hideToast", noOp());
         globals.set("setControlBarPosNew", noOp());
         globals.set("createHUD", new ZeroFunction() {
-            @Override LuaValue invoke() { return LuaValue.valueOf(1); }
+            @Override public LuaValue invoke() { return LuaValue.valueOf(1); }
         });
         globals.set("showHUD", noOp());
         LuaTable threadApi = new LuaTable();
@@ -279,7 +279,7 @@ final class LegacyLuaRuntime {
                 Thread worker = spawnLuaWorker(function, args.subargs(2), "rylux-lua-thread");
                 LuaTable handle = new LuaTable();
                 handle.set("stopThread", new ZeroFunction() {
-                    @Override LuaValue invoke() {
+                    @Override public LuaValue invoke() {
                         control.cancelWorker(worker);
                         return LuaValue.TRUE;
                     }
@@ -296,7 +296,7 @@ final class LegacyLuaRuntime {
             }
         });
         globals.set("getPackageName", new ZeroFunction() {
-            @Override LuaValue invoke() { return LuaValue.valueOf(context.getPackageName()); }
+            @Override public LuaValue invoke() { return LuaValue.valueOf(context.getPackageName()); }
         });
         globals.set("exec", new OneArgFunction() {
             @Override public LuaValue call(LuaValue commandValue) {
@@ -383,7 +383,7 @@ final class LegacyLuaRuntime {
             @Override public LuaValue call(LuaValue data) { return LuaValue.TRUE; }
         });
         turing.set("切割_获取切割字符数据", new ZeroFunction() {
-            @Override LuaValue invoke() { return LuaValue.tableOf(); }
+            @Override public LuaValue invoke() { return LuaValue.tableOf(); }
         });
         turing.set("识别", new OneArgFunction() {
             @Override public LuaValue call(LuaValue threshold) { return recognizeLegacyRegion(); }
@@ -459,9 +459,11 @@ final class LegacyLuaRuntime {
                 "addEditText", "addRadioGroup", "addCheckBox", "addButton", "setOnClick", "show",
                 "setOnClose", "setText", "dismiss", "loadProfile", "saveProfile"}) ui.set(method, noOp());
         ui.set("getData", new ZeroFunction() {
-            @Override LuaValue invoke() {
+            @Override public LuaValue invoke() {
                 LuaTable values = new LuaTable();
-                for (String key : JSONObject.getNames(config) == null ? new String[0] : JSONObject.getNames(config)) {
+                java.util.Iterator<String> keys = config.keys();
+                while (keys.hasNext()) {
+                    String key = keys.next();
                     Object value = config.opt(key);
                     values.set(key, LuaValue.valueOf(value == null || value == JSONObject.NULL ? "" : String.valueOf(value)));
                 }
@@ -755,7 +757,7 @@ final class LegacyLuaRuntime {
     private static LuaValue noOp() { return new VarArgFunction() { @Override public Varargs invoke(Varargs args) { return LuaValue.NONE; } }; }
 
     private abstract static class ZeroFunction extends VarArgFunction {
-        abstract LuaValue invoke();
+        public abstract LuaValue invoke();
         @Override public Varargs invoke(Varargs args) { return invoke(); }
     }
 
