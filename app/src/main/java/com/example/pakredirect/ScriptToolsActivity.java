@@ -2,6 +2,7 @@ package com.example.pakredirect;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.Dialog;
 import android.content.Intent;
 import android.content.ComponentName;
 import android.content.SharedPreferences;
@@ -11,6 +12,7 @@ import android.os.Build;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.ColorDrawable;
 import android.os.Bundle;
 import android.text.Editable;
 import android.text.InputFilter;
@@ -18,6 +20,7 @@ import android.text.InputType;
 import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
+import android.view.Window;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
@@ -106,7 +109,7 @@ public final class ScriptToolsActivity extends Activity {
         setIntent(intent);
         if (intent.getBooleanExtra(EXTRA_SHOW_RUNTIME_DIAGNOSTIC, false)) showRuntimeDiagnostic();
         else if (intent.getBooleanExtra(EXTRA_REQUEST_START, false)) {
-            selectTab(6);
+            selectTab(0);
             confirmAndStart();
         }
     }
@@ -174,7 +177,7 @@ public final class ScriptToolsActivity extends Activity {
 
         FrameLayout content = new FrameLayout(this);
         screen.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
-        String[] names = {"方案", "路线", "战斗", "背包", "队伍", "交易", "运行"};
+        String[] names = {"方案", "路线", "战斗", "背包", "队伍", "交易"};
         for (int i = 0; i < names.length; i++) {
             final int index = i;
             Button tab = button(names[i], SOFT);
@@ -206,6 +209,21 @@ public final class ScriptToolsActivity extends Activity {
         Button saveAs = button("另存为命名方案", BLUE);
         saveAs.setOnClickListener(v -> saveAsProfile());
         addButton(profiles, saveAs);
+
+        LinearLayout run = section("运行与状态", "先检查运行条件，再确认本次方案。开始后会启动沙箱中的封神榜并显示 RYLUX 悬浮控制面板。");
+        Button preflight = button("查看配置与运行前检查", BLUE);
+        preflight.setOnClickListener(v -> showPreflight());
+        addButton(run, preflight);
+        Button previewOverlay = button("预览 RYLUX 脚本悬浮窗", SOFT);
+        previewOverlay.setOnClickListener(v -> showOverlayPreview());
+        addButton(run, previewOverlay);
+        run.addView(label("运行宿主使用 LuaJ、系统截图与触控；旧脚本的不兼容接口会在运行前检查。", 12, MUTED, false));
+        Button start = button("配置方案并启动", BLUE);
+        start.setOnClickListener(v -> confirmAndStart());
+        addButton(run, start);
+        LinearLayout.LayoutParams runLp = new LinearLayout.LayoutParams(-1, -2);
+        runLp.topMargin = dp(14);
+        ((LinearLayout) tabPages.get(0).getChildAt(0)).addView(run, runLp);
 
         root = (LinearLayout) tabPages.get(1).getChildAt(0);
         LinearLayout route = section("挂机与路线", "地图沿用回收脚本中的双语清单。");
@@ -271,18 +289,6 @@ public final class ScriptToolsActivity extends Activity {
         addNumber(trade, "购买物品数量阈值", "物品数量低于阈值才购买", "10", "个", 0, 99999);
         addNumber(trade, "每次购买数量", "每次购买数量", "10", "个", 1, 99999);
 
-        root = (LinearLayout) tabPages.get(6).getChildAt(0);
-        LinearLayout run = section("运行与状态", "打开工作台只读取配置；只有确认本次任务并点击开始后才会执行。");
-        Button preflight = button("查看配置与运行前检查", BLUE);
-        preflight.setOnClickListener(v -> showPreflight());
-        addButton(run, preflight);
-        Button previewOverlay = button("预览 RYLUX 脚本悬浮窗", SOFT);
-        previewOverlay.setOnClickListener(v -> showOverlayPreview());
-        addButton(run, previewOverlay);
-        run.addView(label("运行宿主已接入 LuaJ 和系统截图/触控入口；旧脚本尚有不兼容接口，启动前会检查并阻止不安全执行。", 12, MUTED, false));
-        Button start = button("配置方案并启动", BLUE);
-        start.setOnClickListener(v -> confirmAndStart());
-        addButton(run, start);
         setContentView(screen);
         selectTab(Math.max(0, Math.min(tabPages.size() - 1, selectedTab)));
     }
@@ -375,7 +381,7 @@ public final class ScriptToolsActivity extends Activity {
                 .setAction(ScriptControlOverlayService.ACTION_PREVIEW);
         if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent);
         else startService(intent);
-        Toast.makeText(this, "悬浮窗预览已打开；脚本运行宿主尚未接入", Toast.LENGTH_LONG).show();
+        Toast.makeText(this, "悬浮窗预览已打开；预览不会启动游戏或脚本", Toast.LENGTH_LONG).show();
     }
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
@@ -576,15 +582,16 @@ public final class ScriptToolsActivity extends Activity {
                 + "\nLua 运行宿主：LuaJ 已接入\n游戏输入适配器：" + accessibilityStatus()
                 + "\n兼容说明：OCR 使用 ML Kit 替代旧字库；系统命令仅开放 /proc/uptime；文本输入依赖游戏提供可访问输入框"
                 + "\n脚本兼容阻塞项：" + scriptCompatibilityBlockers()
+                + "\n悬浮窗权限：" + (Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(this) ? "已就绪" : "未开启")
                 + "\n\n检查通过后才会开放开始操作。";
-        new AlertDialog.Builder(this).setTitle("运行前检查")
-                .setMessage(summary).setPositiveButton("知道了", null).show();
+        showRyluxDialog("运行前检查", summary, null, "知道了", null);
     }
 
     private void confirmAndStart() {
         String blockers = scriptCompatibilityBlockers();
         if (!blockers.isEmpty() || !ScriptGameAdapter.isConnected()
-                || gameStatus().contains("尚未导入") || gameStatus().contains("未就绪")) {
+                || gameStatus().contains("尚未导入") || gameStatus().contains("未就绪")
+                || (Build.VERSION.SDK_INT >= 23 && !Settings.canDrawOverlays(this))) {
             showPreflight();
             return;
         }
@@ -593,34 +600,98 @@ public final class ScriptToolsActivity extends Activity {
                 + "（" + values.optString("挂机点x", "100") + ", " + values.optString("挂机点y", "200") + "）"
                 + "\n自动战斗：" + onOff("自动战斗")
                 + "\n装备出售：" + onOff("出售装备") + "；装备保护：" + onOff("保护装备不出售")
-                + "\n\n确认后脚本才会开始，并显示可暂停/停止的 RYLUX 悬浮控制窗。";
-        new AlertDialog.Builder(this).setTitle("确认本次运行").setMessage(summary)
-                .setNegativeButton("返回检查", null)
-                .setPositiveButton("开始", (dialog, which) -> startRuntime())
-                .show();
+                + "\n启动目标：RYLUX 沙箱内的封神榜"
+                + "\n\n点击开始后会打开沙箱游戏并运行脚本，随后显示可暂停/停止的 RYLUX 悬浮控制面板。";
+        showRyluxDialog("确认本次运行", summary, "返回检查", "开始", this::startRuntime);
     }
 
     private void startRuntime() {
-        Intent command = new Intent(this, ScriptRuntimeService.class)
-                .setAction(ScriptRuntimeService.ACTION_START)
-                .putExtra(ScriptRuntimeService.EXTRA_CONFIG, values.toString());
+        // BlackBoxCore routes this launch to the virtualized package; never use the
+        // Android host PackageManager launch intent for the game.
         try {
-            if (Build.VERSION.SDK_INT >= 26) startForegroundService(command);
-            else startService(command);
+            if (!BlackBoxCore.get().launchApk(GAME, 0)) {
+                showRyluxDialog("沙箱游戏启动失败", "RYLUX 无法打开沙箱中的封神榜。请返回沙箱页检查应用状态。",
+                        null, "知道了", null);
+                return;
+            }
+        } catch (RuntimeException error) {
+            showRyluxDialog("沙箱游戏启动失败", String.valueOf(error.getMessage()), null, "知道了", null);
+            return;
+        }
+        try {
             if (Build.VERSION.SDK_INT >= 23 && Settings.canDrawOverlays(this)) {
                 Intent overlay = new Intent(this, ScriptControlOverlayService.class)
                         .setAction(ScriptControlOverlayService.ACTION_RUNTIME);
                 if (Build.VERSION.SDK_INT >= 26) startForegroundService(overlay);
                 else startService(overlay);
             }
-            Toast.makeText(this, "已提交启动请求；返回游戏后可用悬浮窗控制", Toast.LENGTH_SHORT).show();
-            // This activity is opened over the sandbox game only to show the run summary.
-            // Dismiss it after the user confirms so Android returns to the existing
-            // BlackBox proxy activity instead of leaving the RYLUX console in front.
+            Intent command = new Intent(this, ScriptRuntimeService.class)
+                    .setAction(ScriptRuntimeService.ACTION_START)
+                    .putExtra(ScriptRuntimeService.EXTRA_CONFIG, values.toString());
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(command);
+            else startService(command);
+            Toast.makeText(this, "已启动沙箱游戏和脚本；可用 RYLUX 悬浮面板控制", Toast.LENGTH_SHORT).show();
             finish();
         } catch (RuntimeException error) {
-            new AlertDialog.Builder(this).setTitle("无法启动脚本服务")
-                    .setMessage(error.getMessage()).setPositiveButton("知道了", null).show();
+            showRyluxDialog("无法启动脚本服务", String.valueOf(error.getMessage()), null, "知道了", null);
+        }
+    }
+
+    private void showRyluxDialog(String title, String message, String secondaryLabel,
+                                 String primaryLabel, Runnable primaryAction) {
+        Dialog dialog = new Dialog(this);
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(20), dp(18), dp(20), dp(16));
+        card.setBackground(round(CARD, 18));
+        TextView heading = label(title, 18, TEXT, true);
+        heading.setPadding(0, 0, 0, dp(10));
+        card.addView(heading);
+        ScrollView scroll = new ScrollView(this);
+        TextView details = label(message, 14, TEXT, false);
+        details.setLineSpacing(dp(3), 1f);
+        scroll.addView(details, new ScrollView.LayoutParams(-1, -2));
+        LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(-1, -2);
+        scrollLp.bottomMargin = dp(16);
+        card.addView(scroll, scrollLp);
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        if (secondaryLabel != null) {
+            Button secondary = button(secondaryLabel, SOFT);
+            actions.addView(secondary, new LinearLayout.LayoutParams(0, dp(44), 1));
+            LinearLayout.LayoutParams primaryLp = new LinearLayout.LayoutParams(0, dp(44), 1);
+            primaryLp.leftMargin = dp(8);
+            Button primary = button(primaryLabel, BLUE);
+            primary.setOnClickListener(v -> {
+                dialog.dismiss();
+                if (primaryAction != null) primaryAction.run();
+            });
+            secondary.setOnClickListener(v -> dialog.dismiss());
+            actions.addView(primary, primaryLp);
+        } else {
+            Button primary = button(primaryLabel, BLUE);
+            primary.setOnClickListener(v -> {
+                dialog.dismiss();
+                if (primaryAction != null) primaryAction.run();
+            });
+            actions.addView(primary, new LinearLayout.LayoutParams(-1, dp(44)));
+        }
+        card.addView(actions);
+        dialog.setContentView(card);
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            int maxWidth = dp(520);
+            int screenWidth = getResources().getDisplayMetrics().widthPixels - dp(32);
+            window.setLayout(Math.min(maxWidth, screenWidth), -2);
+            window.setGravity(Gravity.CENTER);
+        }
+        dialog.show();
+        if (window != null) {
+            int maxWidth = dp(520);
+            int screenWidth = getResources().getDisplayMetrics().widthPixels - dp(32);
+            window.setLayout(Math.min(maxWidth, screenWidth), -2);
         }
     }
 

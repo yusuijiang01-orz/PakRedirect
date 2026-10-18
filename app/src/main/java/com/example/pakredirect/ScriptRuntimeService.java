@@ -90,6 +90,13 @@ public final class ScriptRuntimeService extends Service {
             LegacyLuaRuntime runtime = new LegacyLuaRuntime(this, control, config,
                     this::publish, this::saveFailure);
             try {
+                // BlackBoxCore starts the sandbox proxy asynchronously. Let that
+                // activity become foreground before the first screenshot or touch.
+                long launchReadyAt = System.currentTimeMillis() + 1_200L;
+                while (System.currentTimeMillis() < launchReadyAt) {
+                    control.checkpoint();
+                    Thread.sleep(100L);
+                }
                 verifyStartupDisplayCapture();
                 runtime.run();
                 control.complete();

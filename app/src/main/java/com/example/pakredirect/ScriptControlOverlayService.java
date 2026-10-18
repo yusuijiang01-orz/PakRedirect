@@ -18,7 +18,6 @@ import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
-import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -29,7 +28,6 @@ public final class ScriptControlOverlayService extends Service {
     public static final String ACTION_RUNTIME = "com.example.pakredirect.script.RUNTIME_OVERLAY";
     private static final String CHANNEL_ID = "script_control_overlay";
     private static final int NOTIFICATION_ID = 48;
-    private static final int BG = Color.rgb(17, 19, 24);
     private static final int CARD = Color.rgb(28, 32, 40);
     private static final int SOFT = Color.rgb(34, 39, 48);
     private static final int BLUE = Color.rgb(72, 113, 255);
@@ -44,7 +42,6 @@ public final class ScriptControlOverlayService extends Service {
     private TextView statusLabel;
     private TextView runActionLabel;
     private TextView pauseActionLabel;
-    private boolean expanded;
     private String runtimeState = ScriptExecutionControl.State.IDLE.name();
     private final BroadcastReceiver runtimeStatus = new BroadcastReceiver() {
         @Override public void onReceive(android.content.Context context, Intent intent) {
@@ -77,7 +74,7 @@ public final class ScriptControlOverlayService extends Service {
                 ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                 : WindowManager.LayoutParams.TYPE_PHONE;
         params = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT, type,
+                dp(320), WindowManager.LayoutParams.WRAP_CONTENT, type,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                         | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
                         | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
@@ -94,38 +91,22 @@ public final class ScriptControlOverlayService extends Service {
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent != null && (ACTION_PREVIEW.equals(intent.getAction())
-                || ACTION_RUNTIME.equals(intent.getAction()))) setExpanded(true);
         return START_NOT_STICKY;
     }
 
     private View buildOverlay() {
-        LinearLayout dock = new LinearLayout(this);
-        dock.setOrientation(LinearLayout.HORIZONTAL);
-        dock.setGravity(Gravity.TOP | Gravity.START);
-
-        ImageView launcher = new ImageView(this);
-        launcher.setImageDrawable(getApplicationInfo().loadIcon(getPackageManager()));
-        launcher.setContentDescription("展开 RYLUX 脚本控制");
-        launcher.setBackground(round(BLUE, 15, BORDER));
-        launcher.setPadding(dp(7), dp(7), dp(7), dp(7));
-        launcher.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        launcher.setClipToOutline(true);
-        launcher.setOnTouchListener(new DockTouchListener());
-        dock.addView(launcher, new LinearLayout.LayoutParams(dp(48), dp(48)));
-
         panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(9), dp(7), dp(9), dp(7));
-        panel.setBackground(round(BG, 18, BORDER));
-        LinearLayout.LayoutParams panelLp = new LinearLayout.LayoutParams(dp(286), -2);
-        panelLp.leftMargin = dp(8);
-        dock.addView(panel, panelLp);
+        panel.setPadding(dp(10), dp(8), dp(10), dp(8));
+        panel.setBackground(round(CARD, 18, BORDER));
+        panel.setContentDescription("RYLUX 脚本控制面板");
 
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
         TextView mark = text("RYLUX", 12, TEXT, true);
         header.addView(mark, new LinearLayout.LayoutParams(dp(50), dp(20)));
+        mark.setContentDescription("拖动 RYLUX 悬浮控制面板");
+        mark.setOnTouchListener(new OverlayDragTouchListener());
         statusLabel = text("● 已就绪 · 点击启动后运行", 10, MUTED, false);
         statusLabel.setMaxLines(1);
         statusLabel.setEllipsize(TextUtils.TruncateAt.END);
@@ -147,7 +128,7 @@ public final class ScriptControlOverlayService extends Service {
         actions.addView(actionCell("▶", "启动", BLUE, v -> {
             if (isRuntimeActive()) sendRuntimeAction(ScriptRuntimeService.ACTION_STOP);
             else openStartConfirmation();
-        }), actionCellParams(false));
+        }), actionCellParams(true));
         actions.addView(actionCell("Ⅱ", "暂停", SOFT, v -> sendRuntimeAction(
                 ScriptExecutionControl.State.PAUSED.name().equals(runtimeState)
                         ? ScriptRuntimeService.ACTION_RESUME : ScriptRuntimeService.ACTION_PAUSE)), actionCellParams(false));
@@ -162,24 +143,13 @@ public final class ScriptControlOverlayService extends Service {
             stopSelf();
         }), actionCellParams(false));
         panel.addView(actions);
-        panel.setVisibility(View.GONE);
-        return dock;
+        return panel;
     }
 
     private boolean isRuntimeActive() {
         return ScriptExecutionControl.State.RUNNING.name().equals(runtimeState)
                 || ScriptExecutionControl.State.PAUSED.name().equals(runtimeState)
                 || ScriptExecutionControl.State.STOP_REQUESTED.name().equals(runtimeState);
-    }
-
-    private void setExpanded(boolean value) {
-        expanded = value;
-        if (panel != null) panel.setVisibility(value ? View.VISIBLE : View.GONE);
-        if (overlay != null) overlay.requestLayout();
-        if (windowManager != null && overlay != null && params != null) {
-            try { windowManager.updateViewLayout(overlay, params); }
-            catch (RuntimeException ignored) { }
-        }
     }
 
     private void openStartConfirmation() {
@@ -226,8 +196,8 @@ public final class ScriptControlOverlayService extends Service {
         return cell;
     }
 
-    /** The launcher stays on the left edge; tap toggles the attached control panel, drag repositions it. */
-    private final class DockTouchListener implements View.OnTouchListener {
+    /** Drag the whole integrated panel from the RYLUX wordmark. */
+    private final class OverlayDragTouchListener implements View.OnTouchListener {
         private float downX;
         private float downY;
         private int startX;
@@ -256,7 +226,6 @@ public final class ScriptControlOverlayService extends Service {
                 return true;
             }
             if (event.getAction() == MotionEvent.ACTION_UP) {
-                if (!dragged) setExpanded(!expanded);
                 return true;
             }
             return event.getAction() == MotionEvent.ACTION_CANCEL;
