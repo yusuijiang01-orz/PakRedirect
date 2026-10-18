@@ -644,6 +644,75 @@ public final class RecoveredLuaTaskTest {
                         && !salePolicy.call(LuaValue.valueOf("橙色"), LuaValue.valueOf(2)).toboolean());
     }
 
+    @Test public void recoveredEquipmentSaleConfirmationWaitsForUserAndCancelsOnTimeout() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        AtomicLong clock = new AtomicLong();
+        AtomicInteger confirmationChecks = new AtomicInteger();
+        AtomicReference<Integer> visibleChecksBeforeDismissal = new AtomicReference<>(2);
+        List<String> clicks = new ArrayList<>();
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.valueOf(clock.incrementAndGet()); }
+        });
+        OneArgFunction noSleep = new OneArgFunction() {
+            @Override public LuaValue call(LuaValue millis) { return LuaValue.NONE; }
+        };
+        VarArgFunction noOp = new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return LuaValue.NONE; }
+        };
+        globals.set("sleep", noSleep);
+        globals.set("sleep2", noSleep);
+        globals.set("print", noOp);
+        globals.set("toast", noOp);
+        globals.set("_ENV", globals);
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot().resolve(module), module);
+        }
+        globals.set("_ENV", globals);
+        LuaTable confirmationPage = new LuaTable();
+        LuaTable templates = new LuaTable();
+        templates.set("商店卖货确定页面", confirmationPage);
+        globals.set("tz", templates);
+        globals.set("找到", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue template) {
+                if (!template.raweq(confirmationPage)) return LuaValue.FALSE;
+                int check = confirmationChecks.incrementAndGet();
+                Integer dismissAfter = visibleChecksBeforeDismissal.get();
+                return LuaValue.valueOf(dismissAfter == null || check <= dismissAfter);
+            }
+        });
+        globals.set("点击", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                clicks.add(args.arg1().tojstring());
+                return LuaValue.NONE;
+            }
+        });
+        LuaTable config = new LuaTable();
+        config.set("出售装备二次确认", LuaValue.valueOf("true"));
+        globals.set("界面数据", config);
+        LuaFunction handler = globals.get("去卖货_处理装备出售确认").checkfunction();
+
+        assertTrue("Dismissing the in-game prompt should allow the workflow to continue",
+                handler.call().toboolean());
+        assertTrue("The script must never press the game's destructive confirm button",
+                !clicks.contains("@@确定卖掉"));
+        assertEquals(0, clicks.size());
+
+        confirmationChecks.set(0);
+        visibleChecksBeforeDismissal.set(null);
+        assertTrue("An unresolved game prompt should stop the workflow after timeout",
+                !handler.call().toboolean());
+        // The mock still reports the prompt as visible when dismissAfter is null.
+        assertTrue("Timeout must explicitly cancel the game prompt", clicks.contains("@@关闭商店卖货确定页面"));
+
+        confirmationChecks.set(0);
+        clicks.clear();
+        visibleChecksBeforeDismissal.set(10);
+        config.set("出售装备二次确认", LuaValue.valueOf("false"));
+        assertTrue("With the extra confirmation disabled, the legacy flow may confirm automatically",
+                handler.call().toboolean());
+        assertEquals(Arrays.asList("@@确定卖掉"), clicks);
+    }
+
     @Test public void recoveredSellerNeverScansEquipmentWhenQualityCeilingIsNoSale() throws Exception {
         Globals globals = JsePlatform.standardGlobals();
         AtomicInteger equipmentScans = new AtomicInteger();

@@ -589,6 +589,28 @@ end
 _ENV["去卖货_卖货_执行红蓝处理"] = L0_1
 
 function L0_1()
+  if not _ENV["找到"](tz["商店卖货确定页面"]) then
+    return true
+  end
+  if _ENV["界面数据"]["出售装备二次确认"] == "true" then
+    toast("请在游戏中确认或取消装备出售")
+    for i = 1, 120 do
+      sleep(500)
+      if not _ENV["找到"](tz["商店卖货确定页面"]) then
+        return true
+      end
+    end
+    toast("装备出售确认超时，停止后续卖货")
+    _ENV["点击"]("@@关闭商店卖货确定页面", 714, 497, 1000)
+    return false
+  end
+  _ENV["点击"]("@@确定卖掉", 537, 494, 1000)
+  return true
+end
+
+_ENV["去卖货_处理装备出售确认"] = L0_1
+
+function L0_1()
   local 格子x = 0
   local 格子y = 0
   -- The legacy script used to enter equipment sales unconditionally. Keep the
@@ -606,7 +628,11 @@ function L0_1()
       _ENV["点击"]("@@关对话", 1229, 422, 1000)
     end
     if _ENV["找到"](tz["商店卖货确定页面"]) then
-      _ENV["点击"]("@@确定卖掉", 537, 494, 1000)
+      if 当前任务3 == "卖装备" then
+        if not _ENV["去卖货_处理装备出售确认"]() then return end
+      else
+        _ENV["点击"]("@@确定卖掉", 537, 494, 1000)
+      end
     end
     if _ENV["找到"](tz["商店买货确定页面"]) then
       _ENV["点击"]("@@确定购买", 537, 494, 1000)
@@ -677,7 +703,7 @@ function L0_1()
             _ENV["点击"]("@@卖1", 1155, 353, 1000)
             for i = 1, 3 do
               if _ENV["找到"](tz["商店卖货确定页面"]) then
-                _ENV["点击"]("@@确定卖掉", 537, 494, 1000)
+                if not _ENV["去卖货_处理装备出售确认"]() then return end
                 break
               end
               sleep(500)
@@ -688,7 +714,7 @@ function L0_1()
           _ENV["点击"]("@@卖1", 1155, 353, 1000)
           for i = 1, 3 do
             if _ENV["找到"](tz["商店卖货确定页面"]) then
-              _ENV["点击"]("@@确定卖掉", 537, 494, 1000)
+              if not _ENV["去卖货_处理装备出售确认"]() then return end
               break
             end
             sleep(500)
