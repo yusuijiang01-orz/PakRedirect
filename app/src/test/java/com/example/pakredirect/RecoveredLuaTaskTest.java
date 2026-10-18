@@ -480,6 +480,84 @@ public final class RecoveredLuaTaskTest {
                 !tapArguments.contains("809|673|2000"));
     }
 
+    @Test public void recoveredPathfinderReturnsFailureAfterTimeout() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        AtomicInteger checks = new AtomicInteger();
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.ZERO; }
+        });
+        OneArgFunction noSleep = new OneArgFunction() {
+            @Override public LuaValue call(LuaValue millis) { return LuaValue.NONE; }
+        };
+        globals.set("sleep", noSleep);
+        globals.set("sleep2", noSleep);
+        VarArgFunction noOp = new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return LuaValue.NONE; }
+        };
+        globals.set("toast", noOp);
+        globals.set("print", noOp);
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot().resolve(module), module);
+        }
+        globals.set("检测寻路完成", new ZeroArgFunction() {
+            @Override public LuaValue call() { checks.incrementAndGet(); return LuaValue.FALSE; }
+        });
+
+        assertTrue("Exhausting the route wait must return explicit failure",
+                !globals.get("寻路_等待完成").checkfunction().call().toboolean());
+        assertEquals("The legacy route wait should retain its bounded 300 checks", 300, checks.get());
+    }
+
+    @Test public void recoveredShopRouteStopsWhenNpcPathfindingTimesOut() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        List<String> clicks = new ArrayList<>();
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.ZERO; }
+        });
+        OneArgFunction noSleep = new OneArgFunction() {
+            @Override public LuaValue call(LuaValue millis) { return LuaValue.NONE; }
+        };
+        globals.set("sleep", noSleep);
+        globals.set("sleep2", noSleep);
+        VarArgFunction noOp = new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return LuaValue.NONE; }
+        };
+        globals.set("toast", noOp);
+        globals.set("print", noOp);
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot().resolve(module), module);
+        }
+        globals.set("_ENV", globals);
+        LuaTable mapPage = new LuaTable();
+        LuaTable templates = new LuaTable();
+        templates.set("大地图页面", mapPage);
+        globals.set("tz", templates);
+        globals.set("找到", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue template) { return LuaValue.valueOf(template.raweq(mapPage)); }
+        });
+        globals.set("点击", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                clicks.add(args.arg1().tojstring());
+                return LuaValue.NONE;
+            }
+        });
+        globals.set("在主页面", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.FALSE; }
+        });
+        globals.set("通用处理", noOp);
+        globals.set("登录_判断一轮", noOp);
+        globals.set("大地图_输入大地图", noOp);
+        globals.set("寻路_等待完成", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.FALSE; }
+        });
+        globals.set("卖货地图", LuaValue.valueOf("sùng thành"));
+
+        assertTrue("Shop navigation must report failure when its route times out",
+                !globals.get("去卖货").checkfunction().call().toboolean());
+        assertEquals(Arrays.asList("@@前往卖货npc"), clicks);
+        assertEquals("去卖货寻路失败", globals.get("当前任务2").tojstring());
+    }
+
     @Test public void recoveredRouteStartsFromTheRealGameHomeScreenshot() throws Exception {
         Path scriptRoot = scriptRoot();
         Globals globals = JsePlatform.standardGlobals();

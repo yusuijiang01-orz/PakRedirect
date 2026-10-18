@@ -796,6 +796,7 @@ function L0_1()
     end
     sleep(1000)
   end
+  return false
 end
 
 _ENV["寻路_等待完成"] = L0_1
@@ -873,7 +874,11 @@ function L0_1()
     elseif _ENV["找到"](tz["大地图页面"]) then
       _ENV["大地图_输入大地图"](_ENV["卖货地图"])
       _ENV["点击"]("@@前往卖货npc", 38, 160, 1000)
-      _ENV["寻路_等待完成"]()
+      if not _ENV["寻路_等待完成"]() then
+        _ENV["当前任务2"] = "去卖货寻路失败"
+        toast("卖货路线超时，取消本次卖货")
+        return false
+      end
       if _ENV["卖货地图"]:find("Đại Phong") then
         touchDown(1, 205, 590)
         touchMoveEx(1, 137, 594, 300)
