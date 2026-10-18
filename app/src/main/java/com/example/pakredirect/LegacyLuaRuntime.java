@@ -532,12 +532,8 @@ final class LegacyLuaRuntime {
         ui.set("getData", new ZeroFunction() {
             @Override public LuaValue invoke() {
                 LuaTable values = new LuaTable();
-                JSONObject defaults = defaultScriptConfig();
-                java.util.Iterator<String> defaultKeys = defaults.keys();
-                while (defaultKeys.hasNext()) {
-                    String key = defaultKeys.next();
-                    Object value = defaults.opt(key);
-                    values.set(key, LuaValue.valueOf(value == null || value == JSONObject.NULL ? "" : String.valueOf(value)));
+                for (java.util.Map.Entry<String, String> entry : LegacyLuaConfig.defaults().entrySet()) {
+                    values.set(entry.getKey(), LuaValue.valueOf(entry.getValue()));
                 }
                 java.util.Iterator<String> keys = config.keys();
                 while (keys.hasNext()) {
@@ -550,48 +546,6 @@ final class LegacyLuaRuntime {
             }
         });
         globals.set("ui", ui);
-    }
-
-    private static JSONObject defaultScriptConfig() {
-        JSONObject defaults = new JSONObject();
-        try {
-            defaults.put("自动战斗", false);
-            defaults.put("手机编号", "");
-            defaults.put("队长名", "");
-            defaults.put("队员名", "");
-            defaults.put("是否队长", "0");
-            defaults.put("检测队长名字频率秒", "180");
-            defaults.put("检测是否有队伍频率秒", "180");
-            defaults.put("红的数量高于", "10");
-            defaults.put("出售全部红", false);
-            defaults.put("蓝的数量高于", "10");
-            defaults.put("出售全部蓝", false);
-            defaults.put("红的数量低于", "10");
-            defaults.put("购买小红", false);
-            defaults.put("购买红的数量", "10");
-            defaults.put("蓝的数量低于", "10");
-            defaults.put("购买小蓝", false);
-            defaults.put("购买蓝的数量", "10");
-            defaults.put("挂机点x", "100");
-            defaults.put("挂机点y", "200");
-            defaults.put("挂机点地图", "0");
-            defaults.put("卖货地图", "0");
-            defaults.put("背包保留重量", "3");
-            defaults.put("背包保留格子", "2");
-            defaults.put("检测修理装备", true);
-            defaults.put("背包检测间隔秒", "60");
-            defaults.put("保留蓝条数量", "4");
-            defaults.put("回蓝>=", true);
-            defaults.put("保留回蓝数值", "10");
-            defaults.put("魔法出招>=", true);
-            defaults.put("保留魔法出招数值", "15");
-            defaults.put("武器出招>=", true);
-            defaults.put("保留武器出招数值", "15");
-            defaults.put("开启vpn", false);
-        } catch (org.json.JSONException impossible) {
-            throw new IllegalStateException("默认脚本配置无效", impossible);
-        }
-        return defaults;
     }
 
     private Varargs findPattern(Varargs args, boolean multi) {
