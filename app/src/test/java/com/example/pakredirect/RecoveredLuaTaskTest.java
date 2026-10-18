@@ -666,6 +666,7 @@ public final class RecoveredLuaTaskTest {
         AtomicLong ticks = new AtomicLong();
         AtomicBoolean mapPageOpen = new AtomicBoolean();
         AtomicReference<int[]> mapOpenTap = new AtomicReference<>();
+        List<int[]> scriptTaps = new ArrayList<>();
         List<String> enteredText = new ArrayList<>();
         OneArgFunction noSleep = new OneArgFunction() {
             @Override public LuaValue call(LuaValue millis) { return LuaValue.NONE; }
@@ -691,12 +692,19 @@ public final class RecoveredLuaTaskTest {
         });
         globals.set("tap", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) {
-                int x = mapper.toScreenX(args.arg(1).todouble());
-                int y = mapper.toScreenY(args.arg(2).todouble());
+                int referenceX = (int) Math.round(args.arg(1).todouble());
+                int referenceY = (int) Math.round(args.arg(2).todouble());
+                int x = mapper.toScreenX(referenceX);
+                int y = mapper.toScreenY(referenceY);
+                scriptTaps.add(new int[]{referenceX, referenceY});
                 if (Math.abs(x - mapper.toScreenX(1159)) <= mapper.toScreenDeltaX(2)
                         && Math.abs(y - mapper.toScreenY(110)) <= mapper.toScreenDeltaY(2)) {
                     mapOpenTap.set(new int[]{x, y});
                     mapPageOpen.set(true);
+                }
+                if (Math.abs(x - mapper.toScreenX(857)) <= mapper.toScreenDeltaX(2)
+                        && Math.abs(y - mapper.toScreenY(651)) <= mapper.toScreenDeltaY(2)) {
+                    mapPageOpen.set(false);
                 }
                 return LuaValue.TRUE;
             }
@@ -775,6 +783,20 @@ public final class RecoveredLuaTaskTest {
                 Arrays.asList("sùng thành", "321", "654"), enteredText);
         assertTrue("The Lua route should submit the destination",
                 !globals.get("需要去挂机点一次").toboolean());
+        assertTrue("Submitting the destination should return the game to its home screen",
+                !mapPageOpen.get());
+
+        int tapsBeforeAutoBattle = scriptTaps.size();
+        LuaTable config = new LuaTable();
+        config.set("自动战斗", LuaValue.valueOf("true"));
+        globals.set("界面数据", config);
+        assertTrue("After reaching the destination, enabled auto-battle should start",
+                globals.get("执行自动战斗").checkfunction().call().toboolean());
+        assertTrue("Auto-battle should issue a game touch after the route completes",
+                scriptTaps.size() > tapsBeforeAutoBattle);
+        int[] autoBattleTap = scriptTaps.get(scriptTaps.size() - 1);
+        assertTrue("The final touch should target the detected auto-battle button",
+                Math.abs(autoBattleTap[0] - 757) <= 2 && Math.abs(autoBattleTap[1] - 566) <= 2);
     }
 
     @Test public void recoveredSupplyRoutineResetsBluePurchaseGuardToFalse() throws Exception {
