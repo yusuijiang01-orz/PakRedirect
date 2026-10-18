@@ -613,7 +613,11 @@ public final class ScriptToolsActivity extends Activity {
                 if (Build.VERSION.SDK_INT >= 26) startForegroundService(overlay);
                 else startService(overlay);
             }
-            Toast.makeText(this, "已提交启动请求；运行状态会显示在控制悬浮窗", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "已提交启动请求；返回游戏后可用悬浮窗控制", Toast.LENGTH_SHORT).show();
+            // This activity is opened over the sandbox game only to show the run summary.
+            // Dismiss it after the user confirms so Android returns to the existing
+            // BlackBox proxy activity instead of leaving the RYLUX console in front.
+            finish();
         } catch (RuntimeException error) {
             new AlertDialog.Builder(this).setTitle("无法启动脚本服务")
                     .setMessage(error.getMessage()).setPositiveButton("知道了", null).show();

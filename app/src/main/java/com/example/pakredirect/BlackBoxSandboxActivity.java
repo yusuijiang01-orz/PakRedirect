@@ -162,7 +162,7 @@ public final class BlackBoxSandboxActivity extends Activity {
         scriptsCard.setPadding(dp(14), dp(14), dp(14), dp(14));
         scriptsCard.setBackground(round(CARD, 14, BORDER));
         scriptsCard.addView(label("脚本工具", 16, TEXT, true));
-        TextView scriptNote = label("9 个只读重建模块 · 配置方案与运行前检查 · 执行环境待接入", 13, MUTED, false);
+        TextView scriptNote = label("Lua 执行宿主已接入 · 配置方案并确认后运行", 13, MUTED, false);
         scriptNote.setPadding(0, dp(7), 0, dp(12));
         scriptsCard.addView(scriptNote);
         Button openScripts = button("打开脚本工作台", SOFT);
