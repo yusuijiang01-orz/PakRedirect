@@ -1141,6 +1141,7 @@ public final class RecoveredLuaTaskTest {
         BufferedImage screen = readFixture("/game/inventory-backpack.png");
         LegacyCoordinateMapper mapper = new LegacyCoordinateMapper(720, 1280,
                 screen.getWidth(), screen.getHeight());
+        AtomicBoolean ocrReadable = new AtomicBoolean(true);
         globals.set("tickCount", new ZeroArgFunction() {
             @Override public LuaValue call() { return LuaValue.ZERO; }
         });
@@ -1149,6 +1150,24 @@ public final class RecoveredLuaTaskTest {
                 return findMultiColor(screen, mapper, args);
             }
         });
+        globals.set("tomocrtextall", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                return LuaValue.valueOf(ocrReadable.get() ? readSingleBrightOne(screen, mapper, args) : "");
+            }
+        });
+        OneArgFunction noSleep = new OneArgFunction() {
+            @Override public LuaValue call(LuaValue millis) { return LuaValue.NONE; }
+        };
+        globals.set("sleep", noSleep);
+        globals.set("sleep2", noSleep);
+        globals.set("hideToast", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.NONE; }
+        });
+        VarArgFunction noOp = new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return LuaValue.NONE; }
+        };
+        globals.set("toast", noOp);
+        globals.set("print", noOp);
         for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
             loadModule(globals, scriptRoot().resolve(module), module);
         }
@@ -1162,6 +1181,31 @@ public final class RecoveredLuaTaskTest {
                 LuaValue.valueOf(149), LuaValue.valueOf(880), LuaValue.valueOf(221)})).tojstring());
         assertEquals("小蓝", identify.invoke(LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(883),
                 LuaValue.valueOf(149), LuaValue.valueOf(951), LuaValue.valueOf(221)})).tojstring());
+
+        Varargs counts = globals.get("检测背包_识别红蓝数量").checkfunction().invoke();
+        LuaTable inventory = counts.arg1().checktable();
+        assertEquals("1", inventory.get("小红").tojstring());
+        assertEquals("1", inventory.get("小蓝").tojstring());
+        assertTrue("Missing large-potion icons are valid zero stock, not OCR failures", counts.arg(2).toboolean());
+        LuaTable config = new LuaTable();
+        config.set("出售全部红", LuaValue.valueOf("false"));
+        config.set("出售全部蓝", LuaValue.valueOf("false"));
+        config.set("购买小红", LuaValue.valueOf("false"));
+        config.set("购买小蓝", LuaValue.valueOf("true"));
+        config.set("红的数量高于", LuaValue.valueOf("10"));
+        config.set("蓝的数量高于", LuaValue.valueOf("10"));
+        config.set("红的数量低于", LuaValue.valueOf("5"));
+        config.set("蓝的数量低于", LuaValue.valueOf("3"));
+        globals.set("界面数据", config);
+        globals.set("买了一次红", LuaValue.FALSE);
+        globals.set("买了一次蓝", LuaValue.FALSE);
+        Varargs decision = globals.get("检测背包_判断是否去卖或者买药").checkfunction().invoke();
+        assertEquals("买蓝", decision.arg1().tojstring());
+        assertEquals("1", decision.arg(2).tojstring());
+
+        ocrReadable.set(false);
+        Varargs unreadableDecision = globals.get("检测背包_判断是否去卖或者买药").checkfunction().invoke();
+        assertEquals("", unreadableDecision.arg1().tojstring());
     }
 
     private static Varargs findMultiColor(BufferedImage image, LegacyCoordinateMapper mapper, Varargs args) {
@@ -1200,6 +1244,25 @@ public final class RecoveredLuaTaskTest {
         String[] parts = encoded.split("-", 2);
         return new int[]{Integer.parseInt(parts[0].trim(), 16),
                 parts.length == 2 ? Integer.parseInt(parts[1].trim(), 16) : 0};
+    }
+
+    private static String readSingleBrightOne(BufferedImage image, LegacyCoordinateMapper mapper, Varargs args) {
+        int left = Math.max(0, mapper.left(args.arg(1).todouble()));
+        int top = Math.max(0, mapper.top(args.arg(2).todouble()));
+        int right = Math.min(image.getWidth() - 1, mapper.right(args.arg(3).todouble()));
+        int bottom = Math.min(image.getHeight() - 1, mapper.bottom(args.arg(4).todouble()));
+        int minX = right, minY = bottom, maxX = left, maxY = top, hits = 0;
+        for (int y = top; y <= bottom; y++) for (int x = left; x <= right; x++) {
+            int color = image.getRGB(x, y);
+            int red = (color >> 16) & 255, green = (color >> 8) & 255, blue = color & 255;
+            if (Math.min(red, Math.min(green, blue)) >= 200
+                    && Math.max(red, Math.max(green, blue)) - Math.min(red, Math.min(green, blue)) <= 50) {
+                minX = Math.min(minX, x); minY = Math.min(minY, y);
+                maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); hits++;
+            }
+        }
+        int width = maxX - minX + 1, height = maxY - minY + 1;
+        return hits >= 10 && width <= 6 && height >= 10 && height >= 2 * width ? "1" : "";
     }
 
     private static boolean colorMatches(int actual, int expected, int tolerance) {

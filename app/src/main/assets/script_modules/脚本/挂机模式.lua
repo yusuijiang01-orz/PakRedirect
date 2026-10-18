@@ -299,6 +299,7 @@ function L0_1()
   hideToast()
   sleep(500)
   local 药品信息 = {}
+  local 数量识别有效 = true
   for yy = 149, 575, 71 do
     for xx = 670, 1035, 71 do
       if 1024 < xx then
@@ -306,12 +307,18 @@ function L0_1()
         local 物品类型 = _ENV["检测背包_识别红蓝数量_识别红蓝"](xx, yy, xx + 68, yy + 72)
         if 物品类型 == "" then
         else
-          药品信息[物品类型] = tomocrtextall(xx - 20 + 808 - 792, yy + 189 - 149, xx + 68 + 840 - 880, yy + 72 + 214 - 221)
+          local 数量文本 = tomocrtextall(xx - 20 + 808 - 792, yy + 189 - 149, xx + 68 + 840 - 880, yy + 72 + 214 - 221)
+          数量文本 = tostring(数量文本 or "")
+          数量文本 = string.gsub(数量文本, "%s+", "")
+          药品信息[物品类型] = 数量文本
+          if string.match(数量文本, "^%d+$") == nil then
+            数量识别有效 = false
+          end
         end
       end
     end
   end
-  return 药品信息
+  return 药品信息, 数量识别有效
 end
 
 _ENV["检测背包_识别红蓝数量"] = L0_1
@@ -1030,17 +1037,33 @@ _ENV["检测背包_识别空格子"] = L0_1
 function L0_1()
   local 红数量 = 0
   local 蓝数量 = 0
+  local 药品信息
+  local 数量识别有效 = false
   for i = 1, 10 do
-    local 药品信息 = _ENV["检测背包_识别红蓝数量"]()
-    红数量 = tonumberEx(药品信息["大红"]) + tonumberEx(药品信息["小红"])
-    蓝数量 = tonumberEx(药品信息["大蓝"]) + tonumberEx(药品信息["小蓝"])
-    toast(string.format("红%d 蓝%d 识别" .. i .. "/10次", 红数量, 蓝数量))
-    sleep(1000)
-    if tonumberEx(药品信息["大红"]) == 0 or tonumberEx(药品信息["小红"]) == 0 or tonumberEx(药品信息["大蓝"]) == 0 or tonumberEx(药品信息["小蓝"]) == 0 then
-    else
+    药品信息, 数量识别有效 = _ENV["检测背包_识别红蓝数量"]()
+    if 数量识别有效 == nil then
+      数量识别有效 = true
+      for _, 药名 in ipairs({"大红", "小红", "大蓝", "小蓝"}) do
+        local 数量文本 = 药品信息[药名]
+        if 数量文本 ~= nil and string.match(tostring(数量文本), "^%s*%d+%s*$") == nil then
+          数量识别有效 = false
+          break
+        end
+      end
+    end
+    if 数量识别有效 then
       break
     end
+    toast("药品数量识别失败，重试" .. i .. "/10")
+    if i < 10 then sleep(1000) end
   end
+  if not 数量识别有效 then
+    toast("药品数量持续无法识别，跳过本次补给交易")
+    return ""
+  end
+  红数量 = tonumberEx(药品信息["大红"]) + tonumberEx(药品信息["小红"])
+  蓝数量 = tonumberEx(药品信息["大蓝"]) + tonumberEx(药品信息["小蓝"])
+  toast(string.format("红%d 蓝%d 识别完成", 红数量, 蓝数量))
   print(_ENV["界面数据"]["购买小红"], _ENV["界面数据"]["购买小红"] == "true")
   print(_ENV["界面数据"]["红的数量低于"])
   print(_ENV["界面数据"]["购买小蓝"], _ENV["界面数据"]["购买小蓝"] == "true")
