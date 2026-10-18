@@ -7,7 +7,9 @@ import static org.junit.Assert.assertTrue;
 import java.awt.image.BufferedImage;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
+import java.io.BufferedReader;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -37,6 +39,15 @@ import org.luaj.vm2.lib.jse.JsePlatform;
 
 /** Directly executes one recovered Lua task without building or launching the APK. */
 public final class RecoveredLuaTaskTest {
+    @Test public void recoveredInventoryImageTemplateIsPresentForTheLuaFindPicCalls() throws Exception {
+        Path imageTemplate = scriptRoot().resolve("空格子0.png");
+        String inventoryScript = Files.readString(scriptRoot().resolve("挂机模式.lua"), StandardCharsets.UTF_8);
+        assertTrue("The recovered inventory routines reference the empty-slot image template",
+                inventoryScript.contains("空格子0.png"));
+        assertTrue("The required image template must ship beside the recovered Lua modules",
+                Files.isRegularFile(imageTemplate));
+    }
+
     @Test public void workbenchStartupConsumesSuppliedConfigWithoutWaitingForHiddenLegacyUi() throws Exception {
         Globals globals = JsePlatform.standardGlobals();
         globals.set("_ENV", globals);
@@ -123,7 +134,73 @@ public final class RecoveredLuaTaskTest {
                 monitorRuns.get());
         assertEquals("The workbench's configured hunt coordinate must reach the Lua main module", "120",
                 globals.get("界面数据").get("挂机点x").tojstring());
+        assertEquals("The localized workbench must pass the Chinese map name to the game search field",
+                "崇城野外", globals.get("挂机点地图").tojstring());
+        assertEquals("The localized workbench must use Chinese for the merchant route too",
+                "崇城野外", globals.get("卖货地图").tojstring());
         assertTrue("Startup must not incur the legacy 60-second form timeout", sleptMillis.get() < 60_000);
+    }
+
+    @Test public void recoveredTuringOcrPassesRegionThresholdFilterAndDictionaryToTheRecognizer() {
+        AtomicReference<LegacyTuringCompat.Request> observed = new AtomicReference<>();
+        LuaTable turing = LegacyTuringCompat.createApi(request -> {
+            observed.set(request);
+            return "  12\n";
+        });
+        Globals globals = JsePlatform.standardGlobals();
+        globals.set("TURING", turing);
+        String recoveredCallSequence =
+                "TURING['来源_获取屏幕像素'](940, 299, 995, 321) " +
+                "TURING['滤镜_彩色_二值化']('FF6563-202020|DE5552-202020') " +
+                "TURING['切割_范围投影切割'](1, 1) " +
+                "local count = TURING['字库_加载六十四进制识别字库']({'1|4,15|abc', '2|4,15|def'}) " +
+                "local text = TURING['识别'](85) return count, text";
+        Varargs luaResult = globals.load(recoveredCallSequence, "turing-compat.lua", globals).invoke();
+
+        assertEquals(2, luaResult.arg(1).toint());
+        assertEquals("12", luaResult.arg(2).tojstring());
+        assertEquals(940, observed.get().left);
+        assertEquals(299, observed.get().top);
+        assertEquals(995, observed.get().right);
+        assertEquals(321, observed.get().bottom);
+        assertEquals(85, observed.get().confidenceThreshold);
+        assertEquals("FF6563-202020|DE5552-202020", observed.get().colorFilter);
+        assertEquals(1, observed.get().projectionMode);
+        assertEquals(1, observed.get().projectionThreshold);
+        assertEquals(2, observed.get().dictionaryEntries.size());
+    }
+
+    @Test public void recoveredTuringColorFilterProducesTheConfiguredBinaryMask() {
+        int[] pixels = {0xffff6563, 0xffff8563, 0xffff8663, 0xff202020};
+        int[] normal = LegacyTuringCompat.applyColorPickFilter(pixels, "FF6563-202020");
+        assertEquals(0xffffffff, normal[0]);
+        assertEquals("Tolerance includes the boundary", 0xffffffff, normal[1]);
+        assertEquals("A one-channel difference beyond tolerance is rejected", 0xff000000, normal[2]);
+        assertEquals(0xff000000, normal[3]);
+
+        int[] inverted = LegacyTuringCompat.applyColorPickFilter(pixels, "@FF6563-202020");
+        assertEquals(0xff000000, inverted[0]);
+        assertEquals(0xffffffff, inverted[2]);
+    }
+
+    @Test public void recoveredTuringConfidenceThresholdRejectsWeakAndUnknownOcrLines() {
+        assertTrue(LegacyTuringCompat.acceptsConfidence(0.85d, 85));
+        assertTrue(!LegacyTuringCompat.acceptsConfidence(0.849d, 85));
+        assertTrue(!LegacyTuringCompat.acceptsConfidence(-1d, 85));
+        assertTrue(LegacyTuringCompat.acceptsConfidence(0.01d, -10));
+        assertTrue(!LegacyTuringCompat.acceptsConfidence(0.99d, 101));
+    }
+
+    @Test public void recoveredTuringNumericFilterUsesGrayscaleBoundsInsteadOfColorMatching() {
+        int[] pixels = {0xff101010, 0xff555555, 0xfff0f0f0};
+        int[] threshold = LegacyTuringCompat.applyFilter(pixels, "85");
+        assertEquals(0xff000000, threshold[0]);
+        assertEquals(0xff000000, threshold[1]);
+        assertEquals(0xffffffff, threshold[2]);
+        int[] range = LegacyTuringCompat.applyFilter(pixels, "60-100");
+        assertEquals(0xffffffff, range[0]);
+        assertEquals(0xff000000, range[1]);
+        assertEquals(0xffffffff, range[2]);
     }
 
     @Test public void recoveredPartyLeaderCheckNeverDisbandsOnMissingOrUnreadableNames() throws Exception {
@@ -149,6 +226,16 @@ public final class RecoveredLuaTaskTest {
         assertEquals("不匹配", judge.call(LuaValue.valueOf("wrong"), LuaValue.valueOf("other"),
                 LuaValue.valueOf("leader")).tojstring());
 
+        LuaTable expectedLeaders = new LuaTable();
+        expectedLeaders.set(1, LuaValue.valueOf("first-leader"));
+        expectedLeaders.set(2, LuaValue.valueOf("second-leader"));
+        assertEquals("A configured alternate leader must be accepted, not only the first line",
+                "匹配", judge.call(LuaValue.valueOf("second-leader"), LuaValue.valueOf(""),
+                        expectedLeaders).tojstring());
+        assertEquals("A newline-delimited legacy value must preserve all configured leaders",
+                "匹配", judge.call(LuaValue.valueOf("second-leader"), LuaValue.valueOf(""),
+                        LuaValue.valueOf("first-leader\nsecond-leader")).tojstring());
+
         LuaFunction inspectionDue = globals.get("组队_检查间隔已到").checkfunction();
         assertTrue("A missing baseline must not run the leader-name check on every loop",
                 !inspectionDue.call(LuaValue.NIL, LuaValue.valueOf(1000), LuaValue.valueOf("180")).toboolean());
@@ -158,6 +245,197 @@ public final class RecoveredLuaTaskTest {
                 inspectionDue.call(LuaValue.valueOf(1000), LuaValue.valueOf(181001), LuaValue.valueOf("180")).toboolean());
         assertTrue("The next check must wait after its timestamp is reset",
                 !inspectionDue.call(LuaValue.valueOf(181001), LuaValue.valueOf(181501), LuaValue.valueOf("180")).toboolean());
+    }
+
+    @Test public void recoveredPartyNameUsesOnlyConfidentOcrRows() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        AtomicReference<LuaTable> rows = new AtomicReference<>(new LuaTable());
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.ZERO; }
+        });
+        globals.set("tomocrtexttable", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return rows.get(); }
+        });
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot().resolve(module), module);
+        }
+
+        LuaTable candidates = new LuaTable();
+        LuaTable weak = new LuaTable();
+        weak.set("words", LuaValue.valueOf("wrong-name"));
+        weak.set("score", LuaValue.valueOf(0.42));
+        LuaTable strong = new LuaTable();
+        strong.set("words", LuaValue.valueOf("liusanjie"));
+        strong.set("score", LuaValue.valueOf(0.91));
+        candidates.set(1, weak);
+        candidates.set(2, strong);
+        rows.set(candidates);
+        assertEquals("The team checker should use the strongest OCR line above its confidence floor",
+                "liusanjie", globals.get("组队_识别名字").checkfunction().invoke(LuaValue.varargsOf(new LuaValue[]{
+                        LuaValue.valueOf(147), LuaValue.valueOf(212), LuaValue.valueOf(327), LuaValue.valueOf(263)})).tojstring());
+
+        LuaTable uncertain = new LuaTable();
+        uncertain.set("words", LuaValue.valueOf("wrong-name"));
+        uncertain.set("score", LuaValue.valueOf(0.79));
+        LuaTable lowConfidenceRows = new LuaTable();
+        lowConfidenceRows.set(1, uncertain);
+        rows.set(lowConfidenceRows);
+        assertEquals("An uncertain OCR result must become unreadable so the caller cannot disband on it",
+                "", globals.get("组队_识别名字").checkfunction().invoke(LuaValue.varargsOf(new LuaValue[]{
+                        LuaValue.valueOf(147), LuaValue.valueOf(212), LuaValue.valueOf(327), LuaValue.valueOf(263)})).tojstring());
+    }
+
+    @Test public void combatSupplyUsesOnlyRecognizedLowResourceAndMatchingQuickslot() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        AtomicLong clock = new AtomicLong(10_000L);
+        AtomicReference<String> health = new AtomicReference<>("6 / 24");
+        AtomicReference<String> mana = new AtomicReference<>("70/70");
+        AtomicReference<Double> healthScore = new AtomicReference<>(0.95d);
+        AtomicReference<Double> manaScore = new AtomicReference<>(0.95d);
+        AtomicReference<int[]> tapped = new AtomicReference<>();
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.valueOf(clock.get()); }
+        });
+        globals.set("tomocrtexttable", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                LuaTable row = new LuaTable();
+                boolean isHealth = args.arg(2).toint() < 65;
+                row.set("words", LuaValue.valueOf(isHealth ? health.get() : mana.get()));
+                row.set("score", LuaValue.valueOf(isHealth ? healthScore.get() : manaScore.get()));
+                LuaTable rows = new LuaTable();
+                rows.set(1, row);
+                return rows;
+            }
+        });
+        globals.set("tap", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                tapped.set(new int[]{args.arg(1).toint(), args.arg(2).toint()});
+                return LuaValue.TRUE;
+            }
+        });
+        VarArgFunction noOp = new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return LuaValue.NONE; }
+        };
+        globals.set("toast", noOp);
+        globals.set("print", noOp);
+        globals.set("sleep", noOp);
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot().resolve(module), module);
+        }
+
+        LuaTable config = new LuaTable();
+        config.set("自动使用红药", LuaValue.valueOf("true"));
+        config.set("生命药触发阈值", LuaValue.valueOf("30"));
+        config.set("自动使用蓝药", LuaValue.valueOf("false"));
+        config.set("法力药触发阈值", LuaValue.valueOf("20"));
+        globals.set("界面数据", config);
+        globals.set("战斗_查找快捷栏药品", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                return args.arg1().tojstring().equals("红")
+                        ? LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(1051), LuaValue.valueOf(310)})
+                        : LuaValue.varargsOf(new LuaValue[]{LuaValue.NIL, LuaValue.NIL});
+            }
+        });
+
+        LuaFunction parse = globals.get("战斗_解析资源百分比").checkfunction();
+        assertEquals(25, parse.call(LuaValue.valueOf("6 / 24")).toint());
+        assertEquals(50, parse.call(LuaValue.valueOf(" 5／10 ")).toint());
+        assertTrue("Zero maximum, over-maximum, and unreadable OCR must be rejected",
+                parse.call(LuaValue.valueOf("0/0")).isnil()
+                        && parse.call(LuaValue.valueOf("25/24")).isnil()
+                        && parse.call(LuaValue.valueOf("?/24")).isnil());
+
+        LuaFunction useSupplies = globals.get("执行自动补给").checkfunction();
+        assertTrue("A recognized low-health reading and matching red quickslot should trigger one tap",
+                useSupplies.call().toboolean());
+        assertEquals(1051, tapped.get()[0]);
+        assertEquals(310, tapped.get()[1]);
+        assertTrue("The supply cooldown must suppress repeated taps in the same low-health interval",
+                !useSupplies.call().toboolean());
+        healthScore.set(0.79d);
+        clock.addAndGet(3_001L);
+        assertTrue("Low-confidence health OCR must not trigger a potion tap", !useSupplies.call().toboolean());
+
+        config.set("自动使用红药", LuaValue.valueOf("false"));
+        config.set("自动使用蓝药", LuaValue.valueOf("true"));
+        mana.set("10/70");
+        manaScore.set(0.95d);
+        clock.addAndGet(3_001L);
+        globals.set("战斗_查找快捷栏药品", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                return args.arg1().tojstring().equals("蓝")
+                        ? LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(1131), LuaValue.valueOf(310)})
+                        : LuaValue.varargsOf(new LuaValue[]{LuaValue.NIL, LuaValue.NIL});
+            }
+        });
+        assertTrue("A recognized low-mana reading should use the matching blue quickslot",
+                useSupplies.call().toboolean());
+        assertEquals(1131, tapped.get()[0]);
+
+        mana.set("unreadable");
+        clock.addAndGet(3_001L);
+        assertTrue("Unreadable OCR must never trigger a potion tap", !useSupplies.call().toboolean());
+    }
+
+    @Test public void combatSupplyDoesNotMistakeEmptyQuickslotsForPotionsInRealGameScreenshot() throws Exception {
+        Path scriptRoot = scriptRoot();
+        BufferedImage frame = readFixture("/game/blackbox-live.png");
+        LegacyCoordinateMapper mapper = new LegacyCoordinateMapper(720, 1280,
+                frame.getWidth(), frame.getHeight());
+        Globals globals = JsePlatform.standardGlobals();
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.ZERO; }
+        });
+        globals.set("findMultiColor", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return findMultiColor(frame, mapper, args); }
+        });
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot.resolve(module), module);
+        }
+
+        assertTrue("The real game frame has empty quickslots, so no potion coordinate may be returned",
+                globals.get("战斗_查找快捷栏药品").invoke(LuaValue.varargsOf(new LuaValue[]{
+                        LuaValue.valueOf("红")})).arg1().isnil());
+        assertTrue("An empty hotbar must not return a blue potion coordinate either",
+                globals.get("战斗_查找快捷栏药品").invoke(LuaValue.varargsOf(new LuaValue[]{
+                        LuaValue.valueOf("蓝")})).arg1().isnil());
+    }
+
+    @Test public void combatSupplyLocatesPotionQuickslotsUsingRecoveredPotionPixels() throws Exception {
+        Path scriptRoot = scriptRoot();
+        BufferedImage liveFrame = readFixture("/game/blackbox-live.png");
+        BufferedImage backpackFrame = readFixture("/game/inventory-backpack.png");
+        LegacyCoordinateMapper mapper = new LegacyCoordinateMapper(720, 1280,
+                liveFrame.getWidth(), liveFrame.getHeight());
+        Graphics2D graphics = liveFrame.createGraphics();
+        try {
+            // Copy real red and blue potion sprites from the captured backpack frame into
+            // two captured empty hotbar slots; the Lua color matcher still reads pixels.
+            graphics.drawImage(backpackFrame, 1196, 366, 1232, 408,
+                    1040, 205, 1076, 247, null);
+            graphics.drawImage(backpackFrame, 1296, 366, 1332, 408,
+                    1130, 205, 1166, 247, null);
+        } finally { graphics.dispose(); }
+
+        Globals globals = JsePlatform.standardGlobals();
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.ZERO; }
+        });
+        globals.set("findMultiColor", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return findMultiColor(liveFrame, mapper, args); }
+        });
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot.resolve(module), module);
+        }
+
+        Varargs redSlot = globals.get("战斗_查找快捷栏药品").invoke(LuaValue.varargsOf(new LuaValue[]{
+                LuaValue.valueOf("红")}));
+        assertEquals("Red potion detection must return the assigned hotbar slot center", 971, redSlot.arg1().toint());
+        assertEquals(310, redSlot.arg(2).toint());
+        Varargs blueSlot = globals.get("战斗_查找快捷栏药品").invoke(LuaValue.varargsOf(new LuaValue[]{
+                LuaValue.valueOf("蓝")}));
+        assertEquals("Blue potion detection must return its separate hotbar slot center", 1051, blueSlot.arg1().toint());
+        assertEquals(310, blueSlot.arg(2).toint());
     }
 
     @Test public void recoveredBackpackWeightParserAcceptsOcrSpacingAndFullWidthSlash() throws Exception {
@@ -544,7 +822,7 @@ public final class RecoveredLuaTaskTest {
         });
         globals.set("imeLib", ime);
         globals.set("tz", tz);
-        globals.set("挂机点地图", LuaValue.valueOf("sùng thành"));
+        globals.set("挂机点地图", LuaValue.valueOf("崇城野外"));
         globals.set("挂机点x", LuaValue.valueOf("321"));
         globals.set("挂机点y", LuaValue.valueOf("654"));
         globals.set("需要去挂机点一次", LuaValue.TRUE);
@@ -554,8 +832,8 @@ public final class RecoveredLuaTaskTest {
         assertTrue("A successful route should clear the pending return flag",
                 !globals.get("需要去挂机点一次").toboolean());
 
-        assertEquals("The route must search the selected Vietnamese map, then enter X/Y.",
-                Arrays.asList("sùng thành", "321", "654"), enteredText);
+        assertEquals("The route must search the selected Chinese map, then enter X/Y.",
+                Arrays.asList("崇城野外", "321", "654"), enteredText);
         assertTrue("The selected map should choose the correct map row",
                 tappedControls.contains("@@选择地图2"));
         assertTrue("The route should submit the destination to the game map",
@@ -770,7 +1048,7 @@ public final class RecoveredLuaTaskTest {
         globals.set("寻路_等待完成", new ZeroArgFunction() {
             @Override public LuaValue call() { return LuaValue.TRUE; }
         });
-        globals.set("挂机点地图", LuaValue.valueOf("sùng thành"));
+        globals.set("挂机点地图", LuaValue.valueOf("崇城野外"));
         globals.set("挂机点x", LuaValue.valueOf("321"));
         globals.set("挂机点y", LuaValue.valueOf("654"));
         globals.set("需要去挂机点一次", LuaValue.TRUE);
@@ -780,7 +1058,7 @@ public final class RecoveredLuaTaskTest {
         assertTrue("The game home signature should lead Lua to tap the map-open control",
                 mapOpenTap.get() != null);
         assertEquals("The route should enter the chosen map followed by its configured X/Y",
-                Arrays.asList("sùng thành", "321", "654"), enteredText);
+                Arrays.asList("崇城野外", "321", "654"), enteredText);
         assertTrue("The Lua route should submit the destination",
                 !globals.get("需要去挂机点一次").toboolean());
         assertTrue("Submitting the destination should return the game to its home screen",
@@ -1027,6 +1305,924 @@ public final class RecoveredLuaTaskTest {
                 !clicked.get().contains("点装备") && !clicked.get().contains("卖1"));
     }
 
+    @Test public void recoveredSellerKeepsSpecialItemsWhenOrdinarySaleIsNotEnabled() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        List<String> clicks = new ArrayList<>();
+        AtomicBoolean selectedItemOpen = new AtomicBoolean(true);
+        AtomicBoolean staleSaleConfirmationOpen = new AtomicBoolean(true);
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.ZERO; }
+        });
+        OneArgFunction noSleep = new OneArgFunction() {
+            @Override public LuaValue call(LuaValue millis) { return LuaValue.NONE; }
+        };
+        globals.set("sleep", noSleep);
+        globals.set("sleep2", noSleep);
+        VarArgFunction noOp = noOpFunction();
+        globals.set("toast", noOp);
+        globals.set("print", noOp);
+        globals.set("_ENV", globals);
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot().resolve(module), module);
+        }
+
+        LuaTable shopPage = new LuaTable();
+        LuaTable nonEquipmentPage = new LuaTable();
+        LuaTable specialItemPage = new LuaTable();
+        LuaTable templates = new LuaTable();
+        templates.set("商店页面", shopPage);
+        templates.set("商店选中非装备属性页面", nonEquipmentPage);
+        templates.set("商店选中特殊物品属性页面", specialItemPage);
+        LuaTable saleConfirmationPage = new LuaTable();
+        templates.set("商店卖货确定页面", saleConfirmationPage);
+        globals.set("tz", templates);
+        globals.set("找到", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue target) {
+                if (target.raweq(shopPage)) return LuaValue.TRUE;
+                if (target.raweq(saleConfirmationPage)) {
+                    return LuaValue.valueOf(staleSaleConfirmationOpen.get());
+                }
+                if (target.raweq(nonEquipmentPage) || target.raweq(specialItemPage)) {
+                    return LuaValue.valueOf(selectedItemOpen.get());
+                }
+                return LuaValue.FALSE;
+            }
+        });
+        globals.set("点击", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                String control = args.arg1().tojstring();
+                clicks.add(control);
+                if ("@@关掉非装备物品".equals(control)) selectedItemOpen.set(false);
+                if ("@@关闭商店卖货确定页面".equals(control)) staleSaleConfirmationOpen.set(false);
+                return LuaValue.NONE;
+            }
+        });
+        globals.set("findPic", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                return LuaValue.varargsOf(new LuaValue[]{LuaValue.FALSE, LuaValue.valueOf(-1), LuaValue.valueOf(-1)});
+            }
+        });
+        LuaTable config = new LuaTable();
+        config.set("出售装备", LuaValue.valueOf("false"));
+        config.set("保护装备不出售", LuaValue.valueOf("true"));
+        config.set("出售装备品质上限", LuaValue.valueOf("0"));
+        config.set("出售全部红", LuaValue.valueOf("false"));
+        config.set("出售全部蓝", LuaValue.valueOf("false"));
+        config.set("购买小红", LuaValue.valueOf("false"));
+        config.set("购买小蓝", LuaValue.valueOf("false"));
+        // Mirror a legacy profile missing this new setting: the host default is false.
+        config.set("允许出售物品", LuaValue.valueOf(LegacyLuaConfig.defaults().get("允许出售物品")));
+        globals.set("界面数据", config);
+        globals.set("买了一次蓝", LuaValue.FALSE);
+        globals.set("买了一次红", LuaValue.FALSE);
+
+        globals.get("去卖货_卖货").checkfunction().call();
+
+        assertTrue("A default or missing trade opt-in must never sell a special item",
+                !clicks.contains("@@出售特殊物品") && !clicks.contains("@@确定卖掉"));
+        assertTrue("An orphaned sale dialog must be canceled when no allowlisted sale was initiated",
+                clicks.contains("@@关闭商店卖货确定页面") && !clicks.contains("@@确定卖掉"));
+        assertTrue("With all sale modes disabled, the merchant workflow must not scan or open inventory items",
+                clicks.stream().noneMatch(action -> action.startsWith("@@点装备"))
+                        && !clicks.contains("@@关掉非装备物品"));
+    }
+
+    @Test public void ordinaryItemSaleRequiresConfidentOcrExactAllowlistAndQuantityAboveThreshold() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        AtomicReference<String> quantityText = new AtomicReference<>("11");
+        AtomicReference<Double> quantityScore = new AtomicReference<>(0.95d);
+        AtomicReference<String> nameText = new AtomicReference<>("冰肌");
+        AtomicReference<Double> nameScore = new AtomicReference<>(0.93d);
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.ZERO; }
+        });
+        globals.set("tomocrtexttable", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                LuaTable row = new LuaTable();
+                boolean isQuantity = args.arg(1).toint() != 620;
+                row.set("words", LuaValue.valueOf(isQuantity ? quantityText.get() : nameText.get()));
+                row.set("score", LuaValue.valueOf(isQuantity ? quantityScore.get() : nameScore.get()));
+                LuaTable rows = new LuaTable();
+                rows.set(1, row);
+                return rows;
+            }
+        });
+        globals.set("print", noOpFunction());
+        globals.set("toast", noOpFunction());
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot().resolve(module), module);
+        }
+
+        LuaFunction readQuantity = globals.get("去卖货_识别物品数量").checkfunction();
+        assertEquals(11, readQuantity.invoke(LuaValue.varargsOf(new LuaValue[]{
+                LuaValue.valueOf(662), LuaValue.valueOf(187), LuaValue.valueOf(694), LuaValue.valueOf(212)})).arg1().toint());
+        quantityScore.set(0.79d);
+        assertTrue("Low-confidence quantity must become unknown", readQuantity.invoke(LuaValue.varargsOf(new LuaValue[]{
+                LuaValue.valueOf(662), LuaValue.valueOf(187), LuaValue.valueOf(694), LuaValue.valueOf(212)})).arg1().isnil());
+        quantityScore.set(0.95d);
+
+        LuaFunction readName = globals.get("去卖货_识别物品名称").checkfunction();
+        assertEquals("冰肌", readName.call().tojstring());
+        nameScore.set(0.7481599d);
+        assertEquals("Low-confidence item names must not be used for a destructive sale", "", readName.call().tojstring());
+        assertEquals("The captured shop's RapidOCR result scores 0.748; allow the exact match only in an explicit opt-in purchase path",
+                "冰肌", readName.invoke(LuaValue.varargsOf(new LuaValue[]{LuaValue.NIL, LuaValue.NIL,
+                        LuaValue.NIL, LuaValue.NIL, LuaValue.valueOf(0.7)})).arg1().tojstring());
+        nameScore.set(0.93d);
+
+        LuaFunction eligible = globals.get("去卖货_判断普通物品出售资格").checkfunction();
+        LuaTable config = new LuaTable();
+        config.set("允许出售物品", LuaValue.valueOf("false"));
+        config.set("出售物品清单", LuaValue.valueOf("冰肌"));
+        config.set("出售物品数量阈值", LuaValue.valueOf("10"));
+        globals.set("界面数据", config);
+        assertTrue("Ordinary item sale must remain opt-in", !eligible.call(
+                LuaValue.valueOf("冰肌"), LuaValue.valueOf(11)).arg1().toboolean());
+
+        config.set("允许出售物品", LuaValue.valueOf("true"));
+        assertTrue("The exact allowlist item at the threshold must be retained", !eligible.call(
+                LuaValue.valueOf("冰肌"), LuaValue.valueOf(10)).arg1().toboolean());
+        assertTrue("A similar but unlisted name must be retained", !eligible.call(
+                LuaValue.valueOf("冰肌碎片"), LuaValue.valueOf(11)).arg1().toboolean());
+        assertTrue("Unknown OCR quantity must be retained", !eligible.call(
+                LuaValue.valueOf("冰肌"), LuaValue.NIL).arg1().toboolean());
+        assertTrue("The exact allowlisted item above threshold may be sold", eligible.call(
+                LuaValue.valueOf("冰肌"), LuaValue.valueOf(11)).arg1().toboolean());
+        config.set("出售物品清单", LuaValue.valueOf("其他物品\n冰肌"));
+        assertTrue("Line-separated allowlist entries must match exactly", eligible.call(
+                LuaValue.valueOf("冰肌"), LuaValue.valueOf(11)).arg1().toboolean());
+        config.set("出售物品清单", LuaValue.valueOf("其他物品，冰肌"));
+        assertTrue("Comma-separated allowlist entries must match exactly", eligible.call(
+                LuaValue.valueOf("冰肌"), LuaValue.valueOf(11)).arg1().toboolean());
+    }
+
+    @Test public void ordinaryItemPurchaseRequiresExactAllowlistAndCountBelowThreshold() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.ZERO; }
+        });
+        globals.set("toast", noOpFunction());
+        globals.set("print", noOpFunction());
+        globals.set("_ENV", globals);
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot().resolve(module), module);
+        }
+        LuaFunction eligible = globals.get("去卖货_判断普通物品购买资格").checkfunction();
+        LuaTable config = new LuaTable();
+        config.set("允许购买物品", LuaValue.valueOf("false"));
+        config.set("购买物品清单", LuaValue.valueOf("回城符"));
+        config.set("购买物品数量阈值", LuaValue.valueOf("10"));
+        config.set("每次购买数量", LuaValue.valueOf("8"));
+        globals.set("界面数据", config);
+
+        assertTrue("Generic purchases must remain disabled unless explicitly opted in",
+                !eligible.call(LuaValue.valueOf("回城符"), LuaValue.valueOf(2)).arg1().toboolean());
+        config.set("允许购买物品", LuaValue.valueOf("true"));
+        assertTrue("A similar or unlisted item must never be purchased",
+                !eligible.call(LuaValue.valueOf("回城符碎片"), LuaValue.valueOf(2)).arg1().toboolean());
+        assertTrue("Unknown OCR inventory counts must skip the purchase",
+                !eligible.call(LuaValue.valueOf("回城符"), LuaValue.NIL).arg1().toboolean());
+        assertTrue("A non-integer OCR count must not drive a purchase",
+                !eligible.call(LuaValue.valueOf("回城符"), LuaValue.valueOf(2.5)).arg1().toboolean());
+        assertTrue("An item at the threshold must not be purchased",
+                !eligible.call(LuaValue.valueOf("回城符"), LuaValue.valueOf(10)).arg1().toboolean());
+
+        Varargs eligiblePurchase = eligible.invoke(LuaValue.varargsOf(new LuaValue[]{
+                LuaValue.valueOf("回城符"), LuaValue.valueOf(2)}));
+        assertTrue("An allowlisted item below threshold should be eligible",
+                eligiblePurchase.arg1().toboolean());
+        assertEquals("The requested batch should be capped so it cannot exceed the configured stock threshold",
+                8, eligiblePurchase.arg(2).toint());
+        Varargs cappedPurchase = eligible.invoke(LuaValue.varargsOf(new LuaValue[]{
+                LuaValue.valueOf("回城符"), LuaValue.valueOf(9)}));
+        assertEquals("The final purchase batch must be capped to the remaining threshold gap",
+                1, cappedPurchase.arg(2).toint());
+        config.set("购买物品清单", LuaValue.valueOf("其他物品，回城符"));
+        assertTrue("Comma-separated item allowlists should use exact matches",
+                eligible.call(LuaValue.valueOf("回城符"), LuaValue.valueOf(2)).arg1().toboolean());
+        config.set("每次购买数量", LuaValue.valueOf("0.5"));
+        assertTrue("A fractional batch size must not become a zero-count purchase action",
+                !eligible.call(LuaValue.valueOf("回城符"), LuaValue.valueOf(2)).arg1().toboolean());
+    }
+
+    @Test public void localizedChineseVendorCatalogFindsAllTenVisibleChineseAllowlistItems() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        BufferedImage shopScreenshot = readFixture("/game/merchant-purchase-list.png");
+        LegacyCoordinateMapper mapper = new LegacyCoordinateMapper(1280, 720,
+                shopScreenshot.getWidth(), shopScreenshot.getHeight());
+        List<String[]> catalogRows = new ArrayList<>();
+        try (InputStream input = RecoveredLuaTaskTest.class.getResourceAsStream(
+                "/game/merchant-purchase-catalog-zh-live-20261018-rapidocr.csv")) {
+            if (input == null) throw new IOException("Missing Chinese merchant catalog OCR fixture");
+            String[] lines = new String(input.readAllBytes(), StandardCharsets.UTF_8).trim().split("\\R");
+            assertEquals("Expected the header and ten visible Chinese catalog items", 11, lines.length);
+            assertEquals("text,raw_center_x,raw_center_y,confidence,tap_x,tap_y", lines[0]);
+            for (int i = 1; i < lines.length; i++) catalogRows.add(lines[i].split(",", -1));
+        }
+
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.ZERO; }
+        });
+        globals.set("sleep", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue millis) { return LuaValue.NONE; }
+        });
+        globals.set("sleep2", globals.get("sleep"));
+        globals.set("print", noOpFunction());
+        globals.set("_ENV", globals);
+        globals.set("tomocrtexttable", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                LuaTable rows = new LuaTable();
+                int index = 1;
+                for (String[] values : catalogRows) {
+                    LuaTable row = new LuaTable();
+                    row.set("words", LuaValue.valueOf(values[0]));
+                    row.set("x", LuaValue.valueOf(mapper.toReferenceX(Double.parseDouble(values[1]))));
+                    row.set("y", LuaValue.valueOf(mapper.toReferenceY(Double.parseDouble(values[2]))));
+                    row.set("score", LuaValue.valueOf(Double.parseDouble(values[3])));
+                    rows.set(index++, row);
+                }
+                return rows;
+            }
+        });
+        List<String> clicks = new ArrayList<>();
+        globals.set("点击", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                clicks.add(args.arg(1).tojstring());
+                return LuaValue.NONE;
+            }
+        });
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot().resolve(module), module);
+        }
+
+        for (String[] values : catalogRows) {
+            Varargs actual = globals.get("去卖货_定位商店商品").checkfunction()
+                    .invoke(LuaValue.valueOf(values[0]));
+            int actualX = actual.arg1().toint();
+            assertEquals("Chinese catalog OCR must find " + values[0],
+                    mapper.toReferenceX(Double.parseDouble(values[1])), actualX);
+            assertEquals("The OCR row must map to the correct item icon for " + values[0],
+                    Integer.parseInt(values[4]), actual.arg(1).toint() < 350 ? 144 : 396);
+            int row = actual.arg(2).toint() < 190 ? 1 : actual.arg(2).toint() < 287 ? 2
+                    : actual.arg(2).toint() < 383 ? 3 : actual.arg(2).toint() < 480 ? 4 : 5;
+            assertEquals("The OCR row must map to the correct item row for " + values[0],
+                    Integer.parseInt(values[5]), new int[] {0,147,244,340,436,530}[row]);
+        }
+        assertTrue("A visible Chinese catalog result must not trigger page navigation or game input",
+                clicks.isEmpty());
+    }
+
+    @Test public void localizedVendorPageTwoMatchesChineseReturnTalismanAllowlist() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        Path scriptRoot = scriptRoot();
+        BufferedImage pageOne = readFixture("/game/localized-vendor-list-live-20261019.png");
+        BufferedImage pageTwo = readFixture("/game/localized-vendor-page2-live-20261019.png");
+        List<OcrLine> pageOneOcr = readRapidOcrFixture(
+                "/game/localized-vendor-list-live-20261019-rapidocr.csv");
+        List<OcrLine> pageTwoOcr = readRapidOcrFixture(
+                "/game/localized-vendor-page2-live-20261019-rapidocr.csv");
+        LegacyCoordinateMapper mapper = new LegacyCoordinateMapper(1280, 720,
+                pageOne.getWidth(), pageOne.getHeight());
+        assertEquals(pageOne.getWidth(), pageTwo.getWidth());
+        assertEquals(pageOne.getHeight(), pageTwo.getHeight());
+        AtomicInteger currentPage = new AtomicInteger(1);
+        List<String> clicks = new ArrayList<>();
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.ZERO; }
+        });
+        OneArgFunction noSleep = new OneArgFunction() {
+            @Override public LuaValue call(LuaValue millis) { return LuaValue.NONE; }
+        };
+        globals.set("sleep", noSleep);
+        globals.set("sleep2", noSleep);
+        globals.set("toast", noOpFunction());
+        globals.set("print", noOpFunction());
+        globals.set("_ENV", globals);
+        globals.set("tomocrtexttable", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                List<OcrLine> source = currentPage.get() == 1 ? pageOneOcr : pageTwoOcr;
+                LuaTable rows = new LuaTable();
+                int index = 1;
+                for (OcrLine line : source) {
+                    int x = mapper.toReferenceX(line.centerX);
+                    int y = mapper.toReferenceY(line.centerY);
+                    if (line.confidence < 0.7d || x < args.arg(1).toint() || x > args.arg(3).toint()
+                            || y < args.arg(2).toint() || y > args.arg(4).toint()) continue;
+                    LuaTable row = new LuaTable();
+                    row.set("words", LuaValue.valueOf(line.text));
+                    row.set("x", LuaValue.valueOf(x));
+                    row.set("y", LuaValue.valueOf(y));
+                    row.set("score", LuaValue.valueOf(line.confidence));
+                    rows.set(index++, row);
+                }
+                return rows;
+            }
+        });
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot.resolve(module), module);
+        }
+        globals.set("点击", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                String action = args.arg(1).tojstring();
+                clicks.add(action);
+                if ("@@商店下一页".equals(action)) currentPage.set(2);
+                return LuaValue.NONE;
+            }
+        });
+
+        Varargs location = globals.get("去卖货_定位商店商品").checkfunction().invoke(
+                LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf("回城符")}));
+        assertEquals("The second live page's OCR alias should locate the Chinese allowlist item",
+                498, location.arg1().toint());
+        assertEquals("The OCR row center should remain in its actual second-page row",
+                315, location.arg(2).toint());
+        assertEquals("The recovered Lua must inspect page one, then turn exactly once to page two",
+                Arrays.asList("@@商店下一页"), clicks);
+    }
+
+    @Test public void localizedVendorOcrCompletesChineseAllowlistedPurchaseSequence() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        Path scriptRoot = scriptRoot();
+        BufferedImage screenshot = readFixture("/game/localized-vendor-list-live-20261019.png");
+        List<OcrLine> catalog = readRapidOcrFixture(
+                "/game/localized-vendor-list-live-20261019-rapidocr.csv");
+        List<OcrLine> detailTitle = readRapidOcrFixture(
+                "/game/localized-item-detail-live-20261019-rapidocr.csv");
+        assertEquals("The real item-detail sample should contain exactly one OCR title", 1, detailTitle.size());
+        assertEquals("RapidOCR's observed title must remain the source for detail verification",
+                "Thion Quyn Quen", detailTitle.get(0).text);
+        LegacyCoordinateMapper mapper = new LegacyCoordinateMapper(1280, 720,
+                screenshot.getWidth(), screenshot.getHeight());
+        List<String> clicks = new ArrayList<>();
+        int[] catalogTap = {-1, -1};
+        AtomicBoolean dialogOpen = new AtomicBoolean(false);
+        AtomicInteger quantity = new AtomicInteger(0);
+        LuaTable shopPage = new LuaTable();
+        LuaTable buyDialog = new LuaTable();
+        LuaTable templates = new LuaTable();
+        templates.set("商店页面", shopPage);
+        templates.set("商店买货确定页面", buyDialog);
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.ZERO; }
+        });
+        OneArgFunction noSleep = new OneArgFunction() {
+            @Override public LuaValue call(LuaValue millis) { return LuaValue.NONE; }
+        };
+        globals.set("sleep", noSleep);
+        globals.set("sleep2", noSleep);
+        globals.set("toast", noOpFunction());
+        globals.set("print", noOpFunction());
+        globals.set("_ENV", globals);
+        globals.set("tomocrtexttable", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                int regionX = args.arg(1).toint();
+                LuaTable rows = new LuaTable();
+                if (regionX == 90) {
+                    int index = 1;
+                    for (OcrLine line : catalog) {
+                        int x = mapper.toReferenceX(line.centerX);
+                        int y = mapper.toReferenceY(line.centerY);
+                        if (line.confidence < 0.7d || x < args.arg(1).toint() || x > args.arg(3).toint()
+                                || y < args.arg(2).toint() || y > args.arg(4).toint()) continue;
+                        LuaTable row = new LuaTable();
+                        row.set("words", LuaValue.valueOf(line.text));
+                        row.set("x", LuaValue.valueOf(x));
+                        row.set("y", LuaValue.valueOf(y));
+                        row.set("score", LuaValue.valueOf(line.confidence));
+                        rows.set(index++, row);
+                    }
+                } else {
+                    LuaTable row = new LuaTable();
+                    if (regionX == 665) row.set("words", LuaValue.valueOf(Integer.toString(quantity.get())));
+                    else row.set("words", LuaValue.valueOf(detailTitle.get(0).text));
+                    row.set("score", LuaValue.valueOf(0.999d));
+                    rows.set(1, row);
+                }
+                return rows;
+            }
+        });
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot.resolve(module), module);
+        }
+        globals.set("tz", templates);
+        globals.set("找到", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue target) {
+                return LuaValue.valueOf(target.raweq(shopPage)
+                        || target.raweq(buyDialog) && dialogOpen.get());
+            }
+        });
+        globals.set("点击", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                String action = args.arg(1).tojstring();
+                clicks.add(action);
+                if ("@@选择购买物品".equals(action)) {
+                    catalogTap[0] = args.arg(2).toint();
+                    catalogTap[1] = args.arg(3).toint();
+                } else if ("@@购买".equals(action)) {
+                    dialogOpen.set(true);
+                    quantity.set(0);
+                } else if ("@@购买+1".equals(action)) {
+                    quantity.incrementAndGet();
+                } else if ("@@确定购买数量".equals(action)) {
+                    dialogOpen.set(false);
+                }
+                return LuaValue.NONE;
+            }
+        });
+        LuaTable config = new LuaTable();
+        config.set("允许购买物品", LuaValue.valueOf("true"));
+        config.set("购买物品清单", LuaValue.valueOf("天权冠"));
+        config.set("购买物品数量阈值", LuaValue.valueOf("5"));
+        config.set("每次购买数量", LuaValue.valueOf("8"));
+        globals.set("界面数据", config);
+
+        String[] chineseCatalog = {"天权冠", "云中冠", "广成冠", "天权道袍", "云中道袍",
+                "广成道袍", "天权令", "云中令", "广成令", "天权巾"};
+        assertEquals("The live catalog sample should contain ten OCR item names", 10, catalog.size());
+        for (int i = 0; i < chineseCatalog.length; i++) {
+            assertTrue("Chinese catalog entry " + chineseCatalog[i] + " must match its observed Vietnamese OCR row "
+                            + catalog.get(i).text,
+                    globals.get("去卖货_商品名称匹配").checkfunction().call(
+                            LuaValue.valueOf(chineseCatalog[i]), LuaValue.valueOf(catalog.get(i).text)).toboolean());
+        }
+        assertTrue("A different product name must not match the Chinese allowlist entry",
+                !globals.get("去卖货_商品名称匹配").checkfunction().call(
+                        LuaValue.valueOf("天权冠"), LuaValue.valueOf("Vân Trung Quán")).toboolean());
+        assertTrue("The separately captured Vietnamese item-detail OCR title must match the same product",
+                globals.get("去卖货_商品名称匹配").checkfunction().call(
+                        LuaValue.valueOf("天权冠"), LuaValue.valueOf(detailTitle.get(0).text)).toboolean());
+
+        assertTrue("A Chinese allowlist name must match the exact RapidOCR alias on the live vendor screen",
+                globals.get("去卖货_购买普通物品").checkfunction().call(
+                        LuaValue.valueOf("天权冠"), LuaValue.valueOf(1)).toboolean());
+        assertEquals("The Vietnamese OCR row must map to the corresponding first product cell",
+                144, catalogTap[0]);
+        assertEquals(147, catalogTap[1]);
+        assertEquals("The stock threshold must cap the purchase batch at four",
+                4, quantity.get());
+        assertTrue("The simulated transaction should close only after the exact verified quantity is submitted",
+                !dialogOpen.get() && clicks.contains("@@确定购买数量"));
+    }
+
+    @Test public void genericPurchaseSelectsOcrMatchedCatalogCellAndCapsTheConfirmedBatch() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        BufferedImage shopScreenshot = readFixture("/game/merchant-purchase-list.png");
+        LegacyCoordinateMapper mapper = new LegacyCoordinateMapper(1280, 720,
+                shopScreenshot.getWidth(), shopScreenshot.getHeight());
+        String[] catalogOcr;
+        try (InputStream input = RecoveredLuaTaskTest.class.getResourceAsStream(
+                "/game/merchant-purchase-catalog-rapidocr.csv")) {
+            if (input == null) throw new IOException("Missing merchant catalog OCR fixture");
+            String[] lines = new String(input.readAllBytes(), StandardCharsets.UTF_8).trim().split("\\R");
+            assertEquals("Expected the OCR CSV header and one catalog row", 2, lines.length);
+            assertEquals("text,raw_center_x,raw_center_y,confidence", lines[0]);
+            catalogOcr = lines[1].split(",", -1);
+            assertEquals("Expected text, source center, and confidence", 4, catalogOcr.length);
+        }
+        assertEquals("The probe row must refer to the captured 1600x900 screen", 1600,
+                shopScreenshot.getWidth());
+        assertEquals(900, shopScreenshot.getHeight());
+        assertEquals("The source OCR x must map to the Lua reference frame", 223,
+                mapper.toReferenceX(Double.parseDouble(catalogOcr[1])));
+        assertEquals("The source OCR y must map to the Lua reference frame", 128,
+                mapper.toReferenceY(Double.parseDouble(catalogOcr[2])));
+        int[] catalogTap = { -1, -1 };
+        List<String> clicks = new ArrayList<>();
+        List<String> toasts = new ArrayList<>();
+        AtomicReference<String> confirmationName = new AtomicReference<>("天权冠");
+        java.util.concurrent.atomic.AtomicInteger selectedQuantity = new java.util.concurrent.atomic.AtomicInteger();
+        AtomicBoolean staleQuantityOcr = new AtomicBoolean(false);
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.ZERO; }
+        });
+        globals.set("sleep", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue millis) { return LuaValue.NONE; }
+        });
+        globals.set("sleep2", globals.get("sleep"));
+        globals.set("toast", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                toasts.add(args.arg1().tojstring());
+                return LuaValue.NONE;
+            }
+        });
+        globals.set("print", noOpFunction());
+        globals.set("_ENV", globals);
+        globals.set("tomocrtexttable", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                LuaTable row = new LuaTable();
+                if (args.arg(1).toint() == 90) {
+                    row.set("words", LuaValue.valueOf(catalogOcr[0]));
+                    row.set("x", LuaValue.valueOf(mapper.toReferenceX(Double.parseDouble(catalogOcr[1]))));
+                    row.set("y", LuaValue.valueOf(mapper.toReferenceY(Double.parseDouble(catalogOcr[2]))));
+                    row.set("score", LuaValue.valueOf(Double.parseDouble(catalogOcr[3])));
+                } else if (args.arg(1).toint() == 550) {
+                    row.set("words", LuaValue.valueOf(confirmationName.get()));
+                    row.set("score", LuaValue.valueOf(0.93));
+                } else if (args.arg(1).toint() == 665) {
+                    row.set("words", LuaValue.valueOf(Integer.toString(
+                            staleQuantityOcr.get() ? 0 : selectedQuantity.get())));
+                    row.set("score", LuaValue.valueOf(0.96));
+                } else {
+                    row.set("words", LuaValue.valueOf("天权冠"));
+                    row.set("score", LuaValue.valueOf(0.93));
+                }
+                LuaTable rows = new LuaTable();
+                rows.set(1, row);
+                return rows;
+            }
+        });
+        LuaTable shopPage = new LuaTable();
+        LuaTable buyDialog = new LuaTable();
+        LuaTable templates = new LuaTable();
+        templates.set("商店页面", shopPage);
+        templates.set("商店买货确定页面", buyDialog);
+        globals.set("tz", templates);
+        globals.set("找到", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue target) {
+                return LuaValue.valueOf(target.raweq(shopPage) || target.raweq(buyDialog));
+            }
+        });
+        globals.set("点击", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                String action = args.arg(1).tojstring();
+                clicks.add(action);
+                if ("@@选择购买物品".equals(action)) {
+                    catalogTap[0] = args.arg(2).toint();
+                    catalogTap[1] = args.arg(3).toint();
+                }
+                if ("@@购买".equals(action)) selectedQuantity.set(0);
+                if ("@@购买+1".equals(action)) selectedQuantity.incrementAndGet();
+                return LuaValue.NONE;
+            }
+        });
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot().resolve(module), module);
+        }
+        globals.set("tz", templates);
+        globals.set("找到", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue target) {
+                return LuaValue.valueOf(target.raweq(shopPage) || target.raweq(buyDialog));
+            }
+        });
+        globals.set("点击", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                String action = args.arg(1).tojstring();
+                clicks.add(action);
+                if ("@@选择购买物品".equals(action)) {
+                    catalogTap[0] = args.arg(2).toint();
+                    catalogTap[1] = args.arg(3).toint();
+                }
+                if ("@@购买".equals(action)) selectedQuantity.set(0);
+                if ("@@购买+1".equals(action)) selectedQuantity.incrementAndGet();
+                return LuaValue.NONE;
+            }
+        });
+        LuaTable config = new LuaTable();
+        config.set("允许购买物品", LuaValue.valueOf("true"));
+        config.set("购买物品清单", LuaValue.valueOf("天权冠"));
+        config.set("购买物品数量阈值", LuaValue.valueOf("5"));
+        config.set("每次购买数量", LuaValue.valueOf("8"));
+        globals.set("界面数据", config);
+
+        LuaValue purchaseResult = globals.get("去卖货_购买普通物品").checkfunction().call(
+                LuaValue.valueOf("天权冠"), LuaValue.valueOf(1));
+        assertTrue("A real shop catalog screenshot should drive the recovered generic buy flow; toasts=" + toasts + ", clicks=" + clicks,
+                purchaseResult.toboolean());
+        assertEquals("The OCR catalog row must map to the first product icon horizontally", 144, catalogTap[0]);
+        assertEquals("The OCR catalog row must map to the first product icon vertically", 147, catalogTap[1]);
+        assertTrue("Shop icon tap must map to a non-empty pixel in the captured screenshot",
+                (shopScreenshot.getRGB(mapper.toScreenX(catalogTap[0]), mapper.toScreenY(catalogTap[1]))
+                        & 0x00ffffff) != 0);
+        assertEquals("The remaining threshold gap caps the requested batch from 8 to 4",
+                4, java.util.Collections.frequency(clicks, "@@购买+1"));
+        assertTrue("The selected item should use the recovered purchase and confirmation controls",
+                clicks.contains("@@购买") && clicks.contains("@@确定购买数量"));
+
+        clicks.clear();
+        staleQuantityOcr.set(true);
+        assertTrue("A stale final quantity must abort before purchase confirmation",
+                !globals.get("去卖货_购买普通物品").checkfunction().call(
+                        LuaValue.valueOf("天权冠"), LuaValue.valueOf(1)).toboolean());
+        assertTrue("Unverified quantity must never be submitted", !clicks.contains("@@确定购买数量"));
+
+        clicks.clear();
+        staleQuantityOcr.set(false);
+        confirmationName.set("云中冠");
+        assertTrue("A mismatched confirmation title must abort before quantity or purchase confirmation",
+                !globals.get("去卖货_购买普通物品").checkfunction().call(
+                        LuaValue.valueOf("天权冠"), LuaValue.valueOf(1)).toboolean());
+        assertTrue("The wrong item must never reach the irreversible confirmation action",
+                !clicks.contains("@@确定购买数量"));
+    }
+
+    @Test public void recoveredSellerRunsGenericPurchaseFromCapturedMerchantScreenAndInventoryCount() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        BufferedImage shopScreenshot = readFixture("/game/merchant-purchase-list.png");
+        List<OcrLine> observedCatalog = readMerchantCatalogOcrFixture("/game/merchant-purchase-catalog-rapidocr.csv");
+        LegacyCoordinateMapper mapper = new LegacyCoordinateMapper(1280, 720,
+                shopScreenshot.getWidth(), shopScreenshot.getHeight());
+        List<String> clicks = new ArrayList<>();
+        int[] catalogTap = {-1, -1};
+        AtomicBoolean bagPopup = new AtomicBoolean(false);
+        AtomicBoolean buyDialog = new AtomicBoolean(false);
+        java.util.concurrent.atomic.AtomicInteger selectedQuantity = new java.util.concurrent.atomic.AtomicInteger();
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.ZERO; }
+        });
+        OneArgFunction noSleep = new OneArgFunction() {
+            @Override public LuaValue call(LuaValue millis) { return LuaValue.NONE; }
+        };
+        globals.set("sleep", noSleep);
+        globals.set("sleep2", noSleep);
+        globals.set("hideToast", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.NONE; }
+        });
+        globals.set("toast", noOpFunction());
+        globals.set("print", noOpFunction());
+        globals.set("_ENV", globals);
+        globals.set("tomocrtexttable", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                LuaTable row = new LuaTable();
+                int regionX = args.arg(1).toint();
+                if (regionX == 90) {
+                    LuaTable rows = new LuaTable();
+                    int index = 1;
+                    for (OcrLine line : observedCatalog) {
+                        if (line.confidence < 0.7d) continue;
+                        int x = mapper.toReferenceX(line.centerX);
+                        int y = mapper.toReferenceY(line.centerY);
+                        if (x < args.arg(1).toint() || x > args.arg(3).toint()
+                                || y < args.arg(2).toint() || y > args.arg(4).toint()) continue;
+                        LuaTable catalogRow = new LuaTable();
+                        catalogRow.set("words", LuaValue.valueOf(line.text));
+                        catalogRow.set("x", LuaValue.valueOf(x));
+                        catalogRow.set("y", LuaValue.valueOf(y));
+                        catalogRow.set("score", LuaValue.valueOf(line.confidence));
+                        rows.set(index++, catalogRow);
+                    }
+                    return rows;
+                } else if (regionX == 662) {
+                    row.set("words", LuaValue.valueOf("1"));
+                    row.set("score", LuaValue.valueOf(0.96));
+                } else if (regionX == 550) {
+                    row.set("words", LuaValue.valueOf("天权冠"));
+                    row.set("score", LuaValue.valueOf(0.93));
+                } else if (regionX == 665) {
+                    row.set("words", LuaValue.valueOf(Integer.toString(selectedQuantity.get())));
+                    row.set("score", LuaValue.valueOf(0.96));
+                } else {
+                    row.set("words", LuaValue.valueOf("天权冠"));
+                    row.set("score", LuaValue.valueOf(0.93));
+                }
+                LuaTable rows = new LuaTable();
+                rows.set(1, row);
+                return rows;
+            }
+        });
+        globals.set("findPic", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                boolean firstInventorySlot = args.arg(1).toint() == 666 && args.arg(2).toint() == 147;
+                return LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(!firstInventorySlot),
+                        LuaValue.valueOf(firstInventorySlot ? -1 : 1), LuaValue.valueOf(firstInventorySlot ? -1 : 1)});
+            }
+        });
+        LuaTable shopPage = new LuaTable();
+        LuaTable inventoryPopup = new LuaTable();
+        LuaTable specialPopup = new LuaTable();
+        LuaTable buyConfirmation = new LuaTable();
+        LuaTable templates = new LuaTable();
+        templates.set("商店页面", shopPage);
+        templates.set("商店选中装备属性页面", new LuaTable());
+        templates.set("商店选中非装备属性页面", inventoryPopup);
+        templates.set("商店选中特殊物品属性页面", specialPopup);
+        templates.set("商店买货确定页面", buyConfirmation);
+        templates.set("商店卖货确定页面", new LuaTable());
+        templates.set("对话页面", new LuaTable());
+        globals.set("tz", templates);
+        globals.set("找到", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue target) {
+                if (target.raweq(shopPage)) return LuaValue.TRUE;
+                if (target.raweq(inventoryPopup)) return LuaValue.valueOf(bagPopup.get());
+                if (target.raweq(specialPopup)) return LuaValue.FALSE;
+                if (target.raweq(buyConfirmation)) return LuaValue.valueOf(buyDialog.get());
+                return LuaValue.FALSE;
+            }
+        });
+        globals.set("点击", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                String action = args.arg(1).tojstring();
+                clicks.add(action);
+                if ("@@点装备1".equals(action)) bagPopup.set(true);
+                if ("@@关掉非装备物品".equals(action)) bagPopup.set(false);
+                if ("@@选择购买物品".equals(action)) {
+                    catalogTap[0] = args.arg(2).toint();
+                    catalogTap[1] = args.arg(3).toint();
+                }
+                if ("@@购买".equals(action)) buyDialog.set(true);
+                if ("@@购买".equals(action)) selectedQuantity.set(0);
+                if ("@@购买+1".equals(action)) selectedQuantity.incrementAndGet();
+                if ("@@确定购买数量".equals(action)) buyDialog.set(false);
+                return LuaValue.NONE;
+            }
+        });
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot().resolve(module), module);
+        }
+        globals.set("tz", templates);
+        globals.set("找到", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue target) {
+                if (target.raweq(shopPage)) return LuaValue.TRUE;
+                if (target.raweq(inventoryPopup)) return LuaValue.valueOf(bagPopup.get());
+                if (target.raweq(specialPopup)) return LuaValue.FALSE;
+                if (target.raweq(buyConfirmation)) return LuaValue.valueOf(buyDialog.get());
+                return LuaValue.FALSE;
+            }
+        });
+        globals.set("点击", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                String action = args.arg(1).tojstring();
+                clicks.add(action);
+                if ("@@点装备1".equals(action)) bagPopup.set(true);
+                if ("@@关掉非装备物品".equals(action)) bagPopup.set(false);
+                if ("@@选择购买物品".equals(action)) {
+                    catalogTap[0] = args.arg(2).toint();
+                    catalogTap[1] = args.arg(3).toint();
+                }
+                if ("@@购买".equals(action)) buyDialog.set(true);
+                if ("@@购买".equals(action)) selectedQuantity.set(0);
+                if ("@@购买+1".equals(action)) selectedQuantity.incrementAndGet();
+                if ("@@确定购买数量".equals(action)) buyDialog.set(false);
+                return LuaValue.NONE;
+            }
+        });
+        globals.set("findPic", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                boolean firstInventorySlot = args.arg(1).toint() == 666 && args.arg(2).toint() == 147;
+                return LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(!firstInventorySlot),
+                        LuaValue.valueOf(firstInventorySlot ? -1 : 1),
+                        LuaValue.valueOf(firstInventorySlot ? -1 : 1)});
+            }
+        });
+        LuaTable config = new LuaTable();
+        config.set("出售装备", LuaValue.valueOf("false"));
+        config.set("保护装备不出售", LuaValue.valueOf("true"));
+        config.set("出售装备品质上限", LuaValue.valueOf("0"));
+        config.set("允许出售物品", LuaValue.valueOf("false"));
+        config.set("出售物品清单", LuaValue.valueOf(""));
+        config.set("出售物品数量阈值", LuaValue.valueOf("10"));
+        config.set("允许购买物品", LuaValue.valueOf("true"));
+        config.set("购买物品清单", LuaValue.valueOf("天权冠"));
+        config.set("购买物品数量阈值", LuaValue.valueOf("5"));
+        config.set("每次购买数量", LuaValue.valueOf("3"));
+        config.set("购买小红", LuaValue.valueOf("false"));
+        config.set("购买小蓝", LuaValue.valueOf("false"));
+        config.set("出售全部红", LuaValue.valueOf("false"));
+        config.set("出售全部蓝", LuaValue.valueOf("false"));
+        globals.set("界面数据", config);
+        globals.set("小红数量", LuaValue.ZERO);
+        globals.set("大红数量", LuaValue.ZERO);
+        globals.set("小蓝数量", LuaValue.ZERO);
+        globals.set("大蓝数量", LuaValue.ZERO);
+        globals.set("买了一次蓝", LuaValue.FALSE);
+        globals.set("买了一次红", LuaValue.FALSE);
+
+        globals.get("去卖货_卖货").checkfunction().call();
+
+        assertTrue("The bag count from the real shop screen should trigger an allowlisted generic purchase",
+                clicks.contains("@@购买") && clicks.contains("@@确定购买数量"));
+        assertEquals("The OCR product name should map back to its captured catalog icon", 144, catalogTap[0]);
+        assertEquals("The OCR product row should map back to the first catalog row", 147, catalogTap[1]);
+        assertEquals("The configured batch should be capped from 3 to the remaining threshold gap of 4", 3,
+                java.util.Collections.frequency(clicks, "@@购买+1"));
+        assertTrue("The generic transaction must never sell bag contents",
+                !clicks.contains("@@卖1") && !clicks.contains("@@出售特殊物品") && !clicks.contains("@@确定卖掉"));
+        assertTrue("The catalog target coordinates must land inside the actual merchant screenshot",
+                (shopScreenshot.getRGB(mapper.toScreenX(catalogTap[0]), mapper.toScreenY(catalogTap[1]))
+                        & 0x00ffffff) != 0);
+    }
+
+    @Test public void recoveredSellerConfirmsOnlyAnOcrVerifiedAllowlistedSpecialItem() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        List<String> clicks = new ArrayList<>();
+        AtomicBoolean shopVisible = new AtomicBoolean(true);
+        AtomicBoolean itemPopupVisible = new AtomicBoolean(false);
+        AtomicBoolean confirmationVisible = new AtomicBoolean(false);
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.ZERO; }
+        });
+        OneArgFunction noSleep = new OneArgFunction() {
+            @Override public LuaValue call(LuaValue millis) { return LuaValue.NONE; }
+        };
+        globals.set("sleep", noSleep);
+        globals.set("sleep2", noSleep);
+        globals.set("print", noOpFunction());
+        globals.set("toast", noOpFunction());
+        globals.set("tomocrtexttable", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                LuaTable row = new LuaTable();
+                if (args.arg(1).toint() == 662) {
+                    row.set("words", LuaValue.valueOf("11"));
+                    row.set("score", LuaValue.valueOf(0.95));
+                } else {
+                    row.set("words", LuaValue.valueOf("冰肌"));
+                    row.set("score", LuaValue.valueOf(0.93));
+                }
+                LuaTable rows = new LuaTable();
+                rows.set(1, row);
+                return rows;
+            }
+        });
+        globals.set("_ENV", globals);
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot().resolve(module), module);
+        }
+
+        LuaTable templates = new LuaTable();
+        for (String name : Arrays.asList("商店页面", "商店选中装备属性页面", "商店选中非装备属性页面",
+                "商店选中特殊物品属性页面", "商店卖货确定页面", "商店买货确定页面", "对话页面")) {
+            templates.set(name, new LuaTable());
+        }
+        globals.set("tz", templates);
+        LuaValue shopPage = templates.get("商店页面");
+        LuaValue equipmentPage = templates.get("商店选中装备属性页面");
+        LuaValue nonEquipmentPage = templates.get("商店选中非装备属性页面");
+        LuaValue specialPage = templates.get("商店选中特殊物品属性页面");
+        LuaValue confirmationPage = templates.get("商店卖货确定页面");
+        globals.set("找到", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue target) {
+                if (target.raweq(shopPage)) return LuaValue.valueOf(shopVisible.get());
+                if (target.raweq(nonEquipmentPage) || target.raweq(specialPage)) {
+                    return LuaValue.valueOf(itemPopupVisible.get());
+                }
+                if (target.raweq(confirmationPage)) return LuaValue.valueOf(confirmationVisible.get());
+                if (target.raweq(equipmentPage)) return LuaValue.FALSE;
+                return LuaValue.FALSE;
+            }
+        });
+        globals.set("findPic", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                return LuaValue.varargsOf(new LuaValue[]{LuaValue.FALSE, LuaValue.valueOf(-1), LuaValue.valueOf(-1)});
+            }
+        });
+        globals.set("点击", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                String action = args.arg1().tojstring();
+                clicks.add(action);
+                if (action.startsWith("@@点装备")) {
+                    shopVisible.set(false);
+                    itemPopupVisible.set(true);
+                } else if ("@@出售特殊物品".equals(action)) {
+                    confirmationVisible.set(true);
+                } else if ("@@确定卖掉".equals(action)) {
+                    confirmationVisible.set(false);
+                    itemPopupVisible.set(false);
+                } else if ("@@关掉非装备物品".equals(action)) {
+                    itemPopupVisible.set(false);
+                }
+                return LuaValue.NONE;
+            }
+        });
+
+        LuaTable config = new LuaTable();
+        config.set("出售装备", LuaValue.valueOf("false"));
+        config.set("保护装备不出售", LuaValue.valueOf("true"));
+        config.set("出售装备品质上限", LuaValue.valueOf("0"));
+        config.set("保留蓝条数量", LuaValue.valueOf("4"));
+        config.set("回蓝>=", LuaValue.valueOf("false"));
+        config.set("魔法出招>=", LuaValue.valueOf("false"));
+        config.set("武器出招>=", LuaValue.valueOf("false"));
+        config.set("允许出售物品", LuaValue.valueOf("true"));
+        config.set("出售物品清单", LuaValue.valueOf("冰肌"));
+        config.set("出售物品数量阈值", LuaValue.valueOf("10"));
+        config.set("出售全部红", LuaValue.valueOf("false"));
+        config.set("出售全部蓝", LuaValue.valueOf("false"));
+        config.set("购买小红", LuaValue.valueOf("false"));
+        config.set("购买小蓝", LuaValue.valueOf("false"));
+        globals.set("界面数据", config);
+        globals.set("买了一次蓝", LuaValue.FALSE);
+        globals.set("买了一次红", LuaValue.FALSE);
+        globals.set("初始化选中", noOpFunction());
+
+        globals.get("去卖货_卖货").checkfunction().call();
+
+        assertTrue("An OCR-verified exact allowlist match above the count threshold should enter sale",
+                clicks.contains("@@出售特殊物品"));
+        assertTrue("The eligible sale must be submitted through the existing confirmation flow",
+                clicks.contains("@@确定卖掉"));
+        assertTrue("Ordinary item policy must never route a special item through the equipment sale control",
+                !clicks.contains("@@卖1"));
+
+        clicks.clear();
+        shopVisible.set(true);
+        itemPopupVisible.set(false);
+        confirmationVisible.set(false);
+        config.set("出售物品清单", LuaValue.valueOf("未列入的其他物品"));
+        globals.get("去卖货_卖货").checkfunction().call();
+        assertTrue("An opted-in but unlisted item must never reach the destructive sale action",
+                !clicks.contains("@@出售特殊物品") && !clicks.contains("@@确定卖掉"));
+        assertTrue("An unlisted selection should be closed and preserved", clicks.contains("@@关掉非装备物品"));
+    }
+
     @Test public void recoveredInventoryDecisionUsesConfiguredRedAndBlueThresholds() throws Exception {
         Globals globals = JsePlatform.standardGlobals();
         AtomicLong clock = new AtomicLong();
@@ -1153,7 +2349,7 @@ public final class RecoveredLuaTaskTest {
 
         assertTrue("Short blue stock should select blue supplies", clicks.contains("@@点蓝"));
         assertTrue("Blue purchase should open quantity confirmation", clicks.contains("@@购买"));
-        assertEquals("Configured quantity 3 must add two units after the first", 2,
+        assertEquals("The observed confirmation starts at zero, so quantity 3 requires three increments", 3,
                 java.util.Collections.frequency(clicks, "@@购买+1"));
         assertTrue("The recovered purchase flow must submit the selected quantity",
                 clicks.contains("@@确定购买数量"));
@@ -1168,7 +2364,7 @@ public final class RecoveredLuaTaskTest {
         config.set("购买红的数量", LuaValue.valueOf("2"));
         globals.get("去卖货_卖货_执行红蓝处理").checkfunction().call(LuaValue.valueOf("买红"));
         assertTrue("A positive red purchase should choose the red supply tab", clicks.contains("@@点红"));
-        assertEquals("Quantity 2 should add exactly one unit after the first", 1,
+        assertEquals("The observed confirmation starts at zero, so quantity 2 requires two increments", 2,
                 java.util.Collections.frequency(clicks, "@@购买+1"));
         assertTrue("A valid red purchase should submit its selected quantity", clicks.contains("@@确定购买数量"));
     }
@@ -1283,10 +2479,13 @@ public final class RecoveredLuaTaskTest {
                 int top = Math.max(0, mapper.top(args.arg(2).todouble()));
                 int right = mapper.edgeRight(args.arg(3).todouble());
                 int bottom = mapper.edgeBottom(args.arg(4).todouble());
-                boolean match = imageMatches(screen, template, left, top, right, bottom,
-                        args.arg(6).tojstring(), args.arg(8).optdouble(0.95));
-                return LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(match),
-                        LuaValue.valueOf(match ? left : -1), LuaValue.valueOf(match ? top : -1)});
+                int mask = Integer.parseInt(args.arg(6).tojstring(), 16) & 0x00ffffff;
+                LegacyImageMatcher.Match match = LegacyImageMatcher.find(imagePixels(screen),
+                        imagePixels(template), left, top, right, bottom, mask,
+                        args.arg(8).optdouble(0.95), () -> { });
+                return LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(match != null),
+                        LuaValue.valueOf(match == null ? -1 : mapper.toReferenceX(match.x)),
+                        LuaValue.valueOf(match == null ? -1 : mapper.toReferenceY(match.y))});
             }
         });
         globals.set("_ENV", globals);
@@ -1335,12 +2534,78 @@ public final class RecoveredLuaTaskTest {
         assertEquals("2/200", globals.get("当前背包重量").tojstring());
     }
 
-    @Test public void recoveredPotionIconMatcherReadsRedAndBlueItemsFromTheRealBackpackScreenshot() throws Exception {
+    @Test public void localizedLiveBackpackPixelsAndRapidOcrFeedRecoveredBlueSupplyScanner() throws Exception {
+        Path scriptRoot = scriptRoot();
+        BufferedImage screen = readFixture("/game/localized-backpack-live-20261019.png");
+        List<OcrLine> counts = readRapidOcrFixture(
+                "/game/localized-backpack-live-20261019-counts-rapidocr.csv");
+        LegacyCoordinateMapper mapper = new LegacyCoordinateMapper(720, 1280,
+                screen.getWidth(), screen.getHeight());
+        Globals globals = JsePlatform.standardGlobals();
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.ZERO; }
+        });
+        globals.set("findMultiColor", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return findMultiColor(screen, mapper, args); }
+        });
+        globals.set("tomocrtextall", LegacyLuaCompat.createTomocrTextAll(args ->
+                readObservedOcrLines(counts, mapper, args)));
+        VarArgFunction noOp = new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return LuaValue.NONE; }
+        };
+        globals.set("sleep", noOp);
+        globals.set("sleep2", noOp);
+        globals.set("hideToast", noOp);
+        globals.set("toast", noOp);
+        globals.set("print", noOp);
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot.resolve(module), module);
+        }
+
+        LuaFunction identify = globals.get("检测背包_识别红蓝数量_识别红蓝").checkfunction();
+        assertEquals("The localized live screenshot's blue potion must match the recovered pixel signature",
+                "小蓝", identify.invoke(LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(812),
+                        LuaValue.valueOf(149), LuaValue.valueOf(880), LuaValue.valueOf(221)})).tojstring());
+        Varargs inventoryRead = globals.get("检测背包_识别红蓝数量").checkfunction().invoke();
+        assertEquals("RapidOCR on the live localized screenshot observes one blue potion",
+                "1", inventoryRead.arg1().get("小蓝").tojstring());
+        assertTrue("The observed count is numeric and must be accepted by the supply scanner",
+                inventoryRead.arg(2).toboolean());
+        LuaTable config = new LuaTable();
+        config.set("出售全部红", LuaValue.valueOf("false"));
+        config.set("出售全部蓝", LuaValue.valueOf("false"));
+        config.set("购买小红", LuaValue.valueOf("false"));
+        config.set("购买小蓝", LuaValue.valueOf("true"));
+        config.set("蓝的数量低于", LuaValue.valueOf("3"));
+        config.set("红的数量低于", LuaValue.valueOf("3"));
+        globals.set("界面数据", config);
+        globals.set("买了一次红", LuaValue.FALSE);
+        globals.set("买了一次蓝", LuaValue.FALSE);
+        Varargs supplyDecision = globals.get("检测背包_判断是否去卖或者买药").checkfunction().invoke();
+        assertEquals("The real localized screenshot must select blue replenishment at stock 1/3",
+                "买蓝", supplyDecision.arg1().tojstring());
+        assertEquals("The supply decision must retain the observed blue count", "1",
+                supplyDecision.arg(2).tojstring());
+    }
+
+    @Test public void recoveredBackpackScreenshotDrivesBlueSupplyPurchaseWithoutSelling() throws Exception {
         Globals globals = JsePlatform.standardGlobals();
         BufferedImage screen = readFixture("/game/inventory-backpack.png");
+        List<OcrLine> recognizedCounts = readRapidOcrFixture("/game/inventory-backpack-counts-rapidocr.csv");
+        // False low-confidence digits in the same ROIs must not inflate the observed stock counts.
+        recognizedCounts.add(new OcrLine(1029.5d, 250.92d, "9", 0.849d));
+        recognizedCounts.add(new OcrLine(1118.08d, 250.58d, "9", 0.849d));
+        // The captured localized client has Vietnamese bag-tab labels outside these numeric ROIs.
+        // A full-screen OCR row must not leak that UI text into the stock count.
+        recognizedCounts.add(new OcrLine(900d, 151d, "Túi 1", 0.999d));
+        recognizedCounts.add(new OcrLine(1055d, 151d, "Túi 2", 0.999d));
         LegacyCoordinateMapper mapper = new LegacyCoordinateMapper(720, 1280,
                 screen.getWidth(), screen.getHeight());
         AtomicBoolean ocrReadable = new AtomicBoolean(true);
+        AtomicBoolean purchaseDialogOpen = new AtomicBoolean(false);
+        AtomicBoolean blueSupplyTabSelected = new AtomicBoolean(false);
+        AtomicInteger selectedPurchaseQuantity = new AtomicInteger(-1);
+        AtomicInteger confirmedPurchaseQuantity = new AtomicInteger(-1);
         List<String> purchaseClicks = new ArrayList<>();
         globals.set("tickCount", new ZeroArgFunction() {
             @Override public LuaValue call() { return LuaValue.ZERO; }
@@ -1350,11 +2615,8 @@ public final class RecoveredLuaTaskTest {
                 return findMultiColor(screen, mapper, args);
             }
         });
-        globals.set("tomocrtextall", new VarArgFunction() {
-            @Override public Varargs invoke(Varargs args) {
-                return LuaValue.valueOf(ocrReadable.get() ? readSingleBrightOne(screen, mapper, args) : "");
-            }
-        });
+        globals.set("tomocrtextall", LegacyLuaCompat.createTomocrTextAll(args ->
+                ocrReadable.get() ? readObservedOcrLines(recognizedCounts, mapper, args) : new LuaTable()));
         OneArgFunction noSleep = new OneArgFunction() {
             @Override public LuaValue call(LuaValue millis) { return LuaValue.NONE; }
         };
@@ -1390,6 +2652,9 @@ public final class RecoveredLuaTaskTest {
         LuaTable config = new LuaTable();
         config.set("出售全部红", LuaValue.valueOf("false"));
         config.set("出售全部蓝", LuaValue.valueOf("false"));
+        config.set("出售装备", LuaValue.valueOf("false"));
+        config.set("保护装备不出售", LuaValue.valueOf("true"));
+        config.set("出售装备品质上限", LuaValue.valueOf("0"));
         config.set("购买小红", LuaValue.valueOf("false"));
         config.set("购买小蓝", LuaValue.valueOf("true"));
         config.set("红的数量高于", LuaValue.valueOf("10"));
@@ -1397,34 +2662,65 @@ public final class RecoveredLuaTaskTest {
         config.set("红的数量低于", LuaValue.valueOf("5"));
         config.set("蓝的数量低于", LuaValue.valueOf("3"));
         globals.set("界面数据", config);
+        globals.set("大红数量", LuaValue.valueOf(inventory.get("大红").toint()));
+        globals.set("小红数量", LuaValue.valueOf(inventory.get("小红").toint()));
+        globals.set("大蓝数量", LuaValue.valueOf(inventory.get("大蓝").toint()));
+        globals.set("小蓝数量", LuaValue.valueOf(inventory.get("小蓝").toint()));
         globals.set("买了一次红", LuaValue.FALSE);
         globals.set("买了一次蓝", LuaValue.FALSE);
         config.set("购买蓝的数量", LuaValue.valueOf("3"));
+        LuaTable shopPage = new LuaTable();
         LuaTable buyConfirmation = new LuaTable();
         LuaTable templates = new LuaTable();
+        templates.set("商店页面", shopPage);
         templates.set("商店买货确定页面", buyConfirmation);
         globals.set("tz", templates);
         globals.set("找到", new OneArgFunction() {
             @Override public LuaValue call(LuaValue template) {
-                return LuaValue.valueOf(template.raweq(buyConfirmation));
+                if (template.raweq(shopPage)) return LuaValue.TRUE;
+                if (template.raweq(buyConfirmation)) return LuaValue.valueOf(purchaseDialogOpen.get());
+                return LuaValue.FALSE;
             }
         });
         globals.set("点击", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) {
-                purchaseClicks.add(args.arg1().tojstring());
+                String action = args.arg1().tojstring();
+                purchaseClicks.add(action);
+                if ("@@点蓝".equals(action)) blueSupplyTabSelected.set(true);
+                if ("@@点红".equals(action)) blueSupplyTabSelected.set(false);
+                if ("@@购买".equals(action) && blueSupplyTabSelected.get()) {
+                    selectedPurchaseQuantity.set(0);
+                    purchaseDialogOpen.set(true);
+                }
+                if ("@@购买+1".equals(action) && purchaseDialogOpen.get()) {
+                    selectedPurchaseQuantity.incrementAndGet();
+                }
+                if ("@@确定购买数量".equals(action) && purchaseDialogOpen.get()) {
+                    confirmedPurchaseQuantity.set(selectedPurchaseQuantity.get());
+                    purchaseDialogOpen.set(false);
+                }
                 return LuaValue.NONE;
             }
         });
         Varargs decision = globals.get("检测背包_判断是否去卖或者买药").checkfunction().invoke();
         assertEquals("买蓝", decision.arg1().tojstring());
         assertEquals("1", decision.arg(2).tojstring());
-        globals.get("去卖货_卖货_执行红蓝处理").checkfunction().call(decision.arg1());
+        globals.get("去卖货_卖货").checkfunction().call();
         assertTrue("The screenshot-driven decision should select the blue supply tab",
                 purchaseClicks.contains("@@点蓝"));
-        assertEquals("Configured quantity 3 must add two units after the first",
-                2, java.util.Collections.frequency(purchaseClicks, "@@购买+1"));
+        assertEquals("The observed confirmation starts at zero, so quantity 3 requires three increments",
+                3, java.util.Collections.frequency(purchaseClicks, "@@购买+1"));
         assertTrue("The purchase flow must submit the configured quantity",
                 purchaseClicks.contains("@@确定购买数量"));
+        assertEquals("The test merchant should start at zero and confirm the exact configured quantity",
+                3, confirmedPurchaseQuantity.get());
+        assertTrue("The confirmation should close the dialog before the seller loop continues",
+                !purchaseDialogOpen.get());
+        assertTrue("The merchant workflow should finish the routine repair step after the purchase",
+                purchaseClicks.contains("@@修理1") && purchaseClicks.contains("@@修理2"));
+        assertTrue("The default-protected run must never sell equipment or ordinary items",
+                !purchaseClicks.contains("@@卖1") && !purchaseClicks.contains("@@出售特殊物品")
+                        && !purchaseClicks.contains("@@确定卖掉"));
 
         ocrReadable.set(false);
         Varargs unreadableDecision = globals.get("检测背包_判断是否去卖或者买药").checkfunction().invoke();
@@ -1475,23 +2771,70 @@ public final class RecoveredLuaTaskTest {
                 parts.length == 2 ? Integer.parseInt(parts[1].trim(), 16) : 0};
     }
 
-    private static String readSingleBrightOne(BufferedImage image, LegacyCoordinateMapper mapper, Varargs args) {
-        int left = Math.max(0, mapper.left(args.arg(1).todouble()));
-        int top = Math.max(0, mapper.top(args.arg(2).todouble()));
-        int right = Math.min(image.getWidth() - 1, mapper.right(args.arg(3).todouble()));
-        int bottom = Math.min(image.getHeight() - 1, mapper.bottom(args.arg(4).todouble()));
-        int minX = right, minY = bottom, maxX = left, maxY = top, hits = 0;
-        for (int y = top; y <= bottom; y++) for (int x = left; x <= right; x++) {
-            int color = image.getRGB(x, y);
-            int red = (color >> 16) & 255, green = (color >> 8) & 255, blue = color & 255;
-            if (Math.min(red, Math.min(green, blue)) >= 200
-                    && Math.max(red, Math.max(green, blue)) - Math.min(red, Math.min(green, blue)) <= 50) {
-                minX = Math.min(minX, x); minY = Math.min(minY, y);
-                maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); hits++;
+    private static List<OcrLine> readRapidOcrFixture(String resourceName) throws IOException {
+        InputStream input = RecoveredLuaTaskTest.class.getResourceAsStream(resourceName);
+        if (input == null) throw new IOException("Missing observed OCR fixture " + resourceName);
+        List<OcrLine> lines = new ArrayList<>();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))) {
+            String line = reader.readLine(); // Header.
+            while ((line = reader.readLine()) != null) {
+                if (line.trim().isEmpty()) continue;
+                String[] fields = line.split(",", -1);
+                if (fields.length < 4) throw new IOException("Malformed RapidOCR fixture row: " + line);
+                lines.add(new OcrLine(Double.parseDouble(fields[0]), Double.parseDouble(fields[1]),
+                        fields[2], Double.parseDouble(fields[3])));
             }
         }
-        int width = maxX - minX + 1, height = maxY - minY + 1;
-        return hits >= 10 && width <= 6 && height >= 10 && height >= 2 * width ? "1" : "";
+        return lines;
+    }
+
+    private static List<OcrLine> readMerchantCatalogOcrFixture(String resourceName) throws IOException {
+        InputStream input = RecoveredLuaTaskTest.class.getResourceAsStream(resourceName);
+        if (input == null) throw new IOException("Missing observed merchant OCR fixture " + resourceName);
+        List<OcrLine> lines = new ArrayList<>();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))) {
+            String line = reader.readLine(); // Header: text,raw_center_x,raw_center_y,confidence.
+            while ((line = reader.readLine()) != null) {
+                if (line.trim().isEmpty()) continue;
+                String[] fields = line.split(",", -1);
+                if (fields.length < 4) throw new IOException("Malformed merchant OCR fixture row: " + line);
+                lines.add(new OcrLine(Double.parseDouble(fields[1]), Double.parseDouble(fields[2]),
+                        fields[0], Double.parseDouble(fields[3])));
+            }
+        }
+        return lines;
+    }
+
+    private static LuaTable readObservedOcrLines(List<OcrLine> lines, LegacyCoordinateMapper mapper, Varargs args) {
+        int left = Math.max(0, mapper.left(args.arg(1).todouble()));
+        int top = Math.max(0, mapper.top(args.arg(2).todouble()));
+        int right = mapper.edgeRight(args.arg(3).todouble());
+        int bottom = mapper.edgeBottom(args.arg(4).todouble());
+        LuaTable observed = new LuaTable();
+        int index = 1;
+        for (OcrLine line : lines) {
+            if (line.centerX < left || line.centerX > right || line.centerY < top || line.centerY > bottom) continue;
+            LuaTable row = new LuaTable();
+            row.set("words", LuaValue.valueOf(line.text));
+            row.set("text", LuaValue.valueOf(line.text));
+            row.set("x", LuaValue.valueOf(line.centerX));
+            row.set("y", LuaValue.valueOf(line.centerY));
+            row.set("score", LuaValue.valueOf(line.confidence));
+            row.set("success", LuaValue.TRUE);
+            observed.set(index++, row);
+        }
+        return observed;
+    }
+
+    private static final class OcrLine {
+        final double centerX, centerY, confidence;
+        final String text;
+        OcrLine(double centerX, double centerY, String text, double confidence) {
+            this.centerX = centerX;
+            this.centerY = centerY;
+            this.text = text;
+            this.confidence = confidence;
+        }
     }
 
     private static boolean colorMatches(int actual, int expected, int tolerance) {
@@ -1511,32 +2854,12 @@ public final class RecoveredLuaTaskTest {
         return scaled;
     }
 
-    private static boolean imageMatches(BufferedImage screen, BufferedImage template,
-                                        int left, int top, int right, int bottom,
-                                        String maskHex, double threshold) {
-        int tw = template.getWidth(), th = template.getHeight();
-        if (right - left < tw || bottom - top < th) return false;
-        int mask = Integer.parseInt(maskHex, 16) & 0x00ffffff;
-        int sampleStep = Math.max(1, Math.min(3, Math.max(tw, th) / 18));
-        int valid = 0;
-        for (int y = 0; y < th; y += sampleStep) for (int x = 0; x < tw; x += sampleStep) {
-            if ((template.getRGB(x, y) & 0x00ffffff) != mask) valid++;
-        }
-        int maxX = right - tw, maxY = bottom - th;
-        for (int y = top; y <= maxY; y++) for (int x = left; x <= maxX; x++) {
-            int hits = 0;
-            for (int ty = 0; ty < th; ty += sampleStep) for (int tx = 0; tx < tw; tx += sampleStep) {
-                int expected = template.getRGB(tx, ty) & 0x00ffffff;
-                if (expected == mask) continue;
-                int actual = screen.getRGB(x + tx, y + ty) & 0x00ffffff;
-                int delta = Math.abs(((expected >> 16) & 255) - ((actual >> 16) & 255))
-                        + Math.abs(((expected >> 8) & 255) - ((actual >> 8) & 255))
-                        + Math.abs((expected & 255) - (actual & 255));
-                if (delta <= 42) hits++;
-            }
-            if (valid > 0 && (double) hits / valid >= threshold) return true;
-        }
-        return false;
+    private static LegacyImageMatcher.Pixels imagePixels(BufferedImage image) {
+        return new LegacyImageMatcher.Pixels() {
+            @Override public int width() { return image.getWidth(); }
+            @Override public int height() { return image.getHeight(); }
+            @Override public int getPixel(int x, int y) { return image.getRGB(x, y); }
+        };
     }
 
     private static Path scriptRoot() throws IOException {

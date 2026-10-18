@@ -3,6 +3,8 @@ package com.example.pakredirect;
 import org.junit.Test;
 import org.luaj.vm2.LuaTable;
 import org.luaj.vm2.LuaValue;
+import org.luaj.vm2.Varargs;
+import org.luaj.vm2.lib.VarArgFunction;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -81,5 +83,33 @@ public class LegacyLuaCompatTest {
         assertEquals(73, found.get("y").toint());
         assertNull(LegacyLuaCompat.findOcrTextMatch(lines, "完全不存在", 0.8d));
         assertNull(LegacyLuaCompat.findOcrTextMatch(lines, "允许进入", 0.99d));
+    }
+
+    @Test public void tomocrtextallOmitsLowConfidenceRowsAndKeepsBoundaryMatches() {
+        LuaTable lines = new LuaTable();
+        LuaTable weak = new LuaTable();
+        weak.set("words", LuaValue.valueOf("8"));
+        weak.set("score", LuaValue.valueOf(0.849d));
+        lines.set(1, weak);
+        LuaTable boundary = new LuaTable();
+        boundary.set("text", LuaValue.valueOf("1"));
+        boundary.set("score", LuaValue.valueOf(0.85d));
+        lines.set(2, boundary);
+        LuaTable accepted = new LuaTable();
+        accepted.set("words", LuaValue.valueOf("9"));
+        accepted.set("confidence", LuaValue.valueOf(0.95d));
+        lines.set(3, accepted);
+        LuaTable unknown = new LuaTable();
+        unknown.set("words", LuaValue.valueOf("7"));
+        lines.set(4, unknown);
+
+        VarArgFunction api = LegacyLuaCompat.createTomocrTextAll(args -> lines);
+        Varargs defaultThreshold = api.invoke(LuaValue.varargsOf(new LuaValue[]{LuaValue.ZERO,
+                LuaValue.ZERO, LuaValue.ZERO, LuaValue.ZERO}));
+        Varargs callerThreshold = api.invoke(LuaValue.varargsOf(new LuaValue[]{LuaValue.ZERO,
+                LuaValue.ZERO, LuaValue.ZERO, LuaValue.ZERO, LuaValue.valueOf(0.99d)}));
+        assertEquals("19", defaultThreshold.tojstring());
+        assertEquals("", callerThreshold.tojstring());
+        assertEquals("", LegacyLuaCompat.concatenateConfidentOcrText(null, 0.85d));
     }
 }

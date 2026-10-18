@@ -74,6 +74,40 @@ public final class RecoveredLuaStartupTest {
         assertTrue("Recovered data module must load", loadedModules.contains("通用数据"));
         assertTrue("Recovered game logic module must load", loadedModules.contains("挂机模式"));
         assertTrue("Main loop must start after all script configuration is initialized", monitorStarted.get());
+        assertTrue("The legacy script form must keep its Vietnamese map name compatibility",
+                "sùng thành".equals(globals.get("挂机点地图").tojstring()));
+    }
+
+    @Test public void ryluxWorkbenchKeepsChineseMapNamesForLocalizedGameSearch() throws Exception {
+        Path assets = scriptAssets();
+        Globals globals = JsePlatform.standardGlobals();
+        AtomicBoolean monitorStarted = new AtomicBoolean();
+        AtomicBoolean executeWorker = new AtomicBoolean();
+        AtomicReference<org.luaj.vm2.LuaFunction> workerFunction = new AtomicReference<>();
+        AtomicLong ticks = new AtomicLong();
+        AtomicLong workerSleeps = new AtomicLong();
+        List<String> loadedModules = new ArrayList<>();
+        installHostStubs(globals, monitorStarted, executeWorker, workerFunction, ticks, workerSleeps);
+        installRequire(globals, assets, loadedModules, monitorStarted);
+
+        LuaTable config = new LuaTable();
+        LegacyLuaConfig.defaults().forEach((key, value) -> config.set(key, LuaValue.valueOf(value)));
+        globals.set("界面数据", config);
+        LegacyLuaConfig.installWorkbenchConfigFlag(globals);
+
+        try {
+            loadLua(globals, assets, "脚本/封神榜.lua");
+            fail("The probe should stop only after entering the main monitor loop");
+        } catch (LuaError expected) {
+            assertTrue("The localized workbench entry should reach the monitor loop, got: "
+                            + expected.getMessage(),
+                    expected.getMessage().contains(REACHED_MONITOR));
+        }
+
+        assertTrue("The RYLUX workbench must pass the Chinese localized map name to route logic",
+                "崇城野外".equals(globals.get("挂机点地图").tojstring()));
+        assertTrue("The RYLUX workbench must pass the Chinese localized map name to seller logic",
+                "崇城野外".equals(globals.get("卖货地图").tojstring()));
     }
 
     private static void installHostStubs(Globals globals, AtomicBoolean monitorStarted,

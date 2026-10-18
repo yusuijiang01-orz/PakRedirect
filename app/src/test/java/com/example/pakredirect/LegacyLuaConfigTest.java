@@ -37,5 +37,16 @@ public final class LegacyLuaConfigTest {
         assertEquals("false", LegacyLuaConfig.defaults().get("出售装备"));
         assertEquals("0", LegacyLuaConfig.defaults().get("出售装备品质上限"));
         assertEquals("true", LegacyLuaConfig.defaults().get("出售装备二次确认"));
+        assertEquals("false", LegacyLuaConfig.defaults().get("允许出售物品"));
+        assertEquals("", LegacyLuaConfig.defaults().get("出售物品清单"));
+        assertEquals("10", LegacyLuaConfig.defaults().get("出售物品数量阈值"));
+        assertEquals("false", LegacyLuaConfig.defaults().get("允许购买物品"));
+        assertEquals("", LegacyLuaConfig.defaults().get("购买物品清单"));
+        assertEquals("10", LegacyLuaConfig.defaults().get("购买物品数量阈值"));
+        assertEquals("10", LegacyLuaConfig.defaults().get("每次购买数量"));
+        assertEquals("false", LegacyLuaConfig.defaults().get("自动使用红药"));
+        assertEquals("false", LegacyLuaConfig.defaults().get("自动使用蓝药"));
+        assertArrayEquals(new String[]{"true", "false", "false"}, LegacyLuaConfig.blueFilterFlags(
+                LegacyLuaConfig.defaults().get("蓝条筛选模式")));
     }
 }

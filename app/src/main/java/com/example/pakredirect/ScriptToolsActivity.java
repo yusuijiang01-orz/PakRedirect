@@ -55,26 +55,18 @@ public final class ScriptToolsActivity extends Activity {
     private static final String RUNTIME_DIAGNOSTICS = "script_runtime_diagnostics";
     private static final String GAME = "com.tepaylink.tamgioiphantranhmobile";
     private static final String SCRIPT = "脚本/封神榜.lua";
-    private static final String[] MODULES = {
+    private static final String[] REQUIRED_ASSETS = {
             SCRIPT, "脚本/挂机模式.lua", "脚本/通用数据.lua", "脚本/中控.lua",
             "脚本/tomocr.lua", "脚本/TURING_VIP.lua", "脚本/w.lua",
-            "插件/opPlugin.lua", "插件/自定义库.lua"
+            "插件/opPlugin.lua", "插件/自定义库.lua", "脚本/空格子0.png"
     };
-    // 中越大地图数组 in the reconstructed main script, in its original order.
+    // Recovered map order, shown using the Chinese names used by the localized client.
     private static final String[] MAPS = {
-            "崇城野外 · sùng thành", "北海 · bắc hải", "燕山 · Yến sơn",
-            "西昆仑 · tây côn lôn", "昆仑山 · chân núi côn lôn", "首阳山 · dương sơn",
-            "游魂关 · du hồn", "苗疆 · miêu cương", "巨鹿 · cự lộc",
-            "潼关 · đồng quan", "孟津 · mạnh tân", "城塘关 · trần đường",
-            "荒漠 · hoang mạc", "荒漠2 · thổ thành", "荒漠3 · phong thần",
-            "荒漠4 · lục châu", "荒漠5 · sa mạc chết", "海1 · thủy vực",
-            "海2 · long cung", "海3 · hải c", "海4 · Long Vực", "海5 · Long Uyên",
-            "火1 · Hiên Viên tầng 1", "火2 · Hiên Viên tầng 2", "火3 · Hiên Viên tầng 3",
-            "火4 · Hiên Viên tầng 4", "火5 · Hiên Viên tầng 5", "冰1 · Ngọc Tuyền",
-            "冰2 · Tuyết Cốc", "冰3 · Đại Phong", "冰4 · Đại Trạch", "冰5 · Băng Xuyên",
-            "捆仙宫1 · Khổn Tiên tầng 1", "捆仙宫2 · Khổn Tiên tầng 2",
-            "捆仙宫3 · Khổn Tiên tầng 3", "捆仙宫4 · Khổn Tiên tầng 4",
-            "捆仙宫5 · Khổn Tiên tầng 5", "碧游宫1 · Bích Du tầng 1"
+            "崇城野外", "北海", "燕山", "西昆仑", "昆仑山", "首阳山", "游魂关", "苗疆", "巨鹿",
+            "潼关", "孟津", "城塘关", "荒漠", "荒漠2", "荒漠3", "荒漠4", "荒漠5",
+            "海1", "海2", "海3", "海4", "海5", "火1", "火2", "火3", "火4", "火5",
+            "冰1", "冰2", "冰3", "冰4", "冰5", "捆仙宫1", "捆仙宫2", "捆仙宫3",
+            "捆仙宫4", "捆仙宫5", "碧游宫1"
     };
     private static final int BG = Color.rgb(17, 19, 24);
     private static final int CARD = Color.rgb(28, 32, 40);
@@ -221,12 +213,9 @@ public final class ScriptToolsActivity extends Activity {
         Button start = button("配置方案并启动", BLUE);
         start.setOnClickListener(v -> confirmAndStart());
         addButton(run, start);
-        LinearLayout.LayoutParams runLp = new LinearLayout.LayoutParams(-1, -2);
-        runLp.topMargin = dp(14);
-        ((LinearLayout) tabPages.get(0).getChildAt(0)).addView(run, runLp);
 
         root = (LinearLayout) tabPages.get(1).getChildAt(0);
-        LinearLayout route = section("挂机与路线", "地图沿用回收脚本中的双语清单。");
+        LinearLayout route = section("挂机与路线", "面向汉化版输入中文地图名，也支持搜索越南语旧名。");
         addMap(route, "挂机点地图");
         addNumber(route, "挂机点x", "挂机点 X 坐标", "100", "坐标", 0, 99999);
         addNumber(route, "挂机点y", "挂机点 Y 坐标", "200", "坐标", 0, 99999);
@@ -254,7 +243,7 @@ public final class ScriptToolsActivity extends Activity {
         addNumber(supplies, "购买蓝的数量", "每次购买蓝药", "10", "个", 1, 99999);
 
         root = (LinearLayout) tabPages.get(3).getChildAt(0);
-        LinearLayout inventory = section("背包与装备", "装备保护是工作台安全偏好；未来适配器接入前无法保证回收脚本遵守。");
+        LinearLayout inventory = section("背包与装备", "装备出售默认关闭；只有显式启用并设置出售品质后才进入旧脚本出售流程，设备端仍待校准。");
         addSwitch(inventory, "保护装备不出售", "保护装备不出售（建议开启）", true);
         addSwitch(inventory, "检测修理装备", "检测并修理装备", true);
         addNumber(inventory, "背包保留重量", "保留背包重量", "3", "重量", 0, 99999);
@@ -279,7 +268,7 @@ public final class ScriptToolsActivity extends Activity {
         addNumber(party, "检测是否有队伍频率秒", "检测队伍间隔", "180", "秒", 1, 86400);
 
         root = (LinearLayout) tabPages.get(5).getChildAt(0);
-        LinearLayout trade = section("交易", "出售保护默认关闭；启用装备出售时仍需保留二次确认。");
+        LinearLayout trade = section("交易", "普通物品须同时命中出售开关、名称清单和数量阈值；OCR 不确定时保留物品。商店页仍需设备校准。");
         addMap(trade, "卖货地图");
         addSwitch(trade, "允许出售物品", "允许出售普通物品", false);
         addText(trade, "出售物品清单", "出售物品名称（每行一个）", true);
@@ -333,13 +322,7 @@ public final class ScriptToolsActivity extends Activity {
         accessibilityState.setPadding(0, dp(10), 0, 0);
         advanced.addView(accessibilityState);
         Button enableAccessibility = button("打开无障碍服务设置", SOFT);
-        enableAccessibility.setOnClickListener(v -> {
-            try {
-                startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
-            } catch (RuntimeException error) {
-                Toast.makeText(this, "无法打开系统无障碍设置", Toast.LENGTH_SHORT).show();
-            }
-        });
+        enableAccessibility.setOnClickListener(v -> openAccessibilitySettings());
         addButton(advanced, enableAccessibility);
         addChoice(advanced, "引擎模式", "引擎模式（首次运行选择）",
                 new String[]{"手动截图与无障碍", "Root", "无障碍服务"}, 0);
@@ -419,7 +402,7 @@ public final class ScriptToolsActivity extends Activity {
         panel.setPadding(dp(16), dp(10), dp(16), 0);
         EditText search = new EditText(this);
         search.setSingleLine(true);
-        search.setHint("搜索中文或越文地图名");
+        search.setHint("搜索中文地图名或越南语旧名");
         search.setTextColor(TEXT);
         search.setHintTextColor(MUTED);
         panel.addView(search);
@@ -533,12 +516,24 @@ public final class ScriptToolsActivity extends Activity {
 
     private String accessibilityStatus() {
         if (Build.VERSION.SDK_INT < 30) return "系统版本不支持无障碍截图（需要 Android 11+）";
+        return isAccessibilityServiceEnabled() ? "游戏输入服务：已启用" : "游戏输入服务：未启用";
+    }
+
+    private boolean isAccessibilityServiceEnabled() {
+        if (Build.VERSION.SDK_INT < 30) return false;
         String enabled = Settings.Secure.getString(getContentResolver(),
                 Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
         String expected = new ComponentName(this, ScriptGameAdapter.class).flattenToString();
-        boolean active = enabled != null && enabled.toLowerCase(Locale.ROOT)
+        return enabled != null && enabled.toLowerCase(Locale.ROOT)
                 .contains(expected.toLowerCase(Locale.ROOT));
-        return active ? "游戏输入服务：已启用" : "游戏输入服务：未启用";
+    }
+
+    private void openAccessibilitySettings() {
+        try {
+            startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+        } catch (RuntimeException error) {
+            Toast.makeText(this, "无法打开系统无障碍设置", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private String gameStatus() {
@@ -577,14 +572,18 @@ public final class ScriptToolsActivity extends Activity {
                 + "\n交易物品清单：出售 " + values.optString("出售物品清单", "（未设置）").replace("\n", "、")
                 + "；购买 " + values.optString("购买物品清单", "（未设置）").replace("\n", "、")
                 + "\n\n游戏检查：" + gameStatus()
-                + "\n模块检查：" + (assetsComplete() ? "9/9 已打包" : "模块不完整")
+                + "\n脚本与模板资源：" + (assetsComplete()
+                        ? REQUIRED_ASSETS.length + "/" + REQUIRED_ASSETS.length + " 已打包" : "资源不完整")
                 + "\n配置检查：" + configurationIssues()
                 + "\nLua 运行宿主：LuaJ 已接入\n游戏输入适配器：" + accessibilityStatus()
                 + "\n兼容说明：OCR 使用 ML Kit 替代旧字库；系统命令仅开放 /proc/uptime；文本输入依赖游戏提供可访问输入框"
                 + "\n脚本兼容阻塞项：" + scriptCompatibilityBlockers()
                 + "\n悬浮窗权限：" + (Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(this) ? "已就绪" : "未开启")
                 + "\n\n检查通过后才会开放开始操作。";
-        showRyluxDialog("运行前检查", summary, null, "知道了", null);
+        boolean canOpenAccessibilitySettings = Build.VERSION.SDK_INT >= 30 && !isAccessibilityServiceEnabled();
+        showRyluxDialog("运行前检查", summary, null,
+                canOpenAccessibilitySettings ? "打开无障碍设置" : "知道了",
+                canOpenAccessibilitySettings ? this::openAccessibilitySettings : null);
     }
 
     private void confirmAndStart() {
@@ -595,7 +594,7 @@ public final class ScriptToolsActivity extends Activity {
             showPreflight();
             return;
         }
-        String summary = "方案：" + profileName + "\n目标：封神榜（越南版）\n运行模式：无障碍截图与触控"
+        String summary = "方案：" + profileName + "\n目标：封神榜（汉化版）\n运行模式：无障碍截图与触控"
                 + "\n路线：" + mapName(values.optInt("挂机点地图", 0))
                 + "（" + values.optString("挂机点x", "100") + ", " + values.optString("挂机点y", "200") + "）"
                 + "\n自动战斗：" + onOff("自动战斗")
@@ -721,7 +720,7 @@ public final class ScriptToolsActivity extends Activity {
     }
 
     private boolean assetsComplete() {
-        for (String path : MODULES) {
+        for (String path : REQUIRED_ASSETS) {
             try (InputStream ignored = getAssets().open("script_modules/" + path)) { }
             catch (IOException error) { return false; }
         }

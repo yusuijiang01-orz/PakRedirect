@@ -347,7 +347,11 @@ L2_1 = ","
 L0_1 = L0_1(L1_1, L2_1)
 _ENV["卖货地图"] = L0_1
 L0_1 = _ENV["卖货地图"]
-L0_1 = L0_1[2]
+if RYLUX_WORKBENCH_CONFIG then
+  L0_1 = L0_1[1]
+else
+  L0_1 = L0_1[2]
+end
 _ENV["卖货地图"] = L0_1
 L0_1 = _ENV["中越大地图数组"]
 L1_1 = tonumber
@@ -363,7 +367,11 @@ L2_1 = ","
 L0_1 = L0_1(L1_1, L2_1)
 _ENV["挂机点地图"] = L0_1
 L0_1 = _ENV["挂机点地图"]
-L0_1 = L0_1[2]
+if RYLUX_WORKBENCH_CONFIG then
+  L0_1 = L0_1[1]
+else
+  L0_1 = L0_1[2]
+end
 _ENV["挂机点地图"] = L0_1
 L0_1 = tonumber
 L1_1 = _ENV["界面数据"]

@@ -13,6 +13,7 @@ import org.json.JSONObject;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeoutException;
 
 /** Explicitly started foreground host for the recovered Lua script. */
 public final class ScriptRuntimeService extends Service {
@@ -90,13 +91,7 @@ public final class ScriptRuntimeService extends Service {
             LegacyLuaRuntime runtime = new LegacyLuaRuntime(this, control, config,
                     this::publish, this::saveFailure);
             try {
-                // BlackBoxCore starts the sandbox proxy asynchronously. Let that
-                // activity become foreground before the first screenshot or touch.
-                long launchReadyAt = System.currentTimeMillis() + 1_200L;
-                while (System.currentTimeMillis() < launchReadyAt) {
-                    control.checkpoint();
-                    Thread.sleep(100L);
-                }
+                awaitTargetGameForeground();
                 verifyStartupDisplayCapture();
                 runtime.run();
                 control.complete();
@@ -117,6 +112,11 @@ public final class ScriptRuntimeService extends Service {
                     if (control.fail(failure)) {
                         saveFailure(failure);
                         publish("启动失败：显示截图检查失败：" + rootMessage(failure.getCause()));
+                    }
+                } else if (failure instanceof StartupTargetForegroundException) {
+                    if (control.fail(failure)) {
+                        saveFailure(failure);
+                        publish("启动失败：" + failure.getMessage());
                     }
                 } else {
                     if (control.fail(failure)) reportFailure(failure);
@@ -141,10 +141,26 @@ public final class ScriptRuntimeService extends Service {
         }
     }
 
+    private void awaitTargetGameForeground() throws Exception {
+        try {
+            ScriptForegroundGate.await(
+                    () -> ScriptGameAdapter.TARGET_GAME_PACKAGE.equals(ScriptGameAdapter.foregroundPackage()),
+                    control::checkpoint,
+                    15_000L,
+                    "15 秒内未检测到沙箱中的汉化版封神榜处于前台；已阻止脚本截图和触控");
+        } catch (TimeoutException timeout) {
+            throw new StartupTargetForegroundException(timeout.getMessage(), timeout);
+        }
+    }
+
     private static final class StartupDisplayCaptureException extends Exception {
         StartupDisplayCaptureException(Throwable cause) {
             super("启动前显示截图检查失败", cause);
         }
+    }
+
+    private static final class StartupTargetForegroundException extends Exception {
+        StartupTargetForegroundException(String message, Throwable cause) { super(message, cause); }
     }
 
     private void publish(String message) {

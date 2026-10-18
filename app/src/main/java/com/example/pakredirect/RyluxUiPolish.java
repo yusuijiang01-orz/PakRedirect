@@ -294,7 +294,7 @@ public final class RyluxUiPolish {
         caption.setOrientation(LinearLayout.VERTICAL);
         caption.setPadding(dp(activity, 22), 0, dp(activity, 22), dp(activity, 23));
 
-        TextView title = label(activity, "封神榜（越南版）", 29, Color.rgb(246, 224, 186), true);
+        TextView title = label(activity, "封神榜（汉化版）", 29, Color.rgb(246, 224, 186), true);
         title.setShadowLayer(dp(activity, 8), 0, dp(activity, 2), Color.argb(190, 0, 0, 0));
         caption.addView(title);
 

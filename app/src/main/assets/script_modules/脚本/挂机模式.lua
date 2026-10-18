@@ -366,11 +366,16 @@ function L0_1(要做的处理, 当前处理的药数量)
     _ENV["点击"]("@@购买", 927, 351, 1000)
   end
   if _ENV["找到"](tz["商店买货确定页面"]) then
-    for i = 1, tonumber(购买数量) - 1 do
+    -- The captured purchase dialog opens with quantity 0, so reaching N
+    -- requires N increments before the final confirmation.
+    for i = 1, tonumber(购买数量) do
       _ENV["点击"]("@@购买+1", 773, 356, 500)
     end
     _ENV["点击"]("@@确定购买数量", 545, 495, 1000)
+    return true
   end
+  toast("购买确认界面未出现，跳过购买")
+  return false
 end
 
 _ENV["去商店_卖货_购买红蓝"] = L0_1
@@ -603,6 +608,324 @@ end
 
 _ENV["去卖货_卖货_执行红蓝处理"] = L0_1
 
+function L0_1(a, b, c, d)
+  local ok, rows = pcall(tomocrtexttable, a, b, c, d)
+  if not ok or type(rows) ~= "table" then
+    return nil
+  end
+  local bestValue = nil
+  local bestScore = 0
+  local conflict = false
+  for i = 1, #rows do
+    local row = rows[i]
+    local text = tostring(row["words"] or row["text"] or "")
+    text = string.gsub(text, "%s+", "")
+    local value = tonumber(text)
+    local score = tonumber(row["score"]) or tonumber(row["confidence"]) or 0
+    if value ~= nil and value >= 0 and score >= 0.8 then
+      if score > bestScore then
+        bestValue = value
+        bestScore = score
+        conflict = false
+      elseif score == bestScore and bestValue ~= value then
+        conflict = true
+      end
+    end
+  end
+  if conflict then
+    return nil
+  end
+  return bestValue
+end
+
+_ENV["去卖货_识别物品数量"] = L0_1
+
+function L0_1(a, b, c, d, 最低置信度)
+  a, b, c, d = a or 620, b or 80, c or 780, d or 135
+  最低置信度 = tonumber(最低置信度) or 0.8
+  local ok, rows = pcall(tomocrtexttable, a, b, c, d)
+  if not ok or type(rows) ~= "table" then
+    return ""
+  end
+  local bestName = ""
+  local bestScore = 0
+  local ambiguous = false
+  for i = 1, #rows do
+    local row = rows[i]
+    local name = tostring(row["words"] or row["text"] or "")
+    name = string.gsub(name, "^%s*(.-)%s*$", "%1")
+    local score = tonumber(row["score"]) or tonumber(row["confidence"]) or 0
+    if name ~= "" and score >= 最低置信度 then
+      if score > bestScore then
+        bestName = name
+        bestScore = score
+        ambiguous = false
+      elseif score == bestScore and name ~= bestName then
+        ambiguous = true
+      end
+    end
+  end
+  return ambiguous and "" or bestName
+end
+
+_ENV["去卖货_识别物品名称"] = L0_1
+
+function L0_1(物品名称, 当前数量)
+  local 配置 = _ENV["界面数据"] or {}
+  if 配置["允许出售物品"] ~= "true" then
+    return false, "出售物品未启用"
+  end
+  local 名称 = tostring(物品名称 or "")
+  名称 = string.gsub(名称, "^%s*(.-)%s*$", "%1")
+  if 名称 == "" then
+    return false, "无法可靠识别物品名称"
+  end
+  local 清单 = tostring(配置["出售物品清单"] or "")
+  清单 = string.gsub(清单, "\r\n", "\n")
+  清单 = string.gsub(清单, "\r", "\n")
+  清单 = string.gsub(清单, ",", "\n")
+  清单 = string.gsub(清单, "，", "\n")
+  清单 = string.gsub(清单, ";", "\n")
+  清单 = string.gsub(清单, "；", "\n")
+  local 在清单中 = false
+  for 清单名称 in string.gmatch(清单 .. "\n", "(.-)\n") do
+    清单名称 = string.gsub(清单名称, "^%s*(.-)%s*$", "%1")
+    if 清单名称 ~= "" and 清单名称 == 名称 then
+      在清单中 = true
+      break
+    end
+  end
+  if not 在清单中 then
+    return false, "物品不在出售清单中"
+  end
+  local 数量 = tonumber(当前数量)
+  if 数量 == nil or 数量 < 0 then
+    return false, "无法可靠识别物品数量"
+  end
+  local 阈值 = tonumber(配置["出售物品数量阈值"])
+  if 阈值 == nil or 阈值 < 0 then
+    return false, "出售数量阈值无效"
+  end
+  if 数量 <= 阈值 then
+    return false, "物品数量未超过出售阈值"
+  end
+  return true, "符合出售规则"
+end
+
+_ENV["去卖货_判断普通物品出售资格"] = L0_1
+
+function L0_1(物品名称, 当前数量)
+  local 配置 = _ENV["界面数据"] or {}
+  if 配置["允许购买物品"] ~= "true" then
+    return false, 0, "购买物品未启用"
+  end
+  local 名称 = tostring(物品名称 or "")
+  名称 = string.gsub(名称, "^%s*(.-)%s*$", "%1")
+  if 名称 == "" then
+    return false, 0, "无法可靠识别物品名称"
+  end
+  local 清单 = tostring(配置["购买物品清单"] or "")
+  清单 = string.gsub(清单, "\r\n", "\n")
+  清单 = string.gsub(清单, "\r", "\n")
+  清单 = string.gsub(清单, ",", "\n")
+  清单 = string.gsub(清单, "，", "\n")
+  清单 = string.gsub(清单, ";", "\n")
+  清单 = string.gsub(清单, "；", "\n")
+  local 在清单中 = false
+  for 清单名称 in string.gmatch(清单 .. "\n", "(.-)\n") do
+    清单名称 = string.gsub(清单名称, "^%s*(.-)%s*$", "%1")
+    if 清单名称 ~= "" and 清单名称 == 名称 then
+      在清单中 = true
+      break
+    end
+  end
+  if not 在清单中 then
+    return false, 0, "物品不在购买清单中"
+  end
+  local 数量 = tonumber(当前数量)
+  if 数量 == nil or 数量 < 0 or 数量 % 1 ~= 0 then
+    return false, 0, "无法可靠识别物品数量"
+  end
+  local 阈值 = tonumber(配置["购买物品数量阈值"])
+  if 阈值 == nil or 阈值 < 0 or 阈值 % 1 ~= 0 then
+    return false, 0, "购买数量阈值无效"
+  end
+  if 数量 >= 阈值 then
+    return false, 0, "物品数量已达到购买阈值"
+  end
+  local 每次购买数量 = tonumber(配置["每次购买数量"])
+  if 每次购买数量 == nil or 每次购买数量 < 1 or 每次购买数量 % 1 ~= 0 then
+    return false, 0, "每次购买数量无效"
+  end
+  return true, math.min(math.floor(每次购买数量), math.floor(阈值 - 数量)), "符合购买规则"
+end
+
+_ENV["去卖货_判断普通物品购买资格"] = L0_1
+
+function L0_1(清单文本)
+  local 结果 = {}
+  local 已加入 = {}
+  local 清单 = tostring(清单文本 or "")
+  清单 = string.gsub(清单, "\r\n", "\n")
+  清单 = string.gsub(清单, "\r", "\n")
+  清单 = string.gsub(清单, ",", "\n")
+  清单 = string.gsub(清单, "，", "\n")
+  清单 = string.gsub(清单, ";", "\n")
+  清单 = string.gsub(清单, "；", "\n")
+  for 名称 in string.gmatch(清单 .. "\n", "(.-)\n") do
+    名称 = string.gsub(名称, "^%s*(.-)%s*$", "%1")
+    if 名称 ~= "" and not 已加入[名称] then
+      table.insert(结果, 名称)
+      已加入[名称] = true
+    end
+  end
+  return 结果
+end
+
+_ENV["去卖货_解析购买物品清单"] = L0_1
+
+local 商品名称别名 = {
+  ["天权冠"] = {"Thiên Quyền Quán", "Thiên Quyn Quán", "Thion Quyn Quen"},
+  ["云中冠"] = {"Vân Trung Quán"},
+  ["广成冠"] = {"Quảng Thành Quán", "Qung Thành Quán"},
+  ["天权道袍"] = {"Thiên Quyền Đạo", "Thiên Quyn Đo"},
+  ["云中道袍"] = {"Vân Trung Đạo Bào", "Vân Trung Đo Bào"},
+  ["广成道袍"] = {"Quảng Thành Đạo", "Quàng Thành Đo"},
+  ["天权令"] = {"Thiên Quyền lệnh", "Thiên Quyn lnh"},
+  ["云中令"] = {"Vân Trung lệnh", "Vân Trung lnh"},
+  ["广成令"] = {"Quảng Thành lệnh", "Qung Thành lnh"},
+  ["天权巾"] = {"Thiên Quyền Cân", "Thiên Quyn Cân"},
+  ["回城符"] = {"Hồi thành phù", "Hi thành phù"}
+}
+
+function L0_1(目标名称, 识别名称)
+  local 目标 = string.gsub(tostring(目标名称 or ""), "^%s*(.-)%s*$", "%1")
+  local 识别 = string.gsub(tostring(识别名称 or ""), "^%s*(.-)%s*$", "%1")
+  if 目标 == "" or 识别 == "" then
+    return false
+  end
+  if 目标 == 识别 then
+    return true
+  end
+  for _, 别名 in ipairs(商品名称别名[目标] or {}) do
+    if 识别 == 别名 then
+      return true
+    end
+  end
+  return false
+end
+
+_ENV["去卖货_商品名称匹配"] = L0_1
+
+function L0_1(目标名称)
+  for page = 1, 2 do
+    local ok, rows = pcall(tomocrtexttable, 90, 95, 610, 575)
+    if ok and type(rows) == "table" then
+      local bestX, bestY, bestScore = nil, nil, 0
+      local ambiguous = false
+      for i = 1, #rows do
+        local row = rows[i]
+        local name = tostring(row["words"] or row["text"] or "")
+        name = string.gsub(name, "^%s*(.-)%s*$", "%1")
+        local score = tonumber(row["score"]) or tonumber(row["confidence"]) or 0
+        local x, y = tonumber(row["x"]), tonumber(row["y"])
+        -- Catalog text in the captured game screenshot is readable but small;
+        -- purchase safety comes from exact allowlist plus the separately checked
+        -- detail/confirmation titles, so accept a lower catalog-only threshold.
+        if _ENV["去卖货_商品名称匹配"](目标名称, name) and score >= 0.7 and x ~= nil and y ~= nil
+            and x >= 90 and x <= 610 and y >= 100 and y < 570 then
+          if score > bestScore then
+            bestX, bestY, bestScore = x, y, score
+            ambiguous = false
+          elseif score == bestScore and (x ~= bestX or y ~= bestY) then
+            ambiguous = true
+          end
+        end
+      end
+      if bestX ~= nil and not ambiguous then
+        return bestX, bestY
+      end
+    end
+    if page == 1 then
+      _ENV["点击"]("@@商店下一页", 442, 617, 800)
+      sleep(300)
+    end
+  end
+  _ENV["点击"]("@@商店下一页", 442, 617, 800)
+  return nil, nil
+end
+
+_ENV["去卖货_定位商店商品"] = L0_1
+
+function L0_1(目标名称, 当前数量)
+  if not _ENV["找到"](tz["商店页面"]) then
+    return false
+  end
+  local 是否允许, 购买数量, 购买原因 = _ENV["去卖货_判断普通物品购买资格"](目标名称, 当前数量)
+  if not 是否允许 or 购买数量 < 1 then
+    toast("跳过购买" .. tostring(目标名称) .. "：" .. tostring(购买原因))
+    return false
+  end
+  local 商品文字x, 商品文字y = _ENV["去卖货_定位商店商品"](目标名称)
+  if 商品文字x == nil then
+    toast("商店页未能唯一识别商品：" .. tostring(目标名称))
+    return false
+  end
+
+  -- The captured shop is a 2-column, 5-row catalog. Tap the corresponding
+  -- icon, then re-read the detail title before invoking the purchase action.
+  local 商品列 = nil
+  if 商品文字x < 350 then
+    商品列 = 1
+  elseif 商品文字x >= 357 then
+    商品列 = 2
+  else
+    return false
+  end
+  local 商品行 = nil
+  if 商品文字y < 190 then 商品行 = 1
+  elseif 商品文字y < 287 then 商品行 = 2
+  elseif 商品文字y < 383 then 商品行 = 3
+  elseif 商品文字y < 480 then 商品行 = 4
+  else 商品行 = 5 end
+  local 商品x = 商品列 == 1 and 144 or 396
+  local 商品y = ({147, 244, 340, 436, 530})[商品行]
+  _ENV["点击"]("@@选择购买物品", 商品x, 商品y, 800)
+  sleep(300)
+  if not _ENV["去卖货_商品名称匹配"](目标名称,
+      _ENV["去卖货_识别物品名称"](nil, nil, nil, nil, 0.7)) then
+    toast("商品详情名称不匹配，取消购买")
+    return false
+  end
+
+  _ENV["点击"]("@@购买", 927, 351, 800)
+  for i = 1, 5 do
+    if _ENV["找到"](tz["商店买货确定页面"]) then
+      local 确认物品名称 = _ENV["去卖货_识别物品名称"](550, 255, 730, 300, 0.7)
+      local 确认数量 = _ENV["去卖货_识别物品数量"](665, 345, 710, 375)
+      if not _ENV["去卖货_商品名称匹配"](目标名称, 确认物品名称) or 确认数量 ~= 0 then
+        toast("购买确认内容不符，取消本次购买")
+        return false
+      end
+      for ii = 1, 购买数量 do
+        _ENV["点击"]("@@购买+1", 773, 356, 500)
+      end
+      local 最终数量 = _ENV["去卖货_识别物品数量"](665, 345, 710, 375)
+      if not _ENV["找到"](tz["商店买货确定页面"]) or 最终数量 ~= 购买数量 then
+        toast("购买数量未能核对，取消本次购买")
+        return false
+      end
+      _ENV["点击"]("@@确定购买数量", 545, 495, 1000)
+      return true
+    end
+    sleep(200)
+  end
+  toast("购买确认界面未出现，跳过购买")
+  return false
+end
+
+_ENV["去卖货_购买普通物品"] = L0_1
+
 function L0_1()
   if not _ENV["找到"](tz["商店卖货确定页面"]) then
     return true
@@ -628,6 +951,12 @@ _ENV["去卖货_处理装备出售确认"] = L0_1
 function L0_1()
   local 格子x = 0
   local 格子y = 0
+  local 当前普通物品数量 = nil
+  local 当前背包购买目标数量 = {}
+  local 当前背包目标数量未知 = {}
+  local 背包目标名称识别失败 = false
+  local 本轮发生出售 = false
+  local 待确认出售类型 = nil
   -- The legacy script used to enter equipment sales unconditionally. Keep the
   -- workbench's protective defaults authoritative: only scan/sell gear when the
   -- user explicitly enables sales and has not enabled the protection switch.
@@ -635,24 +964,56 @@ function L0_1()
   local 允许出售装备 = _ENV["界面数据"]["出售装备"] == "true"
     and _ENV["界面数据"]["保护装备不出售"] ~= "true"
     and 出售装备品质上限 >= 1
-  local 当前任务3 = 允许出售装备 and "卖装备" or "买卖药"
+  local 允许出售普通物品 = _ENV["界面数据"]["允许出售物品"] == "true"
+    and tostring(_ENV["界面数据"]["出售物品清单"] or "") ~= ""
+  local 允许购买普通物品 = _ENV["界面数据"]["允许购买物品"] == "true"
+    and tostring(_ENV["界面数据"]["购买物品清单"] or "") ~= ""
+  local 购买物品名称列表 = _ENV["去卖货_解析购买物品清单"](_ENV["界面数据"]["购买物品清单"])
+  local 购买目标名称集合 = {}
+  for _, 名称 in ipairs(购买物品名称列表) do 购买目标名称集合[名称] = true end
+  local function 记录背包购买目标(名称, 数量)
+    名称 = string.gsub(tostring(名称 or ""), "^%s*(.-)%s*$", "%1")
+    if 名称 == "" then
+      背包目标名称识别失败 = true
+      return false
+    end
+    if 购买目标名称集合[名称] then
+      if 数量 == nil or 数量 < 0 then
+        当前背包目标数量未知[名称] = true
+      else
+        当前背包购买目标数量[名称] = (当前背包购买目标数量[名称] or 0) + 数量
+      end
+    end
+    return true
+  end
+  local 需要扫描背包物品 = 允许出售装备 or 允许出售普通物品 or 允许购买普通物品
+  local 当前任务3 = 需要扫描背包物品 and "扫描物品" or "买卖药"
   _ENV["买了一次蓝"] = false
   _ENV["买了一次红"] = false
   for i = 1, 200 do
+    local 本轮点击背包格 = false
+    local 本轮背包名称已识别 = false
     if _ENV["找到"](tz["对话页面"]) then
       _ENV["点击"]("@@关对话", 1229, 422, 1000)
     end
     if _ENV["找到"](tz["商店卖货确定页面"]) then
-      if 当前任务3 == "卖装备" then
+      if 待确认出售类型 == "装备" and 允许出售装备 then
         if not _ENV["去卖货_处理装备出售确认"]() then return end
-      else
+        待确认出售类型 = nil
+      elseif 待确认出售类型 == "普通物品" and 允许出售普通物品 then
         _ENV["点击"]("@@确定卖掉", 537, 494, 1000)
+        待确认出售类型 = nil
+      else
+        -- A sale dialog can survive from a prior screen or be raised for a
+        -- different selected item. Never treat its mere presence as approval.
+        _ENV["点击"]("@@关闭商店卖货确定页面", 714, 497, 1000)
+        待确认出售类型 = nil
       end
     end
     if _ENV["找到"](tz["商店买货确定页面"]) then
       _ENV["点击"]("@@确定购买", 537, 494, 1000)
     end
-    if 当前任务3 == "卖装备" then
+    if 当前任务3 == "扫描物品" then
       if _ENV["找到"](tz["商店页面"]) then
         print(695 + 格子x * 73, 178 + 格子y * 73)
         if 695 + 格子x * 73 > 1016 then
@@ -667,6 +1028,11 @@ function L0_1()
           if 0 < x then
             toast("跳过格子" .. 1 + 格子x + 格子y * 5)
           else
+            当前普通物品数量 = nil
+            if 允许出售普通物品 or 允许购买普通物品 then
+              当前普通物品数量 = _ENV["去卖货_识别物品数量"](xx - 4, yy + 40, xx + 28, yy + 65)
+            end
+            本轮点击背包格 = true
             _ENV["点击"]("@@点装备" .. 1 + 格子x + 格子y * 5, 695 + 格子x * 73, 178 + 格子y * 73, 800)
           end
           格子x = 格子x + 1
@@ -675,8 +1041,11 @@ function L0_1()
       if _ENV["找到"](tz["商店选中装备属性页面"]) then
         hideToast()
         sleep(200)
+        local 当前背包物品名称 = _ENV["去卖货_识别物品名称"]()
+        本轮背包名称已识别 = 记录背包购买目标(当前背包物品名称, 当前普通物品数量)
         local 装备品质 = _ENV["去卖货_卖货_识别装备品质"]()
-        local 是否稀有 = not _ENV["去卖货_卖货_品质是否允许出售"](装备品质, 出售装备品质上限)
+        local 是否稀有 = not 允许出售装备
+          or not _ENV["去卖货_卖货_品质是否允许出售"](装备品质, 出售装备品质上限)
         local 装备蓝条属性数组 = _ENV["去卖货_卖货_识别蓝条数量和属性"]()
         local 蓝条数量 = #装备蓝条属性数组
         if 是否稀有 then
@@ -715,10 +1084,13 @@ function L0_1()
             toast(提示属性 .. " 保留")
           else
             toast(提示属性 .. " 卖掉")
+            本轮发生出售 = true
+            待确认出售类型 = "装备"
             _ENV["点击"]("@@卖1", 1155, 353, 1000)
             for i = 1, 3 do
               if _ENV["找到"](tz["商店卖货确定页面"]) then
                 if not _ENV["去卖货_处理装备出售确认"]() then return end
+                待确认出售类型 = nil
                 break
               end
               sleep(500)
@@ -726,10 +1098,13 @@ function L0_1()
           end
         else
           toast(蓝条数量 .. "/" .. _ENV["保留蓝条数量"] .. " 卖掉")
+          本轮发生出售 = true
+          待确认出售类型 = "装备"
           _ENV["点击"]("@@卖1", 1155, 353, 1000)
           for i = 1, 3 do
             if _ENV["找到"](tz["商店卖货确定页面"]) then
               if not _ENV["去卖货_处理装备出售确认"]() then return end
+              待确认出售类型 = nil
               break
             end
             sleep(500)
@@ -737,18 +1112,32 @@ function L0_1()
         end
         _ENV["点击"]("@@关掉选中物品", 1184, 638, 800)
       elseif _ENV["找到"](tz["商店选中非装备属性页面"]) then
+        local 当前背包物品名称 = _ENV["去卖货_识别物品名称"]()
+        本轮背包名称已识别 = 记录背包购买目标(当前背包物品名称, 当前普通物品数量)
         if _ENV["找到"](tz["商店选中特殊物品属性页面"]) then
-          _ENV["点击"]("@@出售特殊物品", 935, 354, 1000)
-          for i = 1, 3 do
-            if _ENV["找到"](tz["商店卖货确定页面"]) then
-              _ENV["点击"]("@@确定卖掉", 537, 494, 800)
-              break
+          local 是否允许出售, 出售原因 = _ENV["去卖货_判断普通物品出售资格"](当前背包物品名称, 当前普通物品数量)
+          if 是否允许出售 then
+            本轮发生出售 = true
+            待确认出售类型 = "普通物品"
+            _ENV["点击"]("@@出售特殊物品", 935, 354, 1000)
+            for i = 1, 3 do
+              if _ENV["找到"](tz["商店卖货确定页面"]) then
+                _ENV["点击"]("@@确定卖掉", 537, 494, 800)
+                待确认出售类型 = nil
+                break
+              end
+              sleep(500)
             end
-            sleep(500)
+          else
+            toast("保留特殊物品：" .. tostring(出售原因))
           end
+          _ENV["点击"]("@@关掉非装备物品", 1184, 638, 800)
         else
           _ENV["点击"]("@@关掉非装备物品", 1184, 638, 800)
         end
+      end
+      if 本轮点击背包格 and 允许购买普通物品 and not 本轮背包名称已识别 then
+        背包目标名称识别失败 = true
       end
     end
     if 当前任务3 == "买卖药" and _ENV["找到"](tz["商店页面"]) then
@@ -772,6 +1161,21 @@ function L0_1()
         toast(string.format("%d %d %d %d 蓝太多", _ENV["小红数量"], _ENV["大红数量"], _ENV["小蓝数量"], _ENV["大蓝数量"]))
         sleep(1000)
         _ENV["去卖货_卖货_执行红蓝处理"]("卖蓝")
+      end
+      if 允许购买普通物品 then
+        if 背包目标名称识别失败 or 本轮发生出售 then
+          toast("背包库存未能可靠核对，跳过普通物品购买")
+        else
+          for _, 商品名称 in ipairs(购买物品名称列表) do
+            if 商品名称 == "小红" or 商品名称 == "大红" or 商品名称 == "小蓝" or 商品名称 == "大蓝" then
+              toast("红蓝药请使用补给设置购买，跳过通用购买：" .. 商品名称)
+            elseif 当前背包目标数量未知[商品名称] then
+              toast("物品数量未能可靠识别，跳过购买：" .. 商品名称)
+            elseif _ENV["去卖货_购买普通物品"](商品名称, 当前背包购买目标数量[商品名称] or 0) then
+              return
+            end
+          end
+        end
       end
       当前任务3 = "修装备"
     end
@@ -820,7 +1224,8 @@ function L0_1(地图名)
     _ENV["点击"]("@@XONG", 98, 197, 2000)
   end
   if _ENV["找到"](tz["大地图页面"]) then
-    if 地图名 == "phong thần" or 地图名 == "sùng thành" then
+    if 地图名 == "phong thần" or 地图名 == "sùng thành"
+        or 地图名 == "荒漠3" or 地图名 == "崇城野外" then
       _ENV["点击"]("@@选择地图2", 80, 195, 1500)
     else
       _ENV["点击"]("@@选择地图1", 66, 155, 1500)
@@ -879,7 +1284,7 @@ function L0_1()
         toast("卖货路线超时，取消本次卖货")
         return false
       end
-      if _ENV["卖货地图"]:find("Đại Phong") then
+      if _ENV["卖货地图"]:find("Đại Phong") or _ENV["卖货地图"]:find("冰3") then
         touchDown(1, 205, 590)
         touchMoveEx(1, 137, 594, 300)
         sleep(100)
@@ -1381,80 +1786,21 @@ end
 _ENV["开启vpn函数"] = L0_1
 
 function L0_1(a, b, c, d)
-  local function 文字识别库()
-    local 识别库 = {}
-    
-    识别库[1] = "0|10,19|0Vy1&&n&&yu0EG01u00t01p&&u&&u150"
-    识别库[2] = "1|5,19|6003003&&x&&#&&&"
-    识别库[3] = "1|5,18|O00O00y00&&&&&&"
-    识别库[4] = "1|5,19|6003003&&v&&&&&&"
-    识别库[5] = "1|5,19|6003003u03&&#&&&"
-    识别库[6] = "2|9,19|0O0Cy0U#0&O0&u1yq3uR&uD&m6VW3"
-    识别库[7] = "2|9,19|0u0Ty0##0&O1&u3us7uR&mD&m6FW2"
-    识别库[8] = "2|9,19|0u0Sy0U#0&O1&u1yq3uR&uD&m6VW3"
-    识别库[9] = "3|9,19|0m3Xu1yy0#O03u41q70x&&v&&yV7u"
-    识别库[10] = "3|9,19|1m3Xu1yy0#O03e61#70x&&v&&yF7u"
-    识别库[11] = "3|9,18|C0uy0#y0#m07WG7mu7&&#&&#F7u"
-    识别库[12] = "4|10,19|00y01#07&0FXWU0mV&&d&&x&&y03001W"
-    识别库[13] = "5|9,19|0011&nz&u#OO3yC1s60&3rvX&y0Fu"
-    识别库[14] = "5|9,19|1V1X&nz&u#OO3y80s60&3&vX&y0Fu"
-    识别库[15] = "5|9,18|&uu&u#&uUmm7mW3mm7m&#m&#0Fu"
-    识别库[16] = "5|9,19|3&ZZ&nz&uUuO3i80#60x3&xW&u0Fu"
-    识别库[17] = "6|9,19|0V&W&&u&&#OC3u40s30xn&vu&yC7u"
-    识别库[18] = "6|9,18|7&mV&y&&#mO6WG3WG3uUUyV#SFy"
-    识别库[19] = "7|8,19|1001W00m07u0&yF&t&y3&W0u00"
-    识别库[20] = "8|9,19|0uVX&Vy&&#OS3u40s70x&&u&Vy63u"
-    识别库[21] = "9|9,19|0&XX&uy&yEu63e11s1Wx&&u&&uF&u"
-    识别库[22] = "9|9,18|FuOVyU&yUmC7W47mC7&&#V&#F&u"
-    识别库[23] = "a|7,13|0u#y&uPyOMSR&y&&"
-    识别库[24] = "a|8,13|0Xzv#uxumiGt&v&#F#"
-    识别库[25] = "b|8,19|3&&&&&&V&&WO0WC0O7&y3&y0&y"
-    识别库[26] = "c|7,13|0&y&&O1y0U0VmyuS"
-    识别库[27] = "d|8,19|01&u1&&0yNWO0mC0J&&&&&#&&&"
-    识别库[28] = "e|8,13|1&v&#&tGWyGVvvyy60"
-    识别库[29] = "e|8,13|1&v&#&tumyG&zvyy60"
-    识别库[30] = "f|6,17|200E03&&&&&&uYH00"
-    识别库[31] = "f|6,18|1003W0V&&V&&&rKH00"
-    识别库[32] = "g|9,17|1yxl&&&zZWJ7XcF&EV#DlmVG08"
-    识别库[33] = "h|8,19|1&&#&&&&&&W8008007003&#1&&"
-    识别库[34] = "h|8,19|3&&#&&&V&&0O00C007&u3&#0&#"
-    识别库[35] = "i|3,18|H&#n&&n&&"
-    识别库[36] = "i|3,18|n&&n&&H&#"
-    识别库[37] = "j|4,22|0003H4H&7&&qV&#"
-    识别库[38] = "j|4,21|000SV&&Z&&qV&y"
-    识别库[39] = "k|9,19|3&&z&&&&&&03W03m07&07&u3W#107"
-    识别库[40] = "k|9,19|3&&&&&#&&#03W03u07&07du30#102"
-    识别库[41] = "l|3,19|2ggh&&#&&&"
-    识别库[42] = "m|13,13|1&&&&y0C0603&z&&V&O0C0703&&&&"
-    识别库[43] = "m|12,19|V&&&&&&&03&W03&W03#01&WF#3&W3&W3&&#&&&"
-    识别库[44] = "n|8,13|3&&&&&&O0C07&x&#&#"
-    识别库[45] = "o|8,13|1&v&#m3u0y0&&v&y7m"
-    识别库[46] = "p|8,17|F&&&&&&&&W23067hyF&mF&0"
-    识别库[47] = "q|8,17|7&WV&W&&XW33047&&&&&&&&"
-    识别库[48] = "r|6,13|&&&&&&x0301W0"
-    识别库[49] = "s|7,13|0yC&7VnuSUFzZyGS"
-    识别库[50] = "t|7,17|100701&&x&&z&NmW1X02"
-    识别库[51] = "u|8,13|3&z&&&&W0W0N&x&&&&"
-    识别库[52] = "u|8,13|3&z&&&&W0W0N&x&&&#"
-    识别库[53] = "v|7,13|1y0&#7&m7v&&&ny0"
-    识别库[54] = "w|11,13|V0F&m&y3&&u&0Vy0FuF&&z#0"
-    识别库[55] = "x|8,13|005mV&&7#3&3&xmV03"
-    识别库[56] = "y|8,17|C00Vm3&yE1&u3&n&yFy0S00"
-    识别库[57] = "z|6,13|WFmVy&&#Fu7W3"
-    return 识别库
+  local rows = tomocrtexttable(a, b, c, d) or {}
+  local bestName = ""
+  local bestScore = 0
+  for i = 1, #rows do
+    local row = rows[i]
+    local name = tostring(row["words"] or row["text"] or "")
+    name = string.gsub(name, "^%s*(.-)%s*$", "%1")
+    local score = tonumber(row["score"]) or 0
+    if name ~= "" and score >= 0.8 and score > bestScore then
+      bestName = name
+      bestScore = score
+    end
   end
-  
-  TURING["来源_获取屏幕像素"](a, b, c, d)
-  TURING["滤镜_彩色_二值化"]("127-255")
-  TURING["切割_范围投影切割"](5, 1)
-  TURING["字库_加载六十四进制识别字库"](文字识别库())
-  local 识别结果 = TURING["识别"](88)
-  if 识别结果 ~= nil and 识别结果 ~= "" then
-    return 识别结果
-  end
-  return ""
+  return bestName
 end
-
 _ENV["组队_识别名字"] = L0_1
 
 function L0_1(aa, bb, cc, dd)
@@ -1485,7 +1831,7 @@ function L0_1()
   local x, y = findMultiColor(105, 187, 165, 285, "7b4173-111111", "-7|1|7b3863-111111|-9|-4|6b348c-111111|-13|1|7b3863-111111|-13|3|843852-111111|-9|2|84385a-111111|-6|3|843852-111111|-18|14|943c18-111111|-18|-3|6b387b-111111|-18|6|843c39-111111", 0, 0.9)
   if x ~= -1 and y ~= -1 then
     print("有队长")
-    local 队长名字 = tomocrtextall(147, 212, 327, 263)
+    local 队长名字 = _ENV["组队_识别名字"](147, 212, 327, 263)
     print("队长名字", 队长名字)
     return 队长名字
   end
@@ -1503,10 +1849,125 @@ end
 
 _ENV["执行自动战斗"] = L0_1
 
+function L0_1(资源文本)
+  资源文本 = tostring(资源文本 or "")
+  资源文本 = string.gsub(资源文本, "%s+", "")
+  资源文本 = string.gsub(资源文本, "／", "/")
+  local 当前值, 最大值 = string.match(资源文本, "^(%d+)%/(%d+)$")
+  当前值 = tonumber(当前值)
+  最大值 = tonumber(最大值)
+  if 当前值 == nil or 最大值 == nil or 最大值 <= 0 or 当前值 < 0 or 当前值 > 最大值 then
+    return nil
+  end
+  return math.floor(当前值 * 100 / 最大值)
+end
+
+_ENV["战斗_解析资源百分比"] = L0_1
+
+function L0_1(a, b, c, d)
+  local rows = tomocrtexttable(a, b, c, d)
+  local bestScore = 0
+  local bestPercent = nil
+  for i = 1, #rows do
+    local row = rows[i]
+    local score = tonumber(row["score"]) or tonumber(row["confidence"]) or 0
+    local text = tostring(row["words"] or row["text"] or "")
+    local percent = _ENV["战斗_解析资源百分比"](text)
+    if score >= 0.8 and percent ~= nil and score > bestScore then
+      bestScore = score
+      bestPercent = percent
+    end
+  end
+  return bestPercent
+end
+
+_ENV["战斗_识别资源百分比"] = L0_1
+
+function L0_1(药品颜色)
+  -- The game presents eight item/skill slots in a 4-by-2 grid. Only tap a
+  -- slot after the recovered red/blue potion image signature matches inside it.
+  for _, y in ipairs({310, 375}) do
+    for _, x in ipairs({971, 1051, 1131, 1211}) do
+      local 药品类型 = _ENV["检测背包_识别红蓝数量_识别红蓝"](x - 24, y - 24, x + 24, y + 24)
+      if 药品颜色 == "红" and (药品类型 == "小红" or 药品类型 == "大红")
+          or 药品颜色 == "蓝" and (药品类型 == "小蓝" or 药品类型 == "大蓝") then
+        return x, y
+      end
+    end
+  end
+  return nil, nil
+end
+
+_ENV["战斗_查找快捷栏药品"] = L0_1
+
+function L0_1()
+  local 配置 = _ENV["界面数据"] or {}
+  local 启用红药 = 配置["自动使用红药"] == "true"
+  local 启用蓝药 = 配置["自动使用蓝药"] == "true"
+  if not 启用红药 and not 启用蓝药 then
+    return false
+  end
+
+  local 当前时间 = tickCount()
+  if _ENV["上次自动补给时间"] ~= nil and 当前时间 - _ENV["上次自动补给时间"] < 3000 then
+    return false
+  end
+
+  if 启用红药 then
+    local 当前百分比 = _ENV["战斗_识别资源百分比"](230, 45, 275, 64)
+    local 阈值 = tonumberEx(配置["生命药触发阈值"])
+    if 当前百分比 ~= nil and 当前百分比 <= 阈值 then
+      local x, y = _ENV["战斗_查找快捷栏药品"]("红")
+      if x ~= nil then
+        local 已执行 = tap(x, y)
+        if 已执行 ~= false then
+          _ENV["上次自动补给时间"] = 当前时间
+          toast("生命低于阈值，已使用快捷栏红药")
+          return true
+        end
+      end
+    end
+  end
+
+  if 启用蓝药 then
+    local 当前百分比 = _ENV["战斗_识别资源百分比"](230, 65, 280, 84)
+    local 阈值 = tonumberEx(配置["法力药触发阈值"])
+    if 当前百分比 ~= nil and 当前百分比 <= 阈值 then
+      local x, y = _ENV["战斗_查找快捷栏药品"]("蓝")
+      if x ~= nil then
+        local 已执行 = tap(x, y)
+        if 已执行 ~= false then
+          _ENV["上次自动补给时间"] = 当前时间
+          toast("法力低于阈值，已使用快捷栏蓝药")
+          return true
+        end
+      end
+    end
+  end
+  return false
+end
+
+_ENV["执行自动补给"] = L0_1
+
 function L0_1(识别名称1, 识别名称2, 期望队长名称)
-  期望队长名称 = tostring(期望队长名称 or "")
-  期望队长名称 = string.gsub(期望队长名称, "^%s*(.-)%s*$", "%1")
-  if 期望队长名称 == "" then
+  local 期望队长名称数组 = {}
+  if type(期望队长名称) == "table" then
+    for _, 名称 in ipairs(期望队长名称) do
+      名称 = string.gsub(tostring(名称 or ""), "^%s*(.-)%s*$", "%1")
+      if 名称 ~= "" then
+        table.insert(期望队长名称数组, 名称)
+      end
+    end
+  else
+    local 配置文本 = tostring(期望队长名称 or "")
+    for 名称 in string.gmatch(配置文本 .. "\n", "(.-)\n") do
+      名称 = string.gsub(名称, "^%s*(.-)%s*$", "%1")
+      if 名称 ~= "" then
+        table.insert(期望队长名称数组, 名称)
+      end
+    end
+  end
+  if #期望队长名称数组 == 0 then
     return "未配置"
   end
   local 有效识别结果 = false
@@ -1515,8 +1976,10 @@ function L0_1(识别名称1, 识别名称2, 期望队长名称)
     名称 = string.gsub(名称, "^%s*(.-)%s*$", "%1")
     if 名称 ~= "" then
       有效识别结果 = true
-      if 0.95 <= w.stringSimilarity.levenshteinNormalized(名称, 期望队长名称) then
-        return "匹配"
+      for _, 期望名称 in ipairs(期望队长名称数组) do
+        if 0.95 <= w.stringSimilarity.levenshteinNormalized(名称, 期望名称) then
+          return "匹配"
+        end
       end
     end
   end
@@ -1600,10 +2063,10 @@ function L0_1()
           if _ENV["找到"](tz["组队_附近玩家页面"]) or _ENV["找到"](tz["组队_附近队伍页面"]) then
             local 队长名称 = _ENV["组队_识别队长名称"]()
             local 队长名称2 = ""
-            local 判断结果 = _ENV["组队_判断队长名称"](队长名称, 队长名称2, _ENV["队长名称数组"][1])
+            local 判断结果 = _ENV["组队_判断队长名称"](队长名称, 队长名称2, _ENV["队长名称数组"])
             if 判断结果 == "不匹配" then
               队长名称2 = _ENV["组队_识别队长名称2"]()
-              判断结果 = _ENV["组队_判断队长名称"](队长名称, 队长名称2, _ENV["队长名称数组"][1])
+              判断结果 = _ENV["组队_判断队长名称"](队长名称, 队长名称2, _ENV["队长名称数组"])
             end
             if 判断结果 == "匹配" then
               toast(string.format("[%s]==[%s] ", 队长名称, _ENV["队长名称数组"][1]))
@@ -1692,6 +2155,7 @@ function L0_1()
         if not _ENV["执行返回挂机点"]() then sleep(3000) end
       else
         _ENV["执行自动战斗"]()
+        _ENV["执行自动补给"]()
       end
     end
     _ENV["通用关闭"]()

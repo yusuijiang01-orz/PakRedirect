@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Display-level screenshot and touch adapter. The user must enable its accessibility service. */
 public final class ScriptGameAdapter extends AccessibilityService {
+    static final String TARGET_GAME_PACKAGE = "com.tepaylink.tamgioiphantranhmobile";
     private static volatile ScriptGameAdapter instance;
     private volatile String foregroundPackage = "";
 
@@ -31,13 +32,19 @@ public final class ScriptGameAdapter extends AccessibilityService {
 
     @Override protected void onServiceConnected() {
         super.onServiceConnected();
+        foregroundPackage = "";
         instance = this;
     }
 
     @Override public void onAccessibilityEvent(AccessibilityEvent event) {
-        if (event == null || event.getPackageName() == null) return;
-        String packageName = event.getPackageName().toString();
-        if (!getPackageName().equals(packageName)) foregroundPackage = packageName;
+        if (event == null || event.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return;
+        if (event.getPackageName() == null) {
+            foregroundPackage = "";
+            return;
+        }
+        // Include RYLUX itself: otherwise the last game package could remain cached
+        // after the user returns to the console and incorrectly pass startup gating.
+        foregroundPackage = event.getPackageName().toString();
     }
     @Override public void onInterrupt() { }
 
@@ -46,22 +53,34 @@ public final class ScriptGameAdapter extends AccessibilityService {
         return current == null ? "" : current.foregroundPackage;
     }
 
+    private void requireTargetGameForeground() {
+        ScriptForegroundGate.requireReady(
+                () -> TARGET_GAME_PACKAGE.equals(foregroundPackage),
+                "沙箱中的汉化版封神榜不在前台，已阻止截图、输入和触控");
+    }
+
     public boolean pressHome() {
         return performGlobalAction(GLOBAL_ACTION_HOME);
     }
 
     /** Set text in the currently focused editable node exposed by the game. */
     public boolean setFocusedText(String text) {
+        requireTargetGameForeground();
         AccessibilityNodeInfo root = getRootInActiveWindow();
         if (root == null) return false;
+        AccessibilityNodeInfo focused = null;
         try {
-            AccessibilityNodeInfo focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT);
+            focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT);
+            if (focused == null) focused = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY);
             if (focused == null || !focused.isEditable()) return false;
+            CharSequence nodePackage = focused.getPackageName();
+            if (nodePackage == null || !TARGET_GAME_PACKAGE.contentEquals(nodePackage)) return false;
             Bundle arguments = new Bundle();
             arguments.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
                     text == null ? "" : text);
             return focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments);
         } finally {
+            if (focused != null) focused.recycle();
             root.recycle();
         }
     }
@@ -74,6 +93,7 @@ public final class ScriptGameAdapter extends AccessibilityService {
     }
 
     public Bitmap captureDisplay(long timeoutMs) throws Exception {
+        requireTargetGameForeground();
         if (Build.VERSION.SDK_INT < 30) {
             throw new UnsupportedOperationException("系统版本过低：截图需要 Android 11 或更新版本");
         }
@@ -125,6 +145,7 @@ public final class ScriptGameAdapter extends AccessibilityService {
     }
 
     private boolean dispatch(Path path, long durationMs, long timeoutMs) throws Exception {
+        requireTargetGameForeground();
         if (Build.VERSION.SDK_INT < 24) throw new UnsupportedOperationException("触控需要 Android 7 或更新版本");
         CountDownLatch done = new CountDownLatch(1);
         AtomicBoolean completed = new AtomicBoolean(false);

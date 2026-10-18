@@ -46,14 +46,15 @@ final class LegacyLuaRuntime {
     private final Consumer<Throwable> failureListener;
     private final AtomicBoolean captureHeld = new AtomicBoolean(false);
     private final CopyOnWriteArrayList<Thread> threads = new CopyOnWriteArrayList<>();
+    private final ScriptHudStatus hudStatus = new ScriptHudStatus();
     private volatile Bitmap latestFrame;
     private volatile LegacyCoordinateMapper coordinateMapper;
-    private volatile int[] ocrRegion = new int[]{0, 0, 0, 0};
     private ScriptOcr ocr;
     private LuaInstructionGate instructionGate;
     private volatile float touchStartX, touchStartY, touchEndX, touchEndY;
     private volatile long touchDurationMs = LegacyLuaCompat.defaultTouchDurationMs();
     private Globals globals;
+    private volatile Toast currentToast;
 
     LegacyLuaRuntime(Context context, ScriptExecutionControl control, JSONObject config,
                      Listener listener, Consumer<Throwable> failureListener) {
@@ -334,7 +335,13 @@ final class LegacyLuaRuntime {
             @Override public Varargs invoke(Varargs args) {
                 final String message = args.arg1().tojstring();
                 android.os.Handler main = new android.os.Handler(context.getMainLooper());
-                main.post(() -> Toast.makeText(context, message, Toast.LENGTH_SHORT).show());
+                main.post(() -> {
+                    Toast previous = currentToast;
+                    if (previous != null) previous.cancel();
+                    Toast next = Toast.makeText(context, message, Toast.LENGTH_SHORT);
+                    currentToast = next;
+                    next.show();
+                });
                 return LuaValue.NONE;
             }
         });
@@ -344,12 +351,29 @@ final class LegacyLuaRuntime {
                 return LuaValue.NONE;
             }
         });
-        globals.set("hideToast", noOp());
+        globals.set("hideToast", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                android.os.Handler main = new android.os.Handler(context.getMainLooper());
+                main.post(() -> {
+                    Toast active = currentToast;
+                    currentToast = null;
+                    if (active != null) active.cancel();
+                });
+                return LuaValue.NONE;
+            }
+        });
         globals.set("setControlBarPosNew", noOp());
         globals.set("createHUD", new ZeroFunction() {
             @Override public LuaValue invoke() { return LuaValue.valueOf(1); }
         });
-        globals.set("showHUD", noOp());
+        globals.set("showHUD", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                control.checkpoint();
+                String message = hudStatus.next(args.arg(2).optjstring(""), SystemClock.uptimeMillis());
+                if (message != null && listener != null) listener.onStatus("脚本状态 · " + message);
+                return LuaValue.NONE;
+            }
+        });
         LuaTable threadApi = new LuaTable();
         threadApi.set("newThread", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) {
@@ -420,7 +444,7 @@ final class LegacyLuaRuntime {
                 String name = nameValue.checkjstring();
                 if ("tomocr".equals(name)) { installOcrApi(); return LuaValue.TRUE; }
                 if ("luacurl".equals(name)) return new LuaTable();
-                if ("TURING_VIP".equals(name)) return installTuringStub();
+                if ("TURING_VIP".equals(name)) return installTuringCompat();
                 String module = name.endsWith(".lua") ? name : name + ".lua";
                 return loadModule("脚本/" + module, false);
             }
@@ -459,43 +483,44 @@ final class LegacyLuaRuntime {
         return GAME_PACKAGE.equals(packageName) || VPN_PACKAGE.equals(packageName);
     }
 
-    private LuaValue installTuringStub() {
-        LuaTable turing = new LuaTable();
-        turing.set("来源_获取屏幕像素", new VarArgFunction() {
-            @Override public Varargs invoke(Varargs args) {
-                ocrRegion = new int[]{args.arg(1).toint(), args.arg(2).toint(), args.arg(3).toint(), args.arg(4).toint()};
-                return LuaValue.NONE;
+    private LuaValue installTuringCompat() {
+        return LegacyTuringCompat.createApi(request -> {
+            control.checkpoint();
+            Bitmap screen = frame();
+            LegacyCoordinateMapper mapper = mapperFor(screen);
+            int left = Math.max(0, mapper.left(request.left));
+            int top = Math.max(0, mapper.top(request.top));
+            int right = mapper.edgeRight(request.right);
+            int bottom = mapper.edgeBottom(request.bottom);
+            if (right <= left || bottom <= top) return "";
+            Bitmap crop = Bitmap.createBitmap(screen, left, top, right - left, bottom - top);
+            Bitmap filtered = crop;
+            try {
+                if (!request.colorFilter.isEmpty()) {
+                    int[] pixels = new int[crop.getWidth() * crop.getHeight()];
+                    crop.getPixels(pixels, 0, crop.getWidth(), 0, 0, crop.getWidth(), crop.getHeight());
+                    int[] binary = LegacyTuringCompat.applyFilter(pixels, request.colorFilter);
+                    filtered = Bitmap.createBitmap(binary, crop.getWidth(), crop.getHeight(), Bitmap.Config.ARGB_8888);
+                }
+                if (ocr == null) ocr = new ScriptOcr();
+                ScriptOcr.Result result = ocr.recognize(filtered, true, 10000);
+                org.json.JSONArray lines = new org.json.JSONArray(result.json);
+                StringBuilder acceptedText = new StringBuilder();
+                for (int index = 0; index < lines.length(); index++) {
+                    org.json.JSONObject line = lines.getJSONObject(index);
+                    if (!LegacyTuringCompat.acceptsConfidence(
+                            line.optDouble("score", -1d), request.confidenceThreshold)) continue;
+                    acceptedText.append(line.optString("text", ""));
+                }
+                return acceptedText.toString();
+            } catch (Exception error) {
+                rethrowIfStopped();
+                throw error;
+            } finally {
+                if (filtered != crop) filtered.recycle();
+                crop.recycle();
             }
         });
-        turing.set("滤镜_彩色_二值化", noOp());
-        turing.set("切割_范围投影切割", noOp());
-        turing.set("字库_加载六十四进制识别字库", new OneArgFunction() {
-            @Override public LuaValue call(LuaValue data) { return LuaValue.TRUE; }
-        });
-        turing.set("切割_获取切割字符数据", new ZeroFunction() {
-            @Override public LuaValue invoke() { return LuaValue.tableOf(); }
-        });
-        turing.set("识别", new OneArgFunction() {
-            @Override public LuaValue call(LuaValue threshold) { return recognizeLegacyRegion(); }
-        });
-        return turing;
-    }
-
-    private LuaValue recognizeLegacyRegion() {
-        control.checkpoint();
-        int[] r = ocrRegion;
-        Bitmap screen = frame();
-        LegacyCoordinateMapper mapper = mapperFor(screen);
-        int left = Math.max(0, mapper.left(r[0])), top = Math.max(0, mapper.top(r[1]));
-        int right = mapper.edgeRight(r[2]), bottom = mapper.edgeBottom(r[3]);
-        if (right <= left || bottom <= top) return LuaValue.valueOf("");
-        Bitmap crop = Bitmap.createBitmap(screen, left, top, right - left, bottom - top);
-        try {
-            if (ocr == null) ocr = new ScriptOcr();
-            ScriptOcr.Result result = ocr.recognize(crop, true, 10000);
-            return LuaValue.valueOf(result.text.replace("\n", "").replace(" ", ""));
-        } catch (Exception error) { rethrowIfStopped(); throw new LuaError("TURING OCR 替代识别失败：" + error.getMessage()); }
-        finally { crop.recycle(); }
     }
 
     private void installOcrApi() {
@@ -507,14 +532,8 @@ final class LegacyLuaRuntime {
         globals.set("findStr", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) { return findText(args); }
         });
-        globals.set("tomocrtextall", new VarArgFunction() {
-            @Override public Varargs invoke(Varargs args) {
-                LuaTable lines = recognizeTextRegion(args, "OCR 失败");
-                StringBuilder text = new StringBuilder();
-                for (int i = 1; i <= lines.length(); i++) text.append(lines.get(i).get("words").tojstring());
-                return LuaValue.valueOf(text.toString());
-            }
-        });
+        globals.set("tomocrtextall", LegacyLuaCompat.createTomocrTextAll(
+                args -> recognizeTextRegion(args, "OCR 失败")));
         globals.set("tomocrtext", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) {
                 LuaTable lines = recognizeTextRegion(args, "OCR 失败");
@@ -774,72 +793,27 @@ final class LegacyLuaRuntime {
             int top = Math.max(0, mapper.top(args.arg(2).todouble()));
             int right = mapper.edgeRight(args.arg(3).todouble());
             int bottom = mapper.edgeBottom(args.arg(4).todouble());
-            int tw = template.getWidth(), th = template.getHeight();
-            if (right - left < tw || bottom - top < th) return imageNotFound(fast);
             int mask = args.narg() >= 6 ? parseColor(args.arg(6).tojstring()) : -1;
             double threshold = args.narg() >= 8 ? args.arg(8).optdouble(0.95) : 0.95;
-            threshold = Math.max(0.50, Math.min(1.0, threshold));
-            // Legacy matching uses a color-key mask. Skip keyed pixels and sample a
-            // coarse grid first, then verify the best nearby origin at full resolution.
-            int sampleStep = Math.max(1, Math.min(3, Math.max(tw, th) / 18));
-            int templateSamples = countTemplateSamples(template, mask, sampleStep);
-            if (templateSamples == 0) return imageNotFound(fast);
-            int bestX = -1, bestY = -1;
-            double bestScore = -1;
-            int maxX = right - tw, maxY = bottom - th;
-            long positions = (long) (maxX - left + 1) * (maxY - top + 1);
-            int scanStep = (int) Math.max(1, Math.min(8, Math.ceil(Math.sqrt((double) positions * templateSamples / 5_000_000d))));
-            for (int y = top; y <= maxY; y += scanStep) {
-                for (int x = left; x <= maxX; x += scanStep) {
-                    control.checkpoint();
-                    double score = templateScore(screen, template, x, y, mask, sampleStep);
-                    if (score > bestScore) { bestScore = score; bestX = x; bestY = y; }
-                    if (scanStep == 1 && score >= threshold) {
-                        return imageMatch(fast, mapper.toReferenceX(x), mapper.toReferenceY(y));
-                    }
-                }
-            }
-            // Verify the neighborhood around the coarse best candidate using every
-            // non-masked pixel; this prevents a coarse sample from driving a click.
-            if (bestX >= 0) {
-                int fromX = Math.max(left, bestX - scanStep + 1), toX = Math.min(maxX, bestX + scanStep - 1);
-                int fromY = Math.max(top, bestY - scanStep + 1), toY = Math.min(maxY, bestY + scanStep - 1);
-                for (int y = fromY; y <= toY; y++) for (int x = fromX; x <= toX; x++) {
-                    control.checkpoint();
-                    double score = templateScore(screen, template, x, y, mask, 1);
-                    if (score >= threshold) {
-                        return imageMatch(fast, mapper.toReferenceX(x), mapper.toReferenceY(y));
-                    }
-                }
-            }
-            return imageNotFound(fast);
+            Bitmap matchedTemplate = template;
+            LegacyImageMatcher.Pixels screenPixels = new LegacyImageMatcher.Pixels() {
+                @Override public int width() { return screen.getWidth(); }
+                @Override public int height() { return screen.getHeight(); }
+                @Override public int getPixel(int x, int y) { return screen.getPixel(x, y); }
+            };
+            LegacyImageMatcher.Pixels templatePixels = new LegacyImageMatcher.Pixels() {
+                @Override public int width() { return matchedTemplate.getWidth(); }
+                @Override public int height() { return matchedTemplate.getHeight(); }
+                @Override public int getPixel(int x, int y) { return matchedTemplate.getPixel(x, y); }
+            };
+            LegacyImageMatcher.Match match = LegacyImageMatcher.find(screenPixels, templatePixels,
+                    left, top, right, bottom, mask, threshold, control::checkpoint);
+            return match == null ? imageNotFound(fast)
+                    : imageMatch(fast, mapper.toReferenceX(match.x), mapper.toReferenceY(match.y));
         } finally {
             if (template != sourceTemplate && !template.isRecycled()) template.recycle();
             if (!sourceTemplate.isRecycled()) sourceTemplate.recycle();
         }
-    }
-
-    private int countTemplateSamples(Bitmap template, int mask, int step) {
-        int count = 0;
-        for (int y = 0; y < template.getHeight(); y += step)
-            for (int x = 0; x < template.getWidth(); x += step)
-                if ((template.getPixel(x, y) & 0x00ffffff) != mask) count++;
-        return count;
-    }
-
-    private double templateScore(Bitmap screen, Bitmap template, int x, int y, int mask, int step) {
-        int hit = 0, count = 0;
-        for (int ty = 0; ty < template.getHeight(); ty += step) for (int tx = 0; tx < template.getWidth(); tx += step) {
-            int expected = template.getPixel(tx, ty) & 0x00ffffff;
-            if (expected == mask) continue;
-            int actual = screen.getPixel(x + tx, y + ty) & 0x00ffffff;
-            int dr = Math.abs(((expected >> 16) & 255) - ((actual >> 16) & 255));
-            int dg = Math.abs(((expected >> 8) & 255) - ((actual >> 8) & 255));
-            int db = Math.abs((expected & 255) - (actual & 255));
-            if (dr + dg + db <= 42) hit++;
-            count++;
-        }
-        return count == 0 ? 0 : (double) hit / count;
     }
 
     private Bitmap loadTemplate(String path) {

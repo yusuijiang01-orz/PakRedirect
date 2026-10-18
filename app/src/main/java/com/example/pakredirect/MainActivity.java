@@ -50,8 +50,8 @@ public class MainActivity extends Activity {
     private static final String TARGET_PACKAGE = "com.tepaylink.tamgioiphantranhmobile";
     private static final String MODULE_CODE = "sg_localization";
     private static final int REQUEST_VPN_PERMISSION = 4108;
-    private static final String GAME_NAME = "封神榜(越南版)";
-    private static final String GAME_DESCRIPTION = "越南版封神榜，RYLUX 提供本地汉化、资源校验与本地 PAK 接管。";
+    private static final String GAME_NAME = "封神榜（汉化版）";
+    private static final String GAME_DESCRIPTION = "封神榜汉化版，RYLUX 提供本地汉化、资源校验与本地 PAK 接管。";
     private static final String GAME_LAST_UPDATED = "2026-09-01";
     private static final String LOCALIZATION_PROGRESS = "持续更新中";
     private static final String DEVICE_ID_PREFS = "rylux_device_identity";

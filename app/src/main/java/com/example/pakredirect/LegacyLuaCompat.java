@@ -2,6 +2,8 @@ package com.example.pakredirect;
 
 import org.luaj.vm2.LuaTable;
 import org.luaj.vm2.LuaValue;
+import org.luaj.vm2.Varargs;
+import org.luaj.vm2.lib.VarArgFunction;
 
 /** Small compatibility helpers shared by the recovered Lua host and regression tests. */
 final class LegacyLuaCompat {
@@ -11,6 +13,7 @@ final class LegacyLuaCompat {
     private LegacyLuaCompat() { }
 
     interface PixelReader { int getPixel(int x, int y); }
+    interface OcrRegionRecognizer { LuaTable recognize(Varargs args); }
 
     static long normalizeTouchDuration(long durationMs) {
         return Math.max(1L, Math.min(MAX_TOUCH_DURATION_MS, durationMs));
@@ -68,6 +71,37 @@ final class LegacyLuaCompat {
         LuaTable candidates = new LuaTable();
         candidates.set(1, LuaValue.valueOf(target));
         return findOcrMatch(lines, candidates, minimumScore);
+    }
+
+    /** Joins only OCR rows at or above the confidence required by the caller. */
+    static String concatenateConfidentOcrText(LuaTable lines, double minimumScore) {
+        if (lines == null) return "";
+        double required = Double.isNaN(minimumScore) ? 0.85d
+                : Math.max(0d, Math.min(1d, minimumScore));
+        StringBuilder text = new StringBuilder();
+        for (int i = 1; i <= lines.length(); i++) {
+            LuaValue value = lines.get(i);
+            if (!value.istable()) continue;
+            LuaTable line = value.checktable();
+            double score = line.get("score").isnumber()
+                    ? line.get("score").todouble() : line.get("confidence").optdouble(0d);
+            if (score < required) continue;
+            LuaValue words = line.get("words").isnil() ? line.get("text") : line.get("words");
+            if (!words.isnil()) text.append(words.tojstring());
+        }
+        return text.toString();
+    }
+
+    /** Creates the same confidence-filtering tomocrtextall API used by Android and LuaJ tests. */
+    static VarArgFunction createTomocrTextAll(OcrRegionRecognizer recognizer) {
+        if (recognizer == null) throw new IllegalArgumentException("OCR recognizer is required");
+        return new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                LuaTable lines = recognizer.recognize(args);
+                double minimumScore = args.arg(5).optdouble(0.85d);
+                return LuaValue.valueOf(concatenateConfidentOcrText(lines, minimumScore));
+            }
+        };
     }
 
     static LuaTable splitStr(LuaValue source, LuaValue separator) {
