@@ -274,7 +274,11 @@ end
 
 _ENV["显示截图ui界面"] = L0_1
 L0_1 = _ENV["显示ui界面"]
-L0_1()
+if _ENV["RYLUX_WORKBENCH_CONFIG"] then
+  _ENV["界面数据"] = ui.getData()
+else
+  L0_1()
+end
 L0_1 = print
 L1_1 = _ENV["界面数据"]
 L0_1(L1_1)

@@ -3,10 +3,19 @@ package com.example.pakredirect;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
+import org.luaj.vm2.Globals;
+import org.luaj.vm2.lib.jse.JsePlatform;
 import org.junit.Test;
 
 public final class LegacyLuaConfigTest {
+    @Test public void workbenchHostMarksSettingsAsAvailableBeforeLuaStarts() {
+        Globals globals = JsePlatform.standardGlobals();
+        LegacyLuaConfig.installWorkbenchConfigFlag(globals);
+        assertTrue(globals.get("RYLUX_WORKBENCH_CONFIG").toboolean());
+    }
+
     @Test public void blueFilterSelectionEnablesOnlyTheSelectedLegacyRule() {
         assertArrayEquals(new String[]{"false", "false", "false"}, LegacyLuaConfig.blueFilterFlags("0"));
         assertArrayEquals(new String[]{"true", "false", "false"}, LegacyLuaConfig.blueFilterFlags("1"));

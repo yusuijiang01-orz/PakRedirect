@@ -641,6 +641,10 @@ final class LegacyLuaRuntime {
             }
         });
         globals.set("ui", ui);
+        // The RYLUX workbench supplies settings before the Lua runtime starts.
+        // The recovered script's original UI is not rendered by this host; tell
+        // it to consume the supplied profile instead of waiting for that window.
+        LegacyLuaConfig.installWorkbenchConfigFlag(globals);
     }
 
     private Varargs findPattern(Varargs args, boolean multi) {

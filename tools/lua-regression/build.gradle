@@ -20,8 +20,10 @@ sourceSets {
             ])
             include '**/LuaSourceCompat.java'
             include '**/LegacyLuaCompat.java'
+            include '**/LegacyLuaConfig.java'
             include '**/LegacyCoordinateMapper.java'
             include '**/RecoveredLuaTaskTest.java'
+            include '**/LegacyLuaConfigTest.java'
         }
         resources {
             setSrcDirs([new File(repositoryRoot, 'app/src/test/resources')])

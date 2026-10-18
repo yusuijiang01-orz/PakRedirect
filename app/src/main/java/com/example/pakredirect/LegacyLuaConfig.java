@@ -1,5 +1,8 @@
 package com.example.pakredirect;
 
+import org.luaj.vm2.Globals;
+import org.luaj.vm2.LuaValue;
+
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -7,6 +10,10 @@ import java.util.Map;
 /** Stable defaults for settings read by the recovered Lua modules. */
 final class LegacyLuaConfig {
     private LegacyLuaConfig() { }
+
+    static void installWorkbenchConfigFlag(Globals globals) {
+        globals.set("RYLUX_WORKBENCH_CONFIG", LuaValue.TRUE);
+    }
 
     /** Converts the workbench's exclusive blue-stat filter into the legacy flags. */
     static String[] blueFilterFlags(String selectedMode) {

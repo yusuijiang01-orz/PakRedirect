@@ -37,6 +37,95 @@ import org.luaj.vm2.lib.jse.JsePlatform;
 
 /** Directly executes one recovered Lua task without building or launching the APK. */
 public final class RecoveredLuaTaskTest {
+    @Test public void workbenchStartupConsumesSuppliedConfigWithoutWaitingForHiddenLegacyUi() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        globals.set("_ENV", globals);
+        LegacyLuaConfig.installWorkbenchConfigFlag(globals);
+        AtomicInteger legacyUiLayouts = new AtomicInteger();
+        AtomicInteger monitorRuns = new AtomicInteger();
+        AtomicLong sleptMillis = new AtomicLong();
+        globals.set("print", noOpFunction());
+        globals.set("toast", noOpFunction());
+        globals.set("hideToast", noOpFunction());
+        globals.set("setControlBarPosNew", noOpFunction());
+        globals.set("beginThread", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue function) { return LuaValue.NONE; }
+        });
+        globals.set("sleep", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue millis) {
+                sleptMillis.addAndGet(millis.optlong(0));
+                return LuaValue.NONE;
+            }
+        });
+        globals.set("getPackageName", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.valueOf("com.example.rylux"); }
+        });
+        globals.set("httpGet", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue url) { return LuaValue.valueOf(""); }
+        });
+        globals.set("取开机秒数", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.valueOf(1); }
+        });
+        globals.set("splitStr", new TwoArgFunction() {
+            @Override public LuaValue call(LuaValue source, LuaValue separator) {
+                return LegacyLuaCompat.splitStr(source, separator);
+            }
+        });
+
+        LuaTable suppliedConfig = new LuaTable();
+        for (String[] entry : new String[][]{
+                {"手机编号", "test"}, {"队长名", ""}, {"队员名", ""}, {"是否队长", "2"},
+                {"开启vpn", "false"}, {"检测修理装备", "true"}, {"背包保留重量", "3"},
+                {"背包保留格子", "2"}, {"背包检测间隔秒", "60"}, {"挂机点x", "120"},
+                {"挂机点y", "220"}, {"卖货地图", "0"}, {"挂机点地图", "0"},
+                {"保留蓝条数量", "4"}
+        }) suppliedConfig.set(entry[0], LuaValue.valueOf(entry[1]));
+
+        LuaTable ui = new LuaTable();
+        for (String method : new String[]{"newLayout", "addTabView", "addTab", "newRow", "addTextView",
+                "addEditText", "addRadioGroup", "addCheckBox", "addButton", "setOnClick", "show",
+                "setOnClose", "setText", "dismiss", "loadProfile", "saveProfile"}) {
+            ui.set(method, new VarArgFunction() {
+                @Override public Varargs invoke(Varargs args) {
+                    if ("newLayout".equals(method)) legacyUiLayouts.incrementAndGet();
+                    return LuaValue.NONE;
+                }
+            });
+        }
+        ui.set("getData", new ZeroArgFunction() {
+            @Override public LuaValue call() { return suppliedConfig; }
+        });
+        globals.set("ui", ui);
+
+        globals.set("require", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue module) {
+                String name = module.tojstring();
+                if ("TURING_VIP".equals(name)) return new LuaTable();
+                if ("w".equals(name)) return new LuaTable();
+                if ("中控".equals(name)) {
+                    globals.set("监控命令", new ZeroArgFunction() {
+                        @Override public LuaValue call() {
+                            monitorRuns.incrementAndGet();
+                            return LuaValue.NONE;
+                        }
+                    });
+                }
+                return LuaValue.TRUE;
+            }
+        });
+
+        String source = Files.readString(scriptRoot().resolve("封神榜.lua"), StandardCharsets.UTF_8);
+        globals.load(LuaSourceCompat.normalizeUnicodeIdentifiers(source), "封神榜.lua", globals).call();
+
+        assertEquals("The headless workbench must not try to create the hidden legacy form", 0,
+                legacyUiLayouts.get());
+        assertEquals("Startup must reach the script monitor after loading the supplied config", 1,
+                monitorRuns.get());
+        assertEquals("The workbench's configured hunt coordinate must reach the Lua main module", "120",
+                globals.get("界面数据").get("挂机点x").tojstring());
+        assertTrue("Startup must not incur the legacy 60-second form timeout", sleptMillis.get() < 60_000);
+    }
+
     @Test public void recoveredPartyLeaderCheckNeverDisbandsOnMissingOrUnreadableNames() throws Exception {
         Globals globals = JsePlatform.standardGlobals();
         globals.set("tickCount", new ZeroArgFunction() {
@@ -1460,5 +1549,11 @@ public final class RecoveredLuaTaskTest {
     private static void loadModule(Globals globals, Path path, String name) throws IOException {
         String source = Files.readString(path, StandardCharsets.UTF_8);
         globals.load(LuaSourceCompat.normalizeUnicodeIdentifiers(source), name, globals).call();
+    }
+
+    private static VarArgFunction noOpFunction() {
+        return new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return LuaValue.NONE; }
+        };
     }
 }
