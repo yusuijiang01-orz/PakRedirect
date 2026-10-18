@@ -1138,6 +1138,24 @@ end
 
 _ENV["检测背包_主页面识别红蓝数量"] = L0_1
 
+function L0_1(识别文本)
+  识别文本 = tostring(识别文本 or "")
+  识别文本 = string.gsub(识别文本, "%s+", "")
+  识别文本 = string.gsub(识别文本, "／", "/")
+  local 当前重量文本, 总重量文本 = string.match(识别文本, "^(%d+)%/(%d+)$")
+  if 当前重量文本 == nil then
+    return nil, nil
+  end
+  local 当前重量 = tonumber(当前重量文本)
+  local 总重量 = tonumber(总重量文本)
+  if 总重量 <= 0 or 当前重量 > 总重量 then
+    return nil, nil
+  end
+  return 当前重量, 总重量
+end
+
+_ENV["检测背包_解析重量"] = L0_1
+
 function L0_1()
   if _ENV["检测修理装备"] and _ENV["找到"](tz["提示装备需要修理"]) then
     toast("装备需要修理")
@@ -1183,10 +1201,8 @@ function L0_1()
       _ENV["当前背包格子"] = 当前空格子
       local 识别结果 = tomocrtextall(1057, 346, 1187, 373)
       print(识别结果)
-      local 识别结果数组 = splitStr(识别结果, "/")
-      if #识别结果数组 == 2 then
-        local 重量 = tonumberEx(识别结果数组[1])
-        local 总重量 = tonumberEx(识别结果数组[2])
+      local 重量, 总重量 = _ENV["检测背包_解析重量"](识别结果)
+      if 重量 ~= nil and 总重量 ~= nil then
         _ENV["当前背包重量"] = 重量 .. "/" .. 总重量
         toast(string.format("%d/%d", 重量, 总重量))
         if 总重量 - 重量 <= _ENV["背包保留重量"] then

@@ -61,6 +61,30 @@ public final class RecoveredLuaTaskTest {
                 LuaValue.valueOf("leader")).tojstring());
     }
 
+    @Test public void recoveredBackpackWeightParserAcceptsOcrSpacingAndFullWidthSlash() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.ZERO; }
+        });
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot().resolve(module), module);
+        }
+
+        LuaFunction parser = globals.get("检测背包_解析重量").checkfunction();
+        Varargs exact = parser.invoke(LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf("2/200")}));
+        assertEquals(2, exact.arg(1).toint());
+        assertEquals(200, exact.arg(2).toint());
+        Varargs spaced = parser.invoke(LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(" 12 / 200 ")}));
+        assertEquals(12, spaced.arg(1).toint());
+        assertEquals(200, spaced.arg(2).toint());
+        Varargs fullWidthSlash = parser.invoke(LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf("12／200")}));
+        assertEquals(12, fullWidthSlash.arg(1).toint());
+        assertEquals(200, fullWidthSlash.arg(2).toint());
+        Varargs impossible = parser.invoke(LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf("201/200")}));
+        assertTrue("Impossible or unreadable weights must be rejected instead of influencing the shop decision",
+                impossible.arg1().isnil() && impossible.arg(2).isnil());
+    }
+
     @Test public void stuckDetectorUsesRealGameScreenshotsAndTripsAfterTenUnchangedFrames() throws Exception {
         Path scriptRoot = scriptRoot();
         Globals globals = JsePlatform.standardGlobals();
