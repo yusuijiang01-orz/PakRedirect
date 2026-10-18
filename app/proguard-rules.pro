@@ -9,6 +9,11 @@
 # Keep the complete interpreter intact in the minified release APK; R8 otherwise
 # removes inner library implementations that appear unused from Java call sites.
 -keep class org.luaj.** { *; }
+# LuaJ ships optional adapters for the desktop JSR-223 scripting API and its
+# bytecode compiler. RYLUX uses the interpreter only; those APIs do not exist
+# on Android and are never loaded by the script host.
+-dontwarn javax.script.**
+-dontwarn org.apache.bcel.**
 
 # BlackBox creates Android framework proxies from runtime annotations on
 # generated black.android.* wrappers. Preserve their annotations and members
