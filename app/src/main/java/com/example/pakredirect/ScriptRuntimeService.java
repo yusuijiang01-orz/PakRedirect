@@ -87,22 +87,28 @@ public final class ScriptRuntimeService extends Service {
         startForeground(NOTIFICATION_ID, notification(lastMessage));
         publish(lastMessage);
         executor.execute(() -> {
-            LegacyLuaRuntime runtime = new LegacyLuaRuntime(this, control, config, this::publish);
+            LegacyLuaRuntime runtime = new LegacyLuaRuntime(this, control, config,
+                    this::publish, this::saveFailure);
             try {
                 runtime.run();
                 control.complete();
-                publish("脚本已完成");
+                Throwable workerFailure = control.getFailure();
+                if (workerFailure != null) reportFailure(workerFailure);
+                else publish("脚本已完成");
             } catch (ScriptExecutionControl.StopRequestedException stopped) {
-                control.complete();
-                publish("已停止");
+                Throwable workerFailure = control.getFailure();
+                if (workerFailure != null) reportFailure(workerFailure);
+                else { control.complete(); publish("已停止"); }
             } catch (Throwable failure) {
-                if (control.isStopRequested()) {
+                Throwable workerFailure = control.getFailure();
+                if (workerFailure != null) reportFailure(workerFailure);
+                else if (control.isStopRequested()) {
                     control.complete();
                     publish("已停止");
                 } else {
-                    control.fail();
-                    saveFailure(failure);
-                    publish("脚本失败：" + rootMessage(failure));
+                    if (control.fail(failure)) reportFailure(failure);
+                    else if (control.getFailure() != null) reportFailure(control.getFailure());
+                    else { control.complete(); publish("已停止"); }
                 }
             } finally {
                 stopForeground(true);
@@ -149,16 +155,21 @@ public final class ScriptRuntimeService extends Service {
         return message == null || message.trim().isEmpty() ? type : type + ": " + message;
     }
 
+    private void reportFailure(Throwable failure) {
+        saveFailure(failure);
+        publish("脚本失败：" + rootMessage(failure));
+    }
+
     private void saveFailure(Throwable failure) {
         java.io.StringWriter buffer = new java.io.StringWriter();
         failure.printStackTrace(new java.io.PrintWriter(buffer));
         String detail = buffer.toString();
-        // Keep diagnostics bounded because SharedPreferences is read synchronously on launch.
-        if (detail.length() > 16000) detail = detail.substring(0, 16000) + "\n…(诊断内容已截断)";
+        // Preserve the complete useful stack while keeping SharedPreferences bounded.
+        if (detail.length() > 64_000) detail = detail.substring(0, 64_000) + "\n…(诊断内容已截断)";
         getSharedPreferences(DIAGNOSTICS, MODE_PRIVATE).edit()
                 .putString(LAST_ERROR, detail)
                 .putLong("last_error_time", System.currentTimeMillis())
-                .apply();
+                .commit();
         Log.e("RYLUX-Lua", "脚本执行失败", failure);
     }
 

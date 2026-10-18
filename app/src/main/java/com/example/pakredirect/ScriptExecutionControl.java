@@ -12,15 +12,18 @@ public final class ScriptExecutionControl {
     private final ReentrantLock lock = new ReentrantLock();
     private final Condition changed = lock.newCondition();
     private volatile State state = State.IDLE;
+    private volatile Throwable failure;
     private final Set<Thread> workers = ConcurrentHashMap.newKeySet();
     private final Set<Thread> cancelledWorkers = ConcurrentHashMap.newKeySet();
 
     public State getState() { return state; }
+    public Throwable getFailure() { return failure; }
 
     public boolean isCurrentThreadCancellationRequested() {
         State currentState = state;
         return currentState == State.STOP_REQUESTED || currentState == State.STOPPED
-                || cancelledWorkers.contains(Thread.currentThread()) || Thread.currentThread().isInterrupted();
+                || currentState == State.FAILED
+                || cancelledWorkers.contains(Thread.currentThread());
     }
 
     public boolean isStopRequested() {
@@ -35,6 +38,7 @@ public final class ScriptExecutionControl {
                 throw new IllegalStateException("Script is already active: " + state);
             }
             state = State.RUNNING;
+            failure = null;
             workers.clear();
             cancelledWorkers.clear();
             changed.signalAll();
@@ -106,19 +110,21 @@ public final class ScriptExecutionControl {
             while (state == State.PAUSED) changed.await();
             Thread current = Thread.currentThread();
             boolean workerCancelled = cancelledWorkers.contains(current);
-            if (state == State.STOP_REQUESTED || state == State.STOPPED
-                    || workerCancelled || current.isInterrupted()) {
+            if (state == State.STOP_REQUESTED || state == State.STOPPED || state == State.FAILED
+                    || workerCancelled) {
                 if (state == State.STOP_REQUESTED || state == State.STOPPED) {
                     state = State.STOPPED;
                     changed.signalAll();
                 }
                 throw new StopRequestedException();
             }
+            if (current.isInterrupted()) throw new IllegalStateException("Script thread was interrupted unexpectedly");
             if (state != State.RUNNING) throw new IllegalStateException("Script is not running: " + state);
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             boolean workerCancelled = cancelledWorkers.contains(Thread.currentThread());
-            if (state == State.STOP_REQUESTED || workerCancelled) {
+            if (state == State.STOP_REQUESTED || state == State.STOPPED
+                    || state == State.FAILED || workerCancelled) {
                 if (state == State.STOP_REQUESTED) state = State.STOPPED;
                 throw new StopRequestedException();
             }
@@ -148,13 +154,32 @@ public final class ScriptExecutionControl {
     }
 
     public void complete() { finish(State.COMPLETED); }
-    public void fail() { finish(State.FAILED); }
+
+    /** Record the first failure and stop all other runtime threads. */
+    public boolean fail(Throwable cause) {
+        if (cause == null) throw new NullPointerException("cause");
+        lock.lock();
+        try {
+            if (state != State.RUNNING && state != State.PAUSED) return false;
+            failure = cause;
+            state = State.FAILED;
+            changed.signalAll();
+        } finally {
+            lock.unlock();
+        }
+        for (Thread worker : workers) {
+            if (worker != Thread.currentThread()) worker.interrupt();
+        }
+        return true;
+    }
 
     private void finish(State terminal) {
         lock.lock();
         try {
-            state = state == State.STOP_REQUESTED || state == State.STOPPED
-                    ? State.STOPPED : terminal;
+            if (state != State.FAILED) {
+                state = state == State.STOP_REQUESTED || state == State.STOPPED
+                        ? State.STOPPED : terminal;
+            }
             changed.signalAll();
         } finally {
             lock.unlock();

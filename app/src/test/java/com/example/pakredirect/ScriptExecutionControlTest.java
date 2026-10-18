@@ -2,6 +2,8 @@ package com.example.pakredirect;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 import java.util.concurrent.CountDownLatch;
@@ -38,6 +40,7 @@ public class ScriptExecutionControlTest {
         assertFalse(runner.isAlive());
         assertEquals(2, steps.get());
         assertEquals(ScriptExecutionControl.State.COMPLETED, control.getState());
+        assertNull(control.getFailure());
     }
 
     @Test public void stopInterruptsLongHostSleepPromptly() throws Exception {
@@ -62,6 +65,7 @@ public class ScriptExecutionControlTest {
         runner.join(1000);
         assertFalse(runner.isAlive());
         assertEquals(ScriptExecutionControl.State.STOPPED, control.getState());
+        assertNull(control.getFailure());
     }
 
     @Test public void cancellingOneLuaWorkerKeepsRuntimeRunning() throws Exception {
@@ -87,8 +91,64 @@ public class ScriptExecutionControlTest {
         worker.join(1000);
         assertFalse(worker.isAlive());
         assertEquals(ScriptExecutionControl.State.RUNNING, control.getState());
+        assertNull(control.getFailure());
         assertTrue(control.requestStop());
         control.complete();
         assertEquals(ScriptExecutionControl.State.STOPPED, control.getState());
+    }
+
+    @Test public void workerFailureStopsPausedRuntimeAndKeepsOriginalCause() throws Exception {
+        ScriptExecutionControl control = new ScriptExecutionControl();
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch cancelled = new CountDownLatch(2);
+        control.start();
+        Thread host = sleepingThread(control, ready, cancelled);
+        Thread sibling = sleepingThread(control, ready, cancelled);
+        host.start();
+        sibling.start();
+        assertTrue(ready.await(1, TimeUnit.SECONDS));
+        assertTrue(control.pause());
+
+        RuntimeException original = new RuntimeException("Lua worker failed");
+        assertTrue(control.fail(original));
+        assertTrue(cancelled.await(1, TimeUnit.SECONDS));
+        host.join(1000);
+        sibling.join(1000);
+        assertFalse(host.isAlive());
+        assertFalse(sibling.isAlive());
+        assertEquals(ScriptExecutionControl.State.FAILED, control.getState());
+        assertSame(original, control.getFailure());
+        assertFalse(control.fail(new RuntimeException("later failure")));
+        assertFalse(control.requestStop());
+        control.complete();
+        assertEquals(ScriptExecutionControl.State.FAILED, control.getState());
+        assertSame(original, control.getFailure());
+    }
+
+    @Test public void userStopDoesNotBecomeFailure() {
+        ScriptExecutionControl control = new ScriptExecutionControl();
+        control.start();
+        assertTrue(control.requestStop());
+        assertFalse(control.fail(new RuntimeException("cancelled work")));
+        control.complete();
+        assertEquals(ScriptExecutionControl.State.STOPPED, control.getState());
+        assertNull(control.getFailure());
+    }
+
+    private static Thread sleepingThread(ScriptExecutionControl control, CountDownLatch ready,
+                                         CountDownLatch cancelled) {
+        Thread thread = new Thread(() -> {
+            try {
+                control.attachCurrentThread();
+                ready.countDown();
+                control.sleep(30_000);
+            } catch (ScriptExecutionControl.StopRequestedException expected) {
+                cancelled.countDown();
+            } finally {
+                control.detachCurrentThread();
+            }
+        });
+        thread.setDaemon(true);
+        return thread;
     }
 }

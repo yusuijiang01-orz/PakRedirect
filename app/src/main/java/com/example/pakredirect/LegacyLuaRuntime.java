@@ -4,6 +4,7 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.os.SystemClock;
+import android.util.Log;
 import android.widget.Toast;
 
 import org.json.JSONObject;
@@ -27,6 +28,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 /** Minimal, fail-closed bridge for the recovered LuaJ-compatible scripts. */
 final class LegacyLuaRuntime {
@@ -40,6 +42,7 @@ final class LegacyLuaRuntime {
     private final ScriptExecutionControl control;
     private final JSONObject config;
     private final Listener listener;
+    private final Consumer<Throwable> failureListener;
     private final AtomicBoolean captureHeld = new AtomicBoolean(false);
     private final CopyOnWriteArrayList<Thread> threads = new CopyOnWriteArrayList<>();
     private volatile Bitmap latestFrame;
@@ -49,11 +52,13 @@ final class LegacyLuaRuntime {
     private volatile float touchStartX, touchStartY, touchEndX, touchEndY;
     private Globals globals;
 
-    LegacyLuaRuntime(Context context, ScriptExecutionControl control, JSONObject config, Listener listener) {
+    LegacyLuaRuntime(Context context, ScriptExecutionControl control, JSONObject config,
+                     Listener listener, Consumer<Throwable> failureListener) {
         this.context = context.getApplicationContext();
         this.control = control;
         this.config = config;
         this.listener = listener;
+        this.failureListener = failureListener;
     }
 
     static String[] compatibilityBlockers(Context context) {
@@ -68,11 +73,11 @@ final class LegacyLuaRuntime {
         instructionGate = new LuaInstructionGate(globals, control);
         restrictDangerousLibraries();
         installHostApi();
-        control.attachCurrentThread();
         try {
+            control.attachCurrentThread();
             loadModule("脚本/封神榜.lua", true);
         } finally {
-            for (Thread thread : threads) thread.interrupt();
+            for (Thread thread : threads) control.cancelWorker(thread);
             long deadline = SystemClock.uptimeMillis() + 2000;
             for (Thread thread : threads) {
                 if (thread == Thread.currentThread()) continue;
@@ -356,12 +361,18 @@ final class LegacyLuaRuntime {
 
     private Thread spawnLuaWorker(LuaFunction function, Varargs args, String name) {
         Thread worker = new Thread(() -> {
-            control.attachCurrentThread();
-            try { instructionGate.invoke(function, args); }
+            try {
+                control.attachCurrentThread();
+                instructionGate.invoke(function, args);
+            }
             catch (ScriptExecutionControl.StopRequestedException ignored) { }
             catch (Throwable error) {
-                if (!control.isCurrentThreadCancellationRequested() && !control.isStopRequested()
-                        && listener != null) listener.onStatus("后台脚本线程失败：" + error.getMessage());
+                if (!control.isCurrentThreadCancellationRequested() && control.fail(error)) {
+                    try { failureListener.accept(error); }
+                    catch (RuntimeException diagnosticFailure) {
+                        Log.e("RYLUX-Lua", "保存后台线程诊断失败", diagnosticFailure);
+                    }
+                }
             } finally {
                 control.detachCurrentThread();
                 threads.remove(Thread.currentThread());
@@ -801,6 +812,13 @@ final class LegacyLuaRuntime {
             LuaValue value = instructionGate.invoke(chunk, LuaValue.NONE);
             return value.isnil() ? LuaValue.TRUE : value;
         } catch (ScriptExecutionControl.StopRequestedException stopped) { throw stopped; }
+        catch (LuaError error) {
+            // Keep LuaJ's original stack and source line. Rebuilding the error from
+            // getMessage() discards the failing module's traceback and made the
+            // floating status impossible to diagnose.
+            error.addSuppressed(new IllegalStateException("加载 Lua 模块：" + assetPath));
+            throw error;
+        }
         catch (Exception error) { throw new LuaError("Lua 模块加载失败：" + assetPath + "：" + error.getMessage()); }
     }
 
