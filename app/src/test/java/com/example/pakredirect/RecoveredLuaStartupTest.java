@@ -34,6 +34,7 @@ import org.luaj.vm2.lib.jse.JsePlatform;
 public final class RecoveredLuaStartupTest {
     private static final String REACHED_MONITOR = "TEST_REACHED_MONITOR_LOOP";
     private static final String REACHED_WORKER_SLEEP = "TEST_REACHED_WORKER_SLEEP";
+    private static final long WORKER_SLEEP_PROBE_LIMIT = 1024;
 
     @Test public void recoveredEntryPointLoadsDependenciesAndReachesMainMonitor() throws Exception {
         Path assets = scriptAssets();
@@ -42,8 +43,9 @@ public final class RecoveredLuaStartupTest {
         AtomicBoolean executeWorker = new AtomicBoolean();
         AtomicReference<org.luaj.vm2.LuaFunction> workerFunction = new AtomicReference<>();
         AtomicLong ticks = new AtomicLong();
+        AtomicLong workerSleeps = new AtomicLong();
         List<String> loadedModules = new ArrayList<>();
-        installHostStubs(globals, monitorStarted, executeWorker, workerFunction, ticks);
+        installHostStubs(globals, monitorStarted, executeWorker, workerFunction, ticks, workerSleeps);
         installRequire(globals, assets, loadedModules, monitorStarted);
 
         try {
@@ -60,12 +62,14 @@ public final class RecoveredLuaStartupTest {
         executeWorker.set(true);
         try {
             workerFunction.get().invoke();
-            fail("The worker probe should stop only after its first loop reaches sleep");
+            fail("The worker probe should stop only after the safe iteration budget");
         } catch (LuaError expected) {
-            assertTrue("The worker should reach its first sleep without a host API error, got: "
+            assertTrue("The worker should complete a safe multi-step probe without a host API error, got: "
                             + expected.getMessage(),
                     expected.getMessage().contains(REACHED_WORKER_SLEEP));
         }
+        assertTrue("The worker should survive many screen-check branches before the probe stops",
+                workerSleeps.get() >= WORKER_SLEEP_PROBE_LIMIT);
 
         assertTrue("Recovered helper module w.lua must load", loadedModules.contains("w"));
         assertTrue("Recovered control module must load", loadedModules.contains("中控"));
@@ -77,13 +81,18 @@ public final class RecoveredLuaStartupTest {
     private static void installHostStubs(Globals globals, AtomicBoolean monitorStarted,
                                          AtomicBoolean executeWorker,
                                          AtomicReference<org.luaj.vm2.LuaFunction> workerFunction,
-                                         AtomicLong ticks) {
+                                         AtomicLong ticks, AtomicLong workerSleeps) {
         VarArgFunction noop = new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) { return LuaValue.NONE; }
         };
         globals.set("sleep", new OneArgFunction() {
             @Override public LuaValue call(LuaValue millis) {
-                if (executeWorker.get()) throw new LuaError(REACHED_WORKER_SLEEP);
+                if (executeWorker.get()) {
+                    if (workerSleeps.incrementAndGet() >= WORKER_SLEEP_PROBE_LIMIT) {
+                        throw new LuaError(REACHED_WORKER_SLEEP);
+                    }
+                    return LuaValue.NONE;
+                }
                 if (monitorStarted.get()) throw new LuaError(REACHED_MONITOR);
                 return LuaValue.NONE;
             }
@@ -125,7 +134,7 @@ public final class RecoveredLuaStartupTest {
             @Override public Varargs invoke(Varargs args) { return LuaValue.valueOf(0); }
         });
         globals.set("findColor", noMatch());
-        globals.set("findMultiColor", noMatch());
+        globals.set("findMultiColor", noCoordinateMatch());
         globals.set("findMultiColorAll", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) { return LuaValue.tableOf(); }
         });
@@ -133,6 +142,12 @@ public final class RecoveredLuaStartupTest {
         globals.set("findPicFast", noMatch());
         globals.set("cmpColorEx", new TwoArgFunction() {
             @Override public LuaValue call(LuaValue patterns, LuaValue threshold) { return LuaValue.valueOf(0); }
+        });
+        globals.set("tap", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return LuaValue.TRUE; }
+        });
+        globals.set("swipe", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return LuaValue.TRUE; }
         });
         globals.set("appIsRunning", new OneArgFunction() {
             @Override public LuaValue call(LuaValue packageName) { return LuaValue.TRUE; }
@@ -251,6 +266,14 @@ public final class RecoveredLuaStartupTest {
         return new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) {
                 return LuaValue.varargsOf(new LuaValue[]{LuaValue.FALSE, LuaValue.valueOf(-1), LuaValue.valueOf(-1)});
+            }
+        };
+    }
+
+    private static VarArgFunction noCoordinateMatch() {
+        return new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                return LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(-1), LuaValue.valueOf(-1)});
             }
         };
     }

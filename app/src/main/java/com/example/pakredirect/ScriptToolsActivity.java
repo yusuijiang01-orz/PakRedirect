@@ -48,6 +48,7 @@ import top.niunaijun.blackbox.BlackBoxCore;
 /** Configuration workbench only. There is no script runtime or game input path here. */
 public final class ScriptToolsActivity extends Activity {
     static final String EXTRA_SHOW_RUNTIME_DIAGNOSTIC = "show_runtime_diagnostic";
+    static final String EXTRA_REQUEST_START = "request_confirmed_runtime_start";
     private static final String RUNTIME_DIAGNOSTICS = "script_runtime_diagnostics";
     private static final String GAME = "com.tepaylink.tamgioiphantranhmobile";
     private static final String SCRIPT = "脚本/封神榜.lua";
@@ -97,12 +98,17 @@ public final class ScriptToolsActivity extends Activity {
         loadProfile();
         buildUi();
         if (getIntent().getBooleanExtra(EXTRA_SHOW_RUNTIME_DIAGNOSTIC, false)) showRuntimeDiagnostic();
+        else if (getIntent().getBooleanExtra(EXTRA_REQUEST_START, false)) confirmAndStart();
     }
 
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
         if (intent.getBooleanExtra(EXTRA_SHOW_RUNTIME_DIAGNOSTIC, false)) showRuntimeDiagnostic();
+        else if (intent.getBooleanExtra(EXTRA_REQUEST_START, false)) {
+            selectTab(6);
+            confirmAndStart();
+        }
     }
 
     private void showRuntimeDiagnostic() {

@@ -7,7 +7,6 @@ import android.app.Service;
 import android.content.Intent;
 import android.content.BroadcastReceiver;
 import android.content.IntentFilter;
-import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.graphics.Typeface;
@@ -147,7 +146,7 @@ public final class ScriptControlOverlayService extends Service {
         actions.setPadding(0, dp(3), 0, 0);
         actions.addView(actionCell("▶", "启动", BLUE, v -> {
             if (isRuntimeActive()) sendRuntimeAction(ScriptRuntimeService.ACTION_STOP);
-            else startRuntime();
+            else openStartConfirmation();
         }), actionCellParams(false));
         actions.addView(actionCell("Ⅱ", "暂停", SOFT, v -> sendRuntimeAction(
                 ScriptExecutionControl.State.PAUSED.name().equals(runtimeState)
@@ -183,11 +182,11 @@ public final class ScriptControlOverlayService extends Service {
         }
     }
 
-    private void startRuntime() {
-        SharedPreferences preferences = getSharedPreferences("script_workbench_profiles_v1", MODE_PRIVATE);
-        String selected = preferences.getString("selected", "默认方案");
-        String config = preferences.getString("profile:" + selected, "{}");
-        sendRuntimeAction(ScriptRuntimeService.ACTION_START, config);
+    private void openStartConfirmation() {
+        Intent open = new Intent(this, ScriptToolsActivity.class);
+        open.putExtra(ScriptToolsActivity.EXTRA_REQUEST_START, true);
+        open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        startActivity(open);
     }
 
     private void sendRuntimeAction(String action) { sendRuntimeAction(action, null); }
