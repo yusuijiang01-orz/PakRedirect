@@ -3,9 +3,10 @@ package com.example.pakredirect;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -194,8 +195,14 @@ public final class RecoveredLuaStartupTest {
 
     private static LuaValue loadLua(Globals globals, Path assets, String relativePath) throws IOException {
         Path file = assets.resolve(relativePath);
-        String source = Files.readString(file, StandardCharsets.UTF_8);
-        return globals.load(LuaSourceCompat.normalizeUnicodeIdentifiers(source), relativePath, globals)
+        StringBuilder source = new StringBuilder();
+        try (InputStreamReader reader = new InputStreamReader(new FileInputStream(file.toFile()),
+                StandardCharsets.UTF_8)) {
+            char[] buffer = new char[8192];
+            int read;
+            while ((read = reader.read(buffer)) != -1) source.append(buffer, 0, read);
+        }
+        return globals.load(LuaSourceCompat.normalizeUnicodeIdentifiers(source.toString()), relativePath, globals)
                 .invoke().arg1();
     }
 
@@ -204,7 +211,7 @@ public final class RecoveredLuaStartupTest {
         for (Path candidate : Arrays.asList(
                 workingDirectory.resolve("src/main/assets/script_modules"),
                 workingDirectory.resolve("app/src/main/assets/script_modules"))) {
-            if (Files.isDirectory(candidate)) return candidate;
+            if (candidate.toFile().isDirectory()) return candidate;
         }
         throw new IOException("Could not locate app/src/main/assets/script_modules from " + workingDirectory);
     }
