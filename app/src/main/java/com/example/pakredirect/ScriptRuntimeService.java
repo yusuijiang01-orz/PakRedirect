@@ -7,6 +7,7 @@ import android.app.Service;
 import android.content.Intent;
 import android.os.Build;
 import android.os.IBinder;
+import android.util.Log;
 
 import org.json.JSONObject;
 
@@ -25,6 +26,8 @@ public final class ScriptRuntimeService extends Service {
     public static final String EXTRA_MESSAGE = "message";
     private static final String CHANNEL = "script_runtime";
     private static final int NOTIFICATION_ID = 49;
+    private static final String DIAGNOSTICS = "script_runtime_diagnostics";
+    private static final String LAST_ERROR = "last_error";
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
         Thread thread = new Thread(r, "rylux-lua-host");
@@ -98,6 +101,7 @@ public final class ScriptRuntimeService extends Service {
                     publish("已停止");
                 } else {
                     control.fail();
+                    saveFailure(failure);
                     publish("脚本失败：" + rootMessage(failure));
                 }
             } finally {
@@ -143,6 +147,19 @@ public final class ScriptRuntimeService extends Service {
         String message = cause.getMessage();
         String type = cause.getClass().getName();
         return message == null || message.trim().isEmpty() ? type : type + ": " + message;
+    }
+
+    private void saveFailure(Throwable failure) {
+        java.io.StringWriter buffer = new java.io.StringWriter();
+        failure.printStackTrace(new java.io.PrintWriter(buffer));
+        String detail = buffer.toString();
+        // Keep diagnostics bounded because SharedPreferences is read synchronously on launch.
+        if (detail.length() > 16000) detail = detail.substring(0, 16000) + "\n…(诊断内容已截断)";
+        getSharedPreferences(DIAGNOSTICS, MODE_PRIVATE).edit()
+                .putString(LAST_ERROR, detail)
+                .putLong("last_error_time", System.currentTimeMillis())
+                .apply();
+        Log.e("RYLUX-Lua", "脚本执行失败", failure);
     }
 
     @Override public void onDestroy() {

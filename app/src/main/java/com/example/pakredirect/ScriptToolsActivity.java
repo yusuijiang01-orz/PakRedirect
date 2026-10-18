@@ -47,6 +47,8 @@ import top.niunaijun.blackbox.BlackBoxCore;
 
 /** Configuration workbench only. There is no script runtime or game input path here. */
 public final class ScriptToolsActivity extends Activity {
+    static final String EXTRA_SHOW_RUNTIME_DIAGNOSTIC = "show_runtime_diagnostic";
+    private static final String RUNTIME_DIAGNOSTICS = "script_runtime_diagnostics";
     private static final String GAME = "com.tepaylink.tamgioiphantranhmobile";
     private static final String SCRIPT = "脚本/封神榜.lua";
     private static final String[] MODULES = {
@@ -94,6 +96,33 @@ public final class ScriptToolsActivity extends Activity {
         profileName = preferences.getString("selected", "默认方案");
         loadProfile();
         buildUi();
+        if (getIntent().getBooleanExtra(EXTRA_SHOW_RUNTIME_DIAGNOSTIC, false)) showRuntimeDiagnostic();
+    }
+
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if (intent.getBooleanExtra(EXTRA_SHOW_RUNTIME_DIAGNOSTIC, false)) showRuntimeDiagnostic();
+    }
+
+    private void showRuntimeDiagnostic() {
+        String detail = getSharedPreferences(RUNTIME_DIAGNOSTICS, MODE_PRIVATE)
+                .getString("last_error", "尚无脚本失败诊断记录。下次失败后，点击悬浮窗顶部状态查看完整错误。" );
+        TextView content = label(detail, 12, TEXT, false);
+        content.setTextIsSelectable(true);
+        content.setTypeface(Typeface.MONOSPACE);
+        content.setPadding(dp(12), dp(8), dp(12), dp(8));
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(content, new ScrollView.LayoutParams(-1, -2));
+        new AlertDialog.Builder(this).setTitle("脚本运行诊断").setView(scroll)
+                .setPositiveButton("复制", (dialog, which) -> {
+                    android.content.ClipboardManager clipboard = (android.content.ClipboardManager)
+                            getSystemService(CLIPBOARD_SERVICE);
+                    if (clipboard != null) clipboard.setPrimaryClip(
+                            android.content.ClipData.newPlainText("RYLUX Lua diagnostic", detail));
+                    Toast.makeText(this, "诊断已复制", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("关闭", null).show();
     }
 
     @Override protected void onResume() {

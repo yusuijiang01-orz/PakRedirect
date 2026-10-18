@@ -131,6 +131,13 @@ public final class ScriptControlOverlayService extends Service {
         statusLabel.setMaxLines(1);
         statusLabel.setEllipsize(TextUtils.TruncateAt.END);
         statusLabel.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        statusLabel.setContentDescription("运行状态；点击查看完整诊断");
+        statusLabel.setOnClickListener(v -> {
+            Intent open = new Intent(this, ScriptToolsActivity.class);
+            open.putExtra(ScriptToolsActivity.EXTRA_SHOW_RUNTIME_DIAGNOSTIC, true);
+            open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            startActivity(open);
+        });
         header.addView(statusLabel, new LinearLayout.LayoutParams(0, dp(20), 1));
         panel.addView(header);
 
