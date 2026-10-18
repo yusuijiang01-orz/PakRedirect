@@ -864,7 +864,7 @@ final class LegacyLuaRuntime {
         control.checkpoint();
         try (InputStream stream = context.getAssets().open(ASSET_ROOT + assetPath);
              InputStreamReader reader = new InputStreamReader(stream, StandardCharsets.UTF_8)) {
-            listener.onStatus("加载 " + (main ? "主脚本" : "依赖模块"));
+            listener.onStatus("正在加载 " + (main ? "主脚本" : "依赖模块") + "：" + assetPath);
             StringBuilder source = new StringBuilder();
             char[] buffer = new char[8192];
             int read;
@@ -872,6 +872,7 @@ final class LegacyLuaRuntime {
             String compatibleSource = LuaSourceCompat.normalizeUnicodeIdentifiers(source.toString());
             LuaFunction chunk = globals.load(compatibleSource, assetPath, globals).checkfunction();
             LuaValue value = instructionGate.invoke(chunk, LuaValue.NONE);
+            listener.onStatus("已加载 " + assetPath);
             return value.isnil() ? LuaValue.TRUE : value;
         } catch (ScriptExecutionControl.StopRequestedException stopped) { throw stopped; }
         catch (LuaError error) {
