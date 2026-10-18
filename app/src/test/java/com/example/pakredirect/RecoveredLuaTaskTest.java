@@ -60,7 +60,7 @@ public final class RecoveredLuaTaskTest {
         assertEquals("不匹配", judge.call(LuaValue.valueOf("wrong"), LuaValue.valueOf("other"),
                 LuaValue.valueOf("leader")).tojstring());
 
-        LuaFunction inspectionDue = globals.get("组队_是否到队长检查时间").checkfunction();
+        LuaFunction inspectionDue = globals.get("组队_检查间隔已到").checkfunction();
         assertTrue("A missing baseline must not run the leader-name check on every loop",
                 !inspectionDue.call(LuaValue.NIL, LuaValue.valueOf(1000), LuaValue.valueOf("180")).toboolean());
         assertTrue("The configured 180-second period must not fire early",

@@ -1535,7 +1535,7 @@ function L0_1(上次检查时间, 当前时间, 检查间隔秒)
   return 当前时间 - tonumberEx(上次检查时间) > 1000 * tonumberEx(检查间隔秒)
 end
 
-_ENV["组队_是否到队长检查时间"] = L0_1
+_ENV["组队_检查间隔已到"] = L0_1
 
 function L0_1()
   _ENV["当前任务1"] = "挂机模式"
@@ -1586,7 +1586,7 @@ function L0_1()
         if _ENV["上次检测队长名字"] == nil then
           _ENV["上次检测队长名字"] = tickCount()
         end
-        if _ENV["组队_是否到队长检查时间"](_ENV["上次检测队长名字"], tickCount(), _ENV["界面数据"]["检测队长名字频率秒"]) then
+        if _ENV["组队_检查间隔已到"](_ENV["上次检测队长名字"], tickCount(), _ENV["界面数据"]["检测队长名字频率秒"]) then
           toast("去检测队长名字是否正确")
           sleep(1000)
           if _ENV["在主页面"]() then
@@ -1626,7 +1626,7 @@ function L0_1()
         if _ENV["上次检测是否有队伍"] == nil then
           _ENV["上次检测是否有队伍"] = tickCount()
         end
-        if tickCount() - _ENV["上次检测是否有队伍"] > 1000 * tonumberEx(_ENV["界面数据"]["检测是否有队伍频率秒"]) then
+        if _ENV["组队_检查间隔已到"](_ENV["上次检测是否有队伍"], tickCount(), _ENV["界面数据"]["检测是否有队伍频率秒"]) then
           if _ENV["在主页面"]() and _ENV["没有创建队伍"]() then
             _ENV["点击"]("@@点队伍按钮", 1114, 556, 2000)
           end
@@ -1684,6 +1684,7 @@ function L0_1()
             if _ENV["找到"](tz["组队_附近队伍页面"]) then
               _ENV["点击"]("@@关闭队伍 应该没有组队成功", 1203, 130, 1000)
             end
+          _ENV["上次检测是否有队伍"] = tickCount()
           end
         end
       end
