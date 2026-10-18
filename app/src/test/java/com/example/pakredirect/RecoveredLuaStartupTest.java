@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.Test;
 import org.luaj.vm2.Globals;
@@ -32,14 +33,17 @@ import org.luaj.vm2.lib.jse.JsePlatform;
 /** Exercises the recovered entry point and require chain without touching a game or device. */
 public final class RecoveredLuaStartupTest {
     private static final String REACHED_MONITOR = "TEST_REACHED_MONITOR_LOOP";
+    private static final String REACHED_WORKER_SLEEP = "TEST_REACHED_WORKER_SLEEP";
 
     @Test public void recoveredEntryPointLoadsDependenciesAndReachesMainMonitor() throws Exception {
         Path assets = scriptAssets();
         Globals globals = JsePlatform.standardGlobals();
         AtomicBoolean monitorStarted = new AtomicBoolean();
+        AtomicBoolean executeWorker = new AtomicBoolean();
+        AtomicReference<org.luaj.vm2.LuaFunction> workerFunction = new AtomicReference<>();
         AtomicLong ticks = new AtomicLong();
         List<String> loadedModules = new ArrayList<>();
-        installHostStubs(globals, monitorStarted, ticks);
+        installHostStubs(globals, monitorStarted, executeWorker, workerFunction, ticks);
         installRequire(globals, assets, loadedModules, monitorStarted);
 
         try {
@@ -50,6 +54,19 @@ public final class RecoveredLuaStartupTest {
                     expected.getMessage().contains(REACHED_MONITOR));
         }
 
+        assertTrue("The entry point should start the recovered worker", workerFunction.get() != null);
+        assertTrue("OCR finder bridge must be installed before running the worker", globals.get("tomocr").isfunction());
+        assertTrue("Lua table.unpack must be available to recovered code", globals.get("table").get("unpack").isfunction());
+        executeWorker.set(true);
+        try {
+            workerFunction.get().invoke();
+            fail("The worker probe should stop only after its first loop reaches sleep");
+        } catch (LuaError expected) {
+            assertTrue("The worker should reach its first sleep without a host API error, got: "
+                            + expected.getMessage(),
+                    expected.getMessage().contains(REACHED_WORKER_SLEEP));
+        }
+
         assertTrue("Recovered helper module w.lua must load", loadedModules.contains("w"));
         assertTrue("Recovered control module must load", loadedModules.contains("中控"));
         assertTrue("Recovered data module must load", loadedModules.contains("通用数据"));
@@ -57,12 +74,16 @@ public final class RecoveredLuaStartupTest {
         assertTrue("Main loop must start after all script configuration is initialized", monitorStarted.get());
     }
 
-    private static void installHostStubs(Globals globals, AtomicBoolean monitorStarted, AtomicLong ticks) {
+    private static void installHostStubs(Globals globals, AtomicBoolean monitorStarted,
+                                         AtomicBoolean executeWorker,
+                                         AtomicReference<org.luaj.vm2.LuaFunction> workerFunction,
+                                         AtomicLong ticks) {
         VarArgFunction noop = new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) { return LuaValue.NONE; }
         };
         globals.set("sleep", new OneArgFunction() {
             @Override public LuaValue call(LuaValue millis) {
+                if (executeWorker.get()) throw new LuaError(REACHED_WORKER_SLEEP);
                 if (monitorStarted.get()) throw new LuaError(REACHED_MONITOR);
                 return LuaValue.NONE;
             }
@@ -98,11 +119,44 @@ public final class RecoveredLuaStartupTest {
                 return LegacyLuaCompat.splitStr(source, separator);
             }
         });
+        globals.set("keepCapture", noop);
+        globals.set("releaseCapture", noop);
+        globals.set("getPixelColor", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return LuaValue.valueOf(0); }
+        });
+        globals.set("findColor", noMatch());
+        globals.set("findMultiColor", noMatch());
+        globals.set("findMultiColorAll", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return LuaValue.tableOf(); }
+        });
+        globals.set("findPic", noMatch());
+        globals.set("findPicFast", noMatch());
+        globals.set("cmpColorEx", new TwoArgFunction() {
+            @Override public LuaValue call(LuaValue patterns, LuaValue threshold) { return LuaValue.valueOf(0); }
+        });
+        globals.set("appIsRunning", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue packageName) { return LuaValue.TRUE; }
+        });
+        globals.set("frontAppName", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.valueOf("com.tepaylink.tamgioiphantranhmobile"); }
+        });
+        globals.set("tomocr", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                return LuaValue.varargsOf(new LuaValue[]{LuaValue.FALSE, new LuaTable()});
+            }
+        });
+        globals.set("tomocrtextall", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return LuaValue.valueOf(""); }
+        });
+        globals.set("tomocrtexttable", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return LuaValue.tableOf(); }
+        });
 
         LuaTable thread = new LuaTable();
         thread.set("newThread", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) {
                 monitorStarted.set(true);
+                workerFunction.set(args.arg1().checkfunction());
                 return new LuaTable();
             }
         });
@@ -191,6 +245,14 @@ public final class RecoveredLuaStartupTest {
         LuaTable table = new LuaTable();
         values.forEach((key, value) -> table.set(key, LuaValue.valueOf(value)));
         return table;
+    }
+
+    private static VarArgFunction noMatch() {
+        return new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                return LuaValue.varargsOf(new LuaValue[]{LuaValue.FALSE, LuaValue.valueOf(-1), LuaValue.valueOf(-1)});
+            }
+        };
     }
 
     private static LuaValue loadLua(Globals globals, Path assets, String relativePath) throws IOException {

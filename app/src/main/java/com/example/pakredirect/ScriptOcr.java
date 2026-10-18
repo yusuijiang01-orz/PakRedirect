@@ -57,8 +57,10 @@ public final class ScriptOcr implements AutoCloseable {
                     if (!first) json.append(',');
                     first = false;
                     json.append("{\"text\":\"").append(escape(line.getText()))
+                            .append("\",\"words\":\"").append(escape(line.getText()))
                             .append("\",\"x\":").append(box.centerX())
-                            .append(",\"y\":").append(box.centerY()).append('}');
+                            .append(",\"y\":").append(box.centerY())
+                            .append(",\"score\":").append(line.getConfidence()).append('}');
                 }
             }
             return new Result(text.toString(), json.append(']').toString());

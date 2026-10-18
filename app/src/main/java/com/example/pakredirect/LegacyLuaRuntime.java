@@ -235,6 +235,16 @@ final class LegacyLuaRuntime {
         globals.set("frontAppName", new ZeroFunction() {
             @Override public LuaValue invoke() { return LuaValue.valueOf(ScriptGameAdapter.foregroundPackage()); }
         });
+        globals.set("cmpColorEx", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                control.checkpoint();
+                double threshold = Math.max(0d, Math.min(1d, args.arg(2).optdouble(0.9d)));
+                Bitmap bitmap = frame();
+                boolean matches = LegacyLuaCompat.matchesColorPoints(args.arg(1).checkjstring(), threshold,
+                        bitmap.getWidth(), bitmap.getHeight(), bitmap::getPixel);
+                return LuaValue.valueOf(matches ? 1 : 0);
+            }
+        });
         globals.set("findColor", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) { return findPattern(args, false); }
         });
@@ -429,47 +439,89 @@ final class LegacyLuaRuntime {
     private void installOcrApi() {
         globals.set("tomocrtextall", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) {
-                Bitmap frame = frame();
-                int left = Math.max(0, args.arg(1).toint()), top = Math.max(0, args.arg(2).toint());
-                int right = Math.min(frame.getWidth(), args.arg(3).toint()), bottom = Math.min(frame.getHeight(), args.arg(4).toint());
-                if (right <= left || bottom <= top) return LuaValue.valueOf("");
-                Bitmap crop = Bitmap.createBitmap(frame, left, top, right - left, bottom - top);
-                try {
-                    if (ocr == null) ocr = new ScriptOcr();
-                    ScriptOcr.Result result = ocr.recognize(crop, true, 10000);
-                    return LuaValue.valueOf(result.text.replace("\n", ""));
-                } catch (Exception error) { rethrowIfStopped(); throw new LuaError("OCR 失败：" + error.getMessage()); }
-                finally { crop.recycle(); }
+                LuaTable lines = recognizeTextRegion(args, "OCR 失败");
+                StringBuilder text = new StringBuilder();
+                for (int i = 1; i <= lines.length(); i++) text.append(lines.get(i).get("words").tojstring());
+                return LuaValue.valueOf(text.toString());
             }
         });
-        globals.set("tomocrtext", globals.get("tomocrtextall"));
-        globals.set("tomocrnumber", globals.get("tomocrtextall"));
+        globals.set("tomocrtext", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                LuaTable lines = recognizeTextRegion(args, "OCR 失败");
+                return LuaValue.valueOf(lines.length() == 0 ? "" : lines.get(1).get("words").tojstring());
+            }
+        });
+        globals.set("tomocrnumber", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                LuaTable lines = recognizeTextRegion(args, "OCR 数字识别失败");
+                for (int i = 1; i <= lines.length(); i++) {
+                    String digits = lines.get(i).get("words").tojstring().replaceAll("[^0-9]", "");
+                    if (!digits.isEmpty()) {
+                        try { return LuaValue.valueOf(Long.parseLong(digits)); }
+                        catch (NumberFormatException ignored) { return LuaValue.valueOf(0); }
+                    }
+                }
+                return LuaValue.valueOf(0);
+            }
+        });
         globals.set("tomocrtexttable", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) {
-                Bitmap frame = frame();
-                int left = Math.max(0, args.arg(1).toint()), top = Math.max(0, args.arg(2).toint());
-                int right = Math.min(frame.getWidth(), args.arg(3).toint());
-                int bottom = Math.min(frame.getHeight(), args.arg(4).toint());
-                if (right <= left || bottom <= top) return LuaValue.tableOf();
-                Bitmap crop = Bitmap.createBitmap(frame, left, top, right - left, bottom - top);
-                try {
-                    if (ocr == null) ocr = new ScriptOcr();
-                    ScriptOcr.Result result = ocr.recognize(crop, true, 10000);
-                    org.json.JSONArray lines = new org.json.JSONArray(result.json);
-                    LuaTable table = new LuaTable();
-                    for (int i = 0; i < lines.length(); i++) {
-                        org.json.JSONObject line = lines.getJSONObject(i);
-                        LuaTable item = new LuaTable();
-                        item.set("text", LuaValue.valueOf(line.optString("text")));
-                        item.set("x", LuaValue.valueOf(line.optInt("x") + left));
-                        item.set("y", LuaValue.valueOf(line.optInt("y") + top));
-                        table.set(i + 1, item);
-                    }
-                    return table;
-                } catch (Exception error) { rethrowIfStopped(); throw new LuaError("OCR 表格识别失败：" + error.getMessage()); }
-                finally { crop.recycle(); }
+                return recognizeTextRegion(args, "OCR 表格识别失败");
             }
         });
+        globals.set("tomocr", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                LuaTable lines = recognizeTextRegion(args, "OCR 文本匹配失败");
+                LuaTable candidates = args.arg(5).checktable();
+                double minimumScore = Math.max(0d, Math.min(1d, args.arg(6).optdouble(0.8d)));
+                LuaTable match = LegacyLuaCompat.findOcrMatch(lines, candidates, minimumScore);
+                if (match != null) return LuaValue.varargsOf(new LuaValue[]{LuaValue.TRUE, match});
+                return LuaValue.varargsOf(new LuaValue[]{LuaValue.FALSE, new LuaTable()});
+            }
+        });
+        globals.set("tomocrclick", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                Varargs result = ((LuaFunction) globals.get("tomocr")).invoke(args);
+                if (!result.arg1().toboolean()) return LuaValue.FALSE;
+                LuaValue match = result.arg(2);
+                try {
+                    boolean clicked = ScriptGameAdapter.requireConnected().tap(
+                            (float) match.get("x").todouble(), (float) match.get("y").todouble(), 1000, 5000);
+                    return LuaValue.valueOf(clicked);
+                } catch (Exception error) { rethrowIfStopped(); throw new LuaError("OCR 点击失败：" + error.getMessage()); }
+            }
+        });
+    }
+
+    private LuaTable recognizeTextRegion(Varargs args, String errorLabel) {
+        Bitmap screen = frame();
+        int left = Math.max(0, args.arg(1).toint()), top = Math.max(0, args.arg(2).toint());
+        int right = Math.min(screen.getWidth(), args.arg(3).toint());
+        int bottom = Math.min(screen.getHeight(), args.arg(4).toint());
+        LuaTable table = new LuaTable();
+        if (right <= left || bottom <= top) return table;
+        Bitmap crop = Bitmap.createBitmap(screen, left, top, right - left, bottom - top);
+        try {
+            if (ocr == null) ocr = new ScriptOcr();
+            ScriptOcr.Result result = ocr.recognize(crop, true, 10000);
+            org.json.JSONArray lines = new org.json.JSONArray(result.json);
+            for (int i = 0; i < lines.length(); i++) {
+                org.json.JSONObject line = lines.getJSONObject(i);
+                String words = line.optString("words", line.optString("text", ""));
+                LuaTable item = new LuaTable();
+                item.set("words", LuaValue.valueOf(words));
+                item.set("text", LuaValue.valueOf(words));
+                item.set("x", LuaValue.valueOf(line.optInt("x") + left));
+                item.set("y", LuaValue.valueOf(line.optInt("y") + top));
+                item.set("score", LuaValue.valueOf(line.optDouble("score", 0d)));
+                item.set("success", LuaValue.TRUE);
+                table.set(i + 1, item);
+            }
+            return table;
+        } catch (Exception error) {
+            rethrowIfStopped();
+            throw new LuaError(errorLabel + "：" + error.getMessage());
+        } finally { crop.recycle(); }
     }
 
     private void installUiApi() {

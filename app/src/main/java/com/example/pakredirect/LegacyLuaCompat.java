@@ -7,6 +7,52 @@ import org.luaj.vm2.LuaValue;
 final class LegacyLuaCompat {
     private LegacyLuaCompat() { }
 
+    interface PixelReader { int getPixel(int x, int y); }
+
+    /** Implements the recovered cmpColorEx coordinate/color-list contract. */
+    static boolean matchesColorPoints(String encodedPoints, double threshold, int width, int height,
+                                      PixelReader pixels) {
+        if (encodedPoints == null || encodedPoints.trim().isEmpty() || pixels == null) return false;
+        String[] points = encodedPoints.split(",", -1);
+        if (points.length == 0) return false;
+        double required = Double.isNaN(threshold) ? 0.9d : Math.max(0d, Math.min(1d, threshold));
+        int matches = 0;
+        int valid = 0;
+        for (String point : points) {
+            String[] fields = point.trim().split("\\|", 3);
+            if (fields.length != 3) continue;
+            int x = parseInt(fields[0]), y = parseInt(fields[1]);
+            if (x < 0 || y < 0) continue;
+            String[] colorFields = fields[2].split("-", 2);
+            if (colorFields[0].trim().isEmpty()) continue;
+            valid++;
+            if (x >= width || y >= height) continue;
+            int expected = parseColor(colorFields[0]);
+            int tolerance = colorFields.length > 1 ? parseColor(colorFields[1]) : 0;
+            if (matchesColor(pixels.getPixel(x, y), expected, tolerance)) matches++;
+        }
+        return valid > 0 && matches > 0 && (double) matches / points.length >= required;
+    }
+
+    /** Finds the first OCR line matching one of the recovered script's literal text candidates. */
+    static LuaTable findOcrMatch(LuaTable lines, LuaTable candidates, double minimumScore) {
+        if (lines == null || candidates == null) return null;
+        double required = Double.isNaN(minimumScore) ? 0.8d : Math.max(0d, Math.min(1d, minimumScore));
+        for (int i = 1; i <= lines.length(); i++) {
+            LuaValue value = lines.get(i);
+            if (!value.istable()) continue;
+            LuaTable line = value.checktable();
+            String words = line.get("words").isnil() ? line.get("text").tojstring() : line.get("words").tojstring();
+            if (line.get("score").optdouble(0d) < required) continue;
+            for (int j = 1; j <= candidates.length(); j++) {
+                LuaValue candidate = candidates.get(j);
+                if (!candidate.isnil() && !candidate.tojstring().isEmpty()
+                        && words.contains(candidate.tojstring())) return line;
+            }
+        }
+        return null;
+    }
+
     static LuaTable splitStr(LuaValue source, LuaValue separator) {
         String text = source.isnil() ? "" : source.tojstring();
         String delimiter = separator.isnil() ? "" : separator.tojstring();
@@ -25,5 +71,21 @@ final class LegacyLuaCompat {
         }
         if (start < text.length()) result.set(index, LuaValue.valueOf(text.substring(start)));
         return result;
+    }
+
+    private static int parseColor(String value) {
+        try { return (int) Long.parseLong(value.trim(), 16) & 0x00ffffff; }
+        catch (RuntimeException ignored) { return 0; }
+    }
+
+    private static int parseInt(String value) {
+        try { return Integer.parseInt(value.trim()); }
+        catch (RuntimeException ignored) { return -1; }
+    }
+
+    private static boolean matchesColor(int actual, int expected, int tolerance) {
+        return Math.abs(((actual >> 16) & 255) - ((expected >> 16) & 255)) <= ((tolerance >> 16) & 255)
+                && Math.abs(((actual >> 8) & 255) - ((expected >> 8) & 255)) <= ((tolerance >> 8) & 255)
+                && Math.abs((actual & 255) - (expected & 255)) <= (tolerance & 255);
     }
 }
