@@ -492,6 +492,7 @@ final class LegacyLuaRuntime {
     private static JSONObject defaultScriptConfig() {
         JSONObject defaults = new JSONObject();
         try {
+            defaults.put("自动战斗", false);
             defaults.put("手机编号", "");
             defaults.put("队长名", "");
             defaults.put("队员名", "");

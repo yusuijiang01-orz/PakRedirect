@@ -82,6 +82,10 @@ jobs:
           chmod 600 "$RUNNER_TEMP/rylux-release.jks"
           echo "RYLUX_KEYSTORE_PATH=$RUNNER_TEMP/rylux-release.jks" >> "$GITHUB_ENV"
 
+      - name: Run Android unit tests
+        shell: bash
+        run: gradle testDebugUnitTest --stacktrace
+
       - name: Build signed APK
         shell: bash
         run: |
