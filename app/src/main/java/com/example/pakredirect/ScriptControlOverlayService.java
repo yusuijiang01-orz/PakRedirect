@@ -19,7 +19,6 @@ import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
-import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -44,7 +43,8 @@ public final class ScriptControlOverlayService extends Service {
     private WindowManager.LayoutParams params;
     private LinearLayout panel;
     private TextView statusLabel;
-    private Button pauseAction;
+    private TextView runActionLabel;
+    private TextView pauseActionLabel;
     private boolean expanded;
     private String runtimeState = ScriptExecutionControl.State.IDLE.name();
     private final BroadcastReceiver runtimeStatus = new BroadcastReceiver() {
@@ -54,7 +54,10 @@ public final class ScriptControlOverlayService extends Service {
             String message = intent.getStringExtra(ScriptRuntimeService.EXTRA_MESSAGE);
             runtimeState = state == null ? ScriptExecutionControl.State.IDLE.name() : state;
             statusLabel.setText((state == null ? "运行" : state) + " · " + (message == null ? "" : message));
-            if (pauseAction != null) pauseAction.setText(ScriptExecutionControl.State.PAUSED.name().equals(runtimeState) ? "继续" : "暂停");
+            boolean active = isRuntimeActive();
+            if (runActionLabel != null) runActionLabel.setText(active ? "停止" : "启动");
+            if (pauseActionLabel != null) pauseActionLabel.setText(
+                    ScriptExecutionControl.State.PAUSED.name().equals(runtimeState) ? "继续" : "暂停");
         }
     };
 
@@ -114,53 +117,53 @@ public final class ScriptControlOverlayService extends Service {
 
         panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(13), dp(12), dp(13), dp(13));
+        panel.setPadding(dp(9), dp(7), dp(9), dp(7));
         panel.setBackground(round(BG, 18, BORDER));
-        LinearLayout.LayoutParams panelLp = new LinearLayout.LayoutParams(dp(252), -2);
+        LinearLayout.LayoutParams panelLp = new LinearLayout.LayoutParams(dp(286), -2);
         panelLp.leftMargin = dp(8);
         dock.addView(panel, panelLp);
 
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        TextView mark = text("RYLUX", 15, TEXT, true);
-        header.addView(mark, new LinearLayout.LayoutParams(0, dp(30), 1));
+        TextView mark = text("RYLUX", 12, TEXT, true);
+        header.addView(mark, new LinearLayout.LayoutParams(dp(50), dp(20)));
         statusLabel = text("● 已就绪 · 点击启动后运行", 10, MUTED, false);
-        statusLabel.setMaxLines(2);
+        statusLabel.setMaxLines(1);
         statusLabel.setEllipsize(TextUtils.TruncateAt.END);
-        statusLabel.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
-        header.addView(statusLabel, new LinearLayout.LayoutParams(dp(120), -2));
-        TextView collapse = text("收起", 11, TEXT, true);
-        collapse.setGravity(Gravity.CENTER);
-        collapse.setBackground(round(SOFT, 9, BORDER));
-        collapse.setContentDescription("收起脚本控制");
-        collapse.setOnClickListener(v -> setExpanded(false));
-        LinearLayout.LayoutParams collapseLp = new LinearLayout.LayoutParams(dp(46), dp(30));
-        collapseLp.leftMargin = dp(5);
-        header.addView(collapse, collapseLp);
+        statusLabel.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        header.addView(statusLabel, new LinearLayout.LayoutParams(0, dp(20), 1));
         panel.addView(header);
 
-        LinearLayout first = row();
-        first.addView(action("启动", BLUE, v -> startRuntime()), cellParams(true));
-        pauseAction = action("暂停", SOFT, v -> sendRuntimeAction(
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        actions.setGravity(Gravity.CENTER_VERTICAL);
+        actions.setPadding(0, dp(3), 0, 0);
+        actions.addView(actionCell("▶", "启动", BLUE, v -> {
+            if (isRuntimeActive()) sendRuntimeAction(ScriptRuntimeService.ACTION_STOP);
+            else startRuntime();
+        }), actionCellParams(false));
+        actions.addView(actionCell("Ⅱ", "暂停", SOFT, v -> sendRuntimeAction(
                 ScriptExecutionControl.State.PAUSED.name().equals(runtimeState)
-                        ? ScriptRuntimeService.ACTION_RESUME : ScriptRuntimeService.ACTION_PAUSE));
-        first.addView(pauseAction, cellParams(false));
-        panel.addView(first);
-
-        LinearLayout second = row();
-        second.addView(action("设置", SOFT, v -> {
+                        ? ScriptRuntimeService.ACTION_RESUME : ScriptRuntimeService.ACTION_PAUSE)), actionCellParams(false));
+        actions.addView(actionCell("⚙", "设置", SOFT, v -> {
             Intent open = new Intent(this, ScriptToolsActivity.class);
             open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
             startActivity(open);
-        }), cellParams(true));
-        second.addView(action("退出", Color.rgb(74, 41, 48), v -> {
+        }), actionCellParams(false));
+        actions.addView(actionCell("⏻", "退出", Color.rgb(74, 41, 48), v -> {
             sendRuntimeAction(ScriptRuntimeService.ACTION_STOP);
             Toast.makeText(this, "已请求停止脚本并关闭悬浮窗", Toast.LENGTH_SHORT).show();
             stopSelf();
-        }), cellParams(false));
-        panel.addView(second);
+        }), actionCellParams(false));
+        panel.addView(actions);
         panel.setVisibility(View.GONE);
         return dock;
+    }
+
+    private boolean isRuntimeActive() {
+        return ScriptExecutionControl.State.RUNNING.name().equals(runtimeState)
+                || ScriptExecutionControl.State.PAUSED.name().equals(runtimeState)
+                || ScriptExecutionControl.State.STOP_REQUESTED.name().equals(runtimeState);
     }
 
     private void setExpanded(boolean value) {
@@ -193,29 +196,28 @@ public final class ScriptControlOverlayService extends Service {
         }
     }
 
-    private LinearLayout row() {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setPadding(0, dp(8), 0, 0);
-        return row;
-    }
-
-    private LinearLayout.LayoutParams cellParams(boolean left) {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(43), 1);
-        if (!left) lp.leftMargin = dp(8);
+    private LinearLayout.LayoutParams actionCellParams(boolean first) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(54), 1);
+        if (!first) lp.leftMargin = dp(3);
         return lp;
     }
 
-    private Button action(String title, int color, View.OnClickListener listener) {
-        Button button = new Button(this);
-        button.setText(title);
-        button.setTextColor(TEXT);
-        button.setTextSize(13);
-        button.setAllCaps(false);
-        button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        button.setBackground(round(color, 12, color == BLUE ? BLUE : BORDER));
-        button.setOnClickListener(listener);
-        return button;
+    private LinearLayout actionCell(String glyph, String title, int color, View.OnClickListener listener) {
+        LinearLayout cell = new LinearLayout(this);
+        cell.setOrientation(LinearLayout.VERTICAL);
+        cell.setGravity(Gravity.CENTER);
+        cell.setBackground(round(color, 11, color == BLUE ? BLUE : BORDER));
+        cell.setContentDescription(title);
+        TextView icon = text(glyph, 19, TEXT, true);
+        icon.setGravity(Gravity.CENTER);
+        cell.addView(icon, new LinearLayout.LayoutParams(-1, dp(27)));
+        TextView label = text(title, 10, TEXT, true);
+        label.setGravity(Gravity.CENTER);
+        cell.addView(label, new LinearLayout.LayoutParams(-1, dp(18)));
+        if ("启动".equals(title)) runActionLabel = label;
+        if ("暂停".equals(title)) pauseActionLabel = label;
+        cell.setOnClickListener(listener);
+        return cell;
     }
 
     /** The launcher stays on the left edge; tap toggles the attached control panel, drag repositions it. */
