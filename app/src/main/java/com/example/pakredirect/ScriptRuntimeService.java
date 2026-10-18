@@ -90,6 +90,7 @@ public final class ScriptRuntimeService extends Service {
             LegacyLuaRuntime runtime = new LegacyLuaRuntime(this, control, config,
                     this::publish, this::saveFailure);
             try {
+                verifyStartupDisplayCapture();
                 runtime.run();
                 control.complete();
                 Throwable workerFailure = control.getFailure();
@@ -105,6 +106,11 @@ public final class ScriptRuntimeService extends Service {
                 else if (control.isStopRequested()) {
                     control.complete();
                     publish("已停止");
+                } else if (failure instanceof StartupDisplayCaptureException) {
+                    if (control.fail(failure)) {
+                        saveFailure(failure);
+                        publish("启动失败：显示截图检查失败：" + rootMessage(failure.getCause()));
+                    }
                 } else {
                     if (control.fail(failure)) reportFailure(failure);
                     else if (control.getFailure() != null) reportFailure(control.getFailure());
@@ -115,6 +121,23 @@ public final class ScriptRuntimeService extends Service {
                 stopSelf();
             }
         });
+    }
+
+    private void verifyStartupDisplayCapture() throws StartupDisplayCaptureException {
+        android.graphics.Bitmap frame = null;
+        try {
+            frame = ScriptGameAdapter.requireConnected().captureDisplay(10_000);
+        } catch (Exception failure) {
+            throw new StartupDisplayCaptureException(failure);
+        } finally {
+            if (frame != null && !frame.isRecycled()) frame.recycle();
+        }
+    }
+
+    private static final class StartupDisplayCaptureException extends Exception {
+        StartupDisplayCaptureException(Throwable cause) {
+            super("启动前显示截图检查失败", cause);
+        }
     }
 
     private void publish(String message) {
