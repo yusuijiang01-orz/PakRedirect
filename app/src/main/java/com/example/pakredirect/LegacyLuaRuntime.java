@@ -743,7 +743,8 @@ final class LegacyLuaRuntime {
             int read;
             while ((read = reader.read(buffer)) != -1) source.append(buffer, 0, read);
             String compatibleSource = LuaSourceCompat.normalizeUnicodeIdentifiers(source.toString());
-            LuaValue value = instructionGate.invoke(globals.load(compatibleSource, assetPath, globals), LuaValue.NONE);
+            LuaFunction chunk = globals.load(compatibleSource, assetPath, globals).checkfunction();
+            LuaValue value = instructionGate.invoke(chunk, LuaValue.NONE);
             return value.isnil() ? LuaValue.TRUE : value;
         } catch (ScriptExecutionControl.StopRequestedException stopped) { throw stopped; }
         catch (Exception error) { throw new LuaError("Lua 模块加载失败：" + assetPath + "：" + error.getMessage()); }
