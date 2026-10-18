@@ -1142,6 +1142,7 @@ public final class RecoveredLuaTaskTest {
         LegacyCoordinateMapper mapper = new LegacyCoordinateMapper(720, 1280,
                 screen.getWidth(), screen.getHeight());
         AtomicBoolean ocrReadable = new AtomicBoolean(true);
+        List<String> purchaseClicks = new ArrayList<>();
         globals.set("tickCount", new ZeroArgFunction() {
             @Override public LuaValue call() { return LuaValue.ZERO; }
         });
@@ -1199,13 +1200,42 @@ public final class RecoveredLuaTaskTest {
         globals.set("界面数据", config);
         globals.set("买了一次红", LuaValue.FALSE);
         globals.set("买了一次蓝", LuaValue.FALSE);
+        config.set("购买蓝的数量", LuaValue.valueOf("3"));
+        LuaTable buyConfirmation = new LuaTable();
+        LuaTable templates = new LuaTable();
+        templates.set("商店买货确定页面", buyConfirmation);
+        globals.set("tz", templates);
+        globals.set("找到", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue template) {
+                return LuaValue.valueOf(template.raweq(buyConfirmation));
+            }
+        });
+        globals.set("点击", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                purchaseClicks.add(args.arg1().tojstring());
+                return LuaValue.NONE;
+            }
+        });
         Varargs decision = globals.get("检测背包_判断是否去卖或者买药").checkfunction().invoke();
         assertEquals("买蓝", decision.arg1().tojstring());
         assertEquals("1", decision.arg(2).tojstring());
+        globals.get("去卖货_卖货_执行红蓝处理").checkfunction().call(decision.arg1());
+        assertTrue("The screenshot-driven decision should select the blue supply tab",
+                purchaseClicks.contains("@@点蓝"));
+        assertEquals("Configured quantity 3 must add two units after the first",
+                2, java.util.Collections.frequency(purchaseClicks, "@@购买+1"));
+        assertTrue("The purchase flow must submit the configured quantity",
+                purchaseClicks.contains("@@确定购买数量"));
 
         ocrReadable.set(false);
         Varargs unreadableDecision = globals.get("检测背包_判断是否去卖或者买药").checkfunction().invoke();
         assertEquals("", unreadableDecision.arg1().tojstring());
+        int clicksAfterSuccessfulPurchase = purchaseClicks.size();
+        if (!unreadableDecision.arg1().tojstring().isEmpty()) {
+            globals.get("去卖货_卖货_执行红蓝处理").checkfunction().call(unreadableDecision.arg1());
+        }
+        assertEquals("Unreadable OCR must not produce additional purchase clicks",
+                clicksAfterSuccessfulPurchase, purchaseClicks.size());
     }
 
     private static Varargs findMultiColor(BufferedImage image, LegacyCoordinateMapper mapper, Varargs args) {
