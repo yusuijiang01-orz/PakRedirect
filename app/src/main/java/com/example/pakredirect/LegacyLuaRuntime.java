@@ -47,6 +47,7 @@ final class LegacyLuaRuntime {
     private final AtomicBoolean captureHeld = new AtomicBoolean(false);
     private final CopyOnWriteArrayList<Thread> threads = new CopyOnWriteArrayList<>();
     private volatile Bitmap latestFrame;
+    private volatile LegacyCoordinateMapper coordinateMapper;
     private volatile int[] ocrRegion = new int[]{0, 0, 0, 0};
     private ScriptOcr ocr;
     private LuaInstructionGate instructionGate;
@@ -127,7 +128,9 @@ final class LegacyLuaRuntime {
             @Override public Varargs invoke(Varargs args) {
                 control.checkpoint();
                 Bitmap frame = frame();
-                int x = args.arg(1).toint(), y = args.arg(2).toint();
+                LegacyCoordinateMapper mapper = mapperFor(frame);
+                int x = mapper.toScreenX(args.arg(1).todouble());
+                int y = mapper.toScreenY(args.arg(2).todouble());
                 if (x < 0 || y < 0 || x >= frame.getWidth() || y >= frame.getHeight()) return LuaValue.valueOf(0);
                 int color = frame.getPixel(x, y);
                 return LuaValue.valueOf(color & 0x00ffffff);
@@ -137,7 +140,12 @@ final class LegacyLuaRuntime {
             @Override public Varargs invoke(Varargs args) {
                 control.checkpoint();
                 try {
-                    boolean ok = ScriptGameAdapter.requireConnected().tap(args.arg(1).tofloat(), args.arg(2).tofloat(),
+                    Bitmap screen = frame();
+                    LegacyCoordinateMapper mapper = mapperFor(screen);
+                    int x = mapper.toScreenX(args.arg(1).todouble());
+                    int y = mapper.toScreenY(args.arg(2).todouble());
+                    requireDisplayPoint(x, y, screen);
+                    boolean ok = ScriptGameAdapter.requireConnected().tap(x, y,
                             args.narg() >= 3 ? args.arg(3).optlong(80) : 80, 5000);
                     if (!ok) throw new LuaError("系统未接受点击手势");
                     return LuaValue.TRUE;
@@ -148,8 +156,16 @@ final class LegacyLuaRuntime {
             @Override public Varargs invoke(Varargs args) {
                 control.checkpoint();
                 try {
-                    boolean ok = ScriptGameAdapter.requireConnected().swipe(args.arg(1).tofloat(), args.arg(2).tofloat(),
-                            args.arg(3).tofloat(), args.arg(4).tofloat(), args.arg(5).optlong(300), 8000);
+                    Bitmap screen = frame();
+                    LegacyCoordinateMapper mapper = mapperFor(screen);
+                    int x1 = mapper.toScreenX(args.arg(1).todouble());
+                    int y1 = mapper.toScreenY(args.arg(2).todouble());
+                    int x2 = mapper.toScreenX(args.arg(3).todouble());
+                    int y2 = mapper.toScreenY(args.arg(4).todouble());
+                    requireDisplayPoint(x1, y1, screen);
+                    requireDisplayPoint(x2, y2, screen);
+                    boolean ok = ScriptGameAdapter.requireConnected().swipe(x1, y1, x2, y2,
+                            args.arg(5).optlong(300), 8000);
                     if (!ok) throw new LuaError("系统未接受滑动手势");
                     return LuaValue.TRUE;
                 } catch (Exception error) { rethrowIfStopped(); throw new LuaError("触控失败：" + error.getMessage()); }
@@ -185,8 +201,14 @@ final class LegacyLuaRuntime {
             @Override public Varargs invoke(Varargs args) {
                 control.checkpoint();
                 try {
-                    boolean ok = ScriptGameAdapter.requireConnected().swipe(touchStartX, touchStartY,
-                            touchEndX, touchEndY, touchDurationMs, 8000);
+                    Bitmap screen = frame();
+                    LegacyCoordinateMapper mapper = mapperFor(screen);
+                    int x1 = mapper.toScreenX(touchStartX), y1 = mapper.toScreenY(touchStartY);
+                    int x2 = mapper.toScreenX(touchEndX), y2 = mapper.toScreenY(touchEndY);
+                    requireDisplayPoint(x1, y1, screen);
+                    requireDisplayPoint(x2, y2, screen);
+                    boolean ok = ScriptGameAdapter.requireConnected().swipe(
+                            x1, y1, x2, y2, touchDurationMs, 8000);
                     if (!ok) throw new LuaError("系统未接受触控手势");
                     return LuaValue.TRUE;
                 } catch (Exception error) { rethrowIfStopped(); throw new LuaError("触控失败：" + error.getMessage()); }
@@ -197,9 +219,12 @@ final class LegacyLuaRuntime {
         });
         globals.set("getDisplaySize", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) {
-                android.util.DisplayMetrics metrics = context.getResources().getDisplayMetrics();
-                return LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(metrics.widthPixels),
-                        LuaValue.valueOf(metrics.heightPixels)});
+                // DisplayMetrics describes the host activity's orientation, which can
+                // differ from the game display inside BlackBox. Use the same captured
+                // frame that every pixel/OCR/touch API is mapped against.
+                LegacyCoordinateMapper mapper = mapperFor(frame());
+                return LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(mapper.referenceWidth()),
+                        LuaValue.valueOf(mapper.referenceHeight())});
             }
         });
         globals.set("getDisplayDpi", new ZeroFunction() {
@@ -275,7 +300,8 @@ final class LegacyLuaRuntime {
                 control.checkpoint();
                 double threshold = Math.max(0d, Math.min(1d, args.arg(2).optdouble(0.9d)));
                 Bitmap bitmap = frame();
-                boolean matches = LegacyLuaCompat.matchesColorPoints(args.arg(1).checkjstring(), threshold,
+                LegacyCoordinateMapper mapper = mapperFor(bitmap);
+                boolean matches = LegacyLuaCompat.matchesColorPoints(mapper.mapColorPoints(args.arg(1).checkjstring()), threshold,
                         bitmap.getWidth(), bitmap.getHeight(), bitmap::getPixel);
                 return LuaValue.valueOf(matches ? 1 : 0);
             }
@@ -459,8 +485,9 @@ final class LegacyLuaRuntime {
         control.checkpoint();
         int[] r = ocrRegion;
         Bitmap screen = frame();
-        int left = Math.max(0, r[0]), top = Math.max(0, r[1]);
-        int right = Math.min(screen.getWidth(), r[2]), bottom = Math.min(screen.getHeight(), r[3]);
+        LegacyCoordinateMapper mapper = mapperFor(screen);
+        int left = Math.max(0, mapper.left(r[0])), top = Math.max(0, mapper.top(r[1]));
+        int right = mapper.edgeRight(r[2]), bottom = mapper.edgeBottom(r[3]);
         if (right <= left || bottom <= top) return LuaValue.valueOf("");
         Bitmap crop = Bitmap.createBitmap(screen, left, top, right - left, bottom - top);
         try {
@@ -528,8 +555,11 @@ final class LegacyLuaRuntime {
                 if (!result.arg1().toboolean()) return LuaValue.FALSE;
                 LuaValue match = result.arg(2);
                 try {
+                    Bitmap screen = frame();
+                    LegacyCoordinateMapper mapper = mapperFor(screen);
                     boolean clicked = ScriptGameAdapter.requireConnected().tap(
-                            (float) match.get("x").todouble(), (float) match.get("y").todouble(), 1000, 5000);
+                            mapper.toScreenX(match.get("x").todouble()),
+                            mapper.toScreenY(match.get("y").todouble()), 1000, 5000);
                     return LuaValue.valueOf(clicked);
                 } catch (Exception error) { rethrowIfStopped(); throw new LuaError("OCR 点击失败：" + error.getMessage()); }
             }
@@ -551,9 +581,11 @@ final class LegacyLuaRuntime {
 
     private LuaTable recognizeTextRegion(Varargs args, String errorLabel) {
         Bitmap screen = frame();
-        int left = Math.max(0, args.arg(1).toint()), top = Math.max(0, args.arg(2).toint());
-        int right = Math.min(screen.getWidth(), args.arg(3).toint());
-        int bottom = Math.min(screen.getHeight(), args.arg(4).toint());
+        LegacyCoordinateMapper mapper = mapperFor(screen);
+        int left = Math.max(0, mapper.left(args.arg(1).todouble()));
+        int top = Math.max(0, mapper.top(args.arg(2).todouble()));
+        int right = mapper.edgeRight(args.arg(3).todouble());
+        int bottom = mapper.edgeBottom(args.arg(4).todouble());
         LuaTable table = new LuaTable();
         if (right <= left || bottom <= top) return table;
         Bitmap crop = Bitmap.createBitmap(screen, left, top, right - left, bottom - top);
@@ -567,8 +599,8 @@ final class LegacyLuaRuntime {
                 LuaTable item = new LuaTable();
                 item.set("words", LuaValue.valueOf(words));
                 item.set("text", LuaValue.valueOf(words));
-                item.set("x", LuaValue.valueOf(line.optInt("x") + left));
-                item.set("y", LuaValue.valueOf(line.optInt("y") + top));
+                item.set("x", LuaValue.valueOf(mapper.toReferenceX(line.optInt("x") + left)));
+                item.set("y", LuaValue.valueOf(mapper.toReferenceY(line.optInt("y") + top)));
                 item.set("score", LuaValue.valueOf(line.optDouble("score", 0d)));
                 item.set("success", LuaValue.TRUE);
                 table.set(i + 1, item);
@@ -597,6 +629,13 @@ final class LegacyLuaRuntime {
                     Object value = config.opt(key);
                     values.set(key, LuaValue.valueOf(value == null || value == JSONObject.NULL ? "" : String.valueOf(value)));
                 }
+                String[] blueFilterFlags = LegacyLuaConfig.blueFilterFlags(
+                        values.get("蓝条筛选模式").isnil() ? null : values.get("蓝条筛选模式").tojstring());
+                if (blueFilterFlags != null) {
+                    values.set("回蓝>=", LuaValue.valueOf(blueFilterFlags[0]));
+                    values.set("魔法出招>=", LuaValue.valueOf(blueFilterFlags[1]));
+                    values.set("武器出招>=", LuaValue.valueOf(blueFilterFlags[2]));
+                }
                 if (values.get("是否队长").isnil()) values.set("是否队长", LuaValue.valueOf("0"));
                 return values;
             }
@@ -607,8 +646,11 @@ final class LegacyLuaRuntime {
     private Varargs findPattern(Varargs args, boolean multi) {
         control.checkpoint();
         Bitmap frame = frame();
-        int left = Math.max(0, args.arg(1).toint()), top = Math.max(0, args.arg(2).toint());
-        int right = Math.min(frame.getWidth() - 1, args.arg(3).toint()), bottom = Math.min(frame.getHeight() - 1, args.arg(4).toint());
+        LegacyCoordinateMapper mapper = mapperFor(frame);
+        int left = Math.max(0, mapper.left(args.arg(1).todouble()));
+        int top = Math.max(0, mapper.top(args.arg(2).todouble()));
+        int right = Math.min(frame.getWidth() - 1, mapper.right(args.arg(3).todouble()));
+        int bottom = Math.min(frame.getHeight() - 1, mapper.bottom(args.arg(4).todouble()));
         String primary = args.arg(5).tojstring().split("\\|", 2)[0];
         String[] primaryParts = primary.split("-", 2);
         int color = parseColor(primaryParts[0]);
@@ -619,7 +661,8 @@ final class LegacyLuaRuntime {
             String[] parts = points.split("\\|");
             for (int i = 0; i + 2 < parts.length; i += 3) {
                 String[] colorParts = parts[i + 2].split("-", 2);
-                offsets.add(new int[]{parseInt(parts[i]), parseInt(parts[i + 1]), parseColor(colorParts[0]),
+                offsets.add(new int[]{mapper.toScreenDeltaX(parseInt(parts[i])),
+                        mapper.toScreenDeltaY(parseInt(parts[i + 1])), parseColor(colorParts[0]),
                         colorParts.length > 1 ? parseColor(colorParts[1]) : 0});
             }
         }
@@ -634,7 +677,8 @@ final class LegacyLuaRuntime {
                         String[] expectedParts = colors[i].split("-", 2);
                         int expected = parseColor(expectedParts[0]);
                         int colorTolerance = expectedParts.length > 1 ? parseColor(expectedParts[1]) : 0;
-                        if (x + i >= frame.getWidth() || !colorMatches(frame.getPixel(x + i, y), expected, colorTolerance)) {
+                        int px = x + mapper.toScreenDeltaX(i);
+                        if (px < 0 || px >= frame.getWidth() || !colorMatches(frame.getPixel(px, y), expected, colorTolerance)) {
                             match = false; break;
                         }
                     }
@@ -646,7 +690,8 @@ final class LegacyLuaRuntime {
                             || !colorMatches(frame.getPixel(px, py), p[2], p[3])) { match = false; break; }
                 }
                 if (match) {
-                    LuaValue xVal = LuaValue.valueOf(x), yVal = LuaValue.valueOf(y);
+                    LuaValue xVal = LuaValue.valueOf(mapper.toReferenceX(x));
+                    LuaValue yVal = LuaValue.valueOf(mapper.toReferenceY(y));
                     return multi ? LuaValue.varargsOf(new LuaValue[]{xVal, yVal})
                             : LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(1), xVal, yVal});
                 }
@@ -659,9 +704,11 @@ final class LegacyLuaRuntime {
     private LuaTable findAllPatterns(Varargs args) {
         control.checkpoint();
         Bitmap frame = frame();
-        int left = Math.max(0, args.arg(1).toint()), top = Math.max(0, args.arg(2).toint());
-        int right = Math.min(frame.getWidth() - 1, args.arg(3).toint());
-        int bottom = Math.min(frame.getHeight() - 1, args.arg(4).toint());
+        LegacyCoordinateMapper mapper = mapperFor(frame);
+        int left = Math.max(0, mapper.left(args.arg(1).todouble()));
+        int top = Math.max(0, mapper.top(args.arg(2).todouble()));
+        int right = Math.min(frame.getWidth() - 1, mapper.right(args.arg(3).todouble()));
+        int bottom = Math.min(frame.getHeight() - 1, mapper.bottom(args.arg(4).todouble()));
         String[] primaryParts = args.arg(5).tojstring().split("\\|", 2)[0].split("-", 2);
         int color = parseColor(primaryParts[0]);
         int tolerance = primaryParts.length > 1 ? parseColor(primaryParts[1]) : 0;
@@ -671,7 +718,8 @@ final class LegacyLuaRuntime {
             String[] parts = points.split("\\|");
             for (int i = 0; i + 2 < parts.length; i += 3) {
                 String[] colorParts = parts[i + 2].split("-", 2);
-                offsets.add(new int[]{parseInt(parts[i]), parseInt(parts[i + 1]), parseColor(colorParts[0]),
+                offsets.add(new int[]{mapper.toScreenDeltaX(parseInt(parts[i])),
+                        mapper.toScreenDeltaY(parseInt(parts[i + 1])), parseColor(colorParts[0]),
                         colorParts.length > 1 ? parseColor(colorParts[1]) : 0});
             }
         }
@@ -692,8 +740,8 @@ final class LegacyLuaRuntime {
                 }
                 if (match) {
                     LuaTable point = new LuaTable();
-                    point.set("x", LuaValue.valueOf(x));
-                    point.set("y", LuaValue.valueOf(y));
+                    point.set("x", LuaValue.valueOf(mapper.toReferenceX(x)));
+                    point.set("y", LuaValue.valueOf(mapper.toReferenceY(y)));
                     matches.set(++count, point);
                     if (count >= MAX_COLOR_MATCHES) return matches;
                 }
@@ -706,13 +754,22 @@ final class LegacyLuaRuntime {
     private Varargs findImage(Varargs args, boolean fast) {
         control.checkpoint();
         Bitmap screen = frame();
-        Bitmap template = loadTemplate(args.arg(5).tojstring());
-        if (template == null) throw new LuaError("找图模板不存在：" + args.arg(5).tojstring());
+        LegacyCoordinateMapper mapper = mapperFor(screen);
+        String templatePath = args.arg(5).tojstring();
+        boolean capturedFromCurrentDisplay = snapshotFile(templatePath).isFile();
+        Bitmap sourceTemplate = loadTemplate(templatePath);
+        if (sourceTemplate == null) throw new LuaError("找图模板不存在：" + templatePath);
+        Bitmap template = sourceTemplate;
         try {
-            int left = Math.max(0, args.arg(1).toint());
-            int top = Math.max(0, args.arg(2).toint());
-            int right = Math.min(screen.getWidth(), args.arg(3).toint());
-            int bottom = Math.min(screen.getHeight(), args.arg(4).toint());
+            if (mapper.shouldScaleTemplate(capturedFromCurrentDisplay)) {
+                int scaledWidth = Math.max(1, mapper.toScreenDeltaX(sourceTemplate.getWidth()));
+                int scaledHeight = Math.max(1, mapper.toScreenDeltaY(sourceTemplate.getHeight()));
+                template = Bitmap.createScaledBitmap(sourceTemplate, scaledWidth, scaledHeight, true);
+            }
+            int left = Math.max(0, mapper.left(args.arg(1).todouble()));
+            int top = Math.max(0, mapper.top(args.arg(2).todouble()));
+            int right = mapper.edgeRight(args.arg(3).todouble());
+            int bottom = mapper.edgeBottom(args.arg(4).todouble());
             int tw = template.getWidth(), th = template.getHeight();
             if (right - left < tw || bottom - top < th) return imageNotFound(fast);
             int mask = args.narg() >= 6 ? parseColor(args.arg(6).tojstring()) : -1;
@@ -733,7 +790,9 @@ final class LegacyLuaRuntime {
                     control.checkpoint();
                     double score = templateScore(screen, template, x, y, mask, sampleStep);
                     if (score > bestScore) { bestScore = score; bestX = x; bestY = y; }
-                    if (scanStep == 1 && score >= threshold) return imageMatch(fast, x, y);
+                    if (scanStep == 1 && score >= threshold) {
+                        return imageMatch(fast, mapper.toReferenceX(x), mapper.toReferenceY(y));
+                    }
                 }
             }
             // Verify the neighborhood around the coarse best candidate using every
@@ -744,11 +803,16 @@ final class LegacyLuaRuntime {
                 for (int y = fromY; y <= toY; y++) for (int x = fromX; x <= toX; x++) {
                     control.checkpoint();
                     double score = templateScore(screen, template, x, y, mask, 1);
-                    if (score >= threshold) return imageMatch(fast, x, y);
+                    if (score >= threshold) {
+                        return imageMatch(fast, mapper.toReferenceX(x), mapper.toReferenceY(y));
+                    }
                 }
             }
             return imageNotFound(fast);
-        } finally { template.recycle(); }
+        } finally {
+            if (template != sourceTemplate && !template.isRecycled()) template.recycle();
+            if (!sourceTemplate.isRecycled()) sourceTemplate.recycle();
+        }
     }
 
     private int countTemplateSamples(Bitmap template, int mask, int step) {
@@ -794,8 +858,11 @@ final class LegacyLuaRuntime {
         boolean ownsCrop = false;
         try {
             if (args.narg() >= 5) {
-                int left = Math.max(0, args.arg(2).toint()), top = Math.max(0, args.arg(3).toint());
-                int right = Math.min(source.getWidth(), args.arg(4).toint()), bottom = Math.min(source.getHeight(), args.arg(5).toint());
+                LegacyCoordinateMapper mapper = mapperFor(source);
+                int left = Math.max(0, mapper.left(args.arg(2).todouble()));
+                int top = Math.max(0, mapper.top(args.arg(3).todouble()));
+                int right = mapper.edgeRight(args.arg(4).todouble());
+                int bottom = mapper.edgeBottom(args.arg(5).todouble());
                 if (right <= left || bottom <= top) throw new LuaError("截图区域无效");
                 crop = Bitmap.createBitmap(source, left, top, right - left, bottom - top);
                 ownsCrop = true;
@@ -841,8 +908,12 @@ final class LegacyLuaRuntime {
             Bitmap capture = ScriptGameAdapter.requireConnected().captureDisplay(10000);
             Bitmap old = latestFrame;
             latestFrame = capture;
+            coordinateMapper = mapperFor(capture.getWidth(), capture.getHeight());
             if (old != null && !old.isRecycled()) old.recycle();
-        } catch (Exception error) { rethrowIfStopped(); throw new LuaError("截图失败：" + error.getMessage()); }
+        } catch (Exception error) {
+            rethrowIfStopped();
+            throw new LuaError("截图失败：" + ScriptRuntimeErrors.summarize(error));
+        }
     }
 
     private Bitmap frame() {
@@ -854,9 +925,32 @@ final class LegacyLuaRuntime {
         return current;
     }
 
+    private LegacyCoordinateMapper mapperFor(Bitmap frame) {
+        LegacyCoordinateMapper mapper = coordinateMapper;
+        if (mapper == null || latestFrame == null || frame.getWidth() != latestFrame.getWidth()
+                || frame.getHeight() != latestFrame.getHeight()) {
+            mapper = mapperFor(frame.getWidth(), frame.getHeight());
+            coordinateMapper = mapper;
+        }
+        return mapper;
+    }
+
+    private LegacyCoordinateMapper mapperFor(int screenWidth, int screenHeight) {
+        return new LegacyCoordinateMapper(config.optInt("虚拟屏幕宽度", 720),
+                config.optInt("虚拟屏幕高度", 1280), screenWidth, screenHeight);
+    }
+
+    private static void requireDisplayPoint(int x, int y, Bitmap screen) {
+        if (x < 0 || y < 0 || x >= screen.getWidth() || y >= screen.getHeight()) {
+            throw new LuaError("触控坐标越界：" + x + "," + y + "；显示尺寸 "
+                    + screen.getWidth() + "x" + screen.getHeight());
+        }
+    }
+
     private void releaseFrame() {
         Bitmap old = latestFrame;
         latestFrame = null;
+        coordinateMapper = null;
         if (old != null && !old.isRecycled()) old.recycle();
     }
 

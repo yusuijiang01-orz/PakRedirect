@@ -1,5 +1,21 @@
 local L0_1, L1_1
 
+local function 采集检测点颜色和(检测点)
+  keepCapture()
+  local ok, colornumber = pcall(function()
+    local sum = 0
+    for i = 1, #检测点 do
+      sum = sum + getPixelColor(检测点[i][1], 检测点[i][2], 1)
+    end
+    return sum
+  end)
+  releaseCapture()
+  if not ok then
+    error(colornumber, 0)
+  end
+  return colornumber
+end
+
 function L0_1()
   if _ENV["上次检测卡死"] == nil or tickCount() - _ENV["上次检测卡死"] > 5000 then
     if _ENV["没有变化次数"] == nil then
@@ -12,12 +28,7 @@ function L0_1()
         table.insert(检测点, {x, y})
       end
     end
-    local colornumber = 0
-    keepCapture()
-    for i = 1, #检测点 do
-      colornumber = colornumber + getPixelColor(检测点[i][1], 检测点[i][2], 1)
-    end
-    releaseCapture()
+    local colornumber = 采集检测点颜色和(检测点)
     print(colornumber)
     if _ENV["上次检测点色值"] == colornumber then
       _ENV["没有变化次数"] = _ENV["没有变化次数"] + 1
@@ -50,12 +61,7 @@ function L0_1()
       table.insert(检测点, {x, y})
     end
   end
-  local colornumber = 0
-  keepCapture()
-  for i = 1, #检测点 do
-    colornumber = colornumber + getPixelColor(检测点[i][1], 检测点[i][2], 1)
-  end
-  releaseCapture()
+  local colornumber = 采集检测点颜色和(检测点)
   if _ENV["检测寻路完成_上次检测寻路点色值"] == colornumber then
     _ENV["检测寻路完成_寻路没有变化次数"] = _ENV["检测寻路完成_寻路没有变化次数"] + 1
     if _ENV["检测寻路完成_寻路没有变化次数"] >= 3 then
@@ -85,12 +91,7 @@ function L0_1()
         table.insert(检测点, {x, y})
       end
     end
-    local colornumber = 0
-    keepCapture()
-    for i = 1, #检测点 do
-      colornumber = colornumber + getPixelColor(检测点[i][1], 检测点[i][2], 1)
-    end
-    releaseCapture()
+    local colornumber = 采集检测点颜色和(检测点)
     print(colornumber)
     if _ENV["检测挂机长时间不移动_上次检测寻路点色值"] == colornumber then
       _ENV["检测挂机长时间不移动_寻路没有变化次数"] = _ENV["检测挂机长时间不移动_寻路没有变化次数"] + 1
@@ -298,9 +299,9 @@ function L0_1()
   hideToast()
   sleep(500)
   local 药品信息 = {}
-  for yy = 149, 655, 71 do
+  for yy = 149, 575, 71 do
     for xx = 670, 1035, 71 do
-      if 1024 < xx or 646 < yy then
+      if 1024 < xx then
       else
         local 物品类型 = _ENV["检测背包_识别红蓝数量_识别红蓝"](xx, yy, xx + 68, yy + 72)
         if 物品类型 == "" then
@@ -319,9 +320,9 @@ function L0_1(出售种类)
   hideToast()
   sleep(500)
   local 药品信息 = {}
-  for yy = 149, 655, 71 do
+  for yy = 149, 575, 71 do
     for xx = 670, 1035, 71 do
-      if 1024 < xx or 646 < yy then
+      if 1024 < xx then
       else
         local 物品类型 = _ENV["检测背包_识别红蓝数量_识别红蓝"](xx, yy, xx + 68, yy + 72)
         if 物品类型:find("红") and 出售种类:find("红") or 物品类型:find("蓝") and 出售种类:find("蓝") then
@@ -362,17 +363,36 @@ _ENV["去商店_卖货_购买红蓝"] = L0_1
 function L0_1()
   local index, x, y = findColor(797, 90, 1013, 130, "ffff00-111111|ffff00-111111|ffff00-111111|f7f700-111111", 0, 0.9)
   if 0 < x then
-    return true
+    return "黄色"
   end
   local index, x, y = findColor(797, 90, 1013, 130, "00ff00-111111|00e700-111111|00ff00-111111|00f700-111111|00c600-111111|00ff00-111111|00ff00-111111|00d200-111111|00ff00-111111", 0, 0.9)
   if 0 < x then
-    return true
+    return "绿色"
   end
   local index, x, y = findColor(797, 90, 1013, 130, "efa23a-111111|efa231-111111|e69e3a-111111|e69e3a-111111|e69a31-111111|e69a31-111111|f7aa3a-111111|c58629-111111|c58629-111111", 0, 0.9)
   if 0 < x then
-    return true
+    return "橙色"
+  end
+  return "白色"
+end
+
+_ENV["去卖货_卖货_识别装备品质"] = L0_1
+
+function L0_1(装备品质, 出售装备品质上限)
+  local 上限 = tonumberEx(出售装备品质上限)
+  if 装备品质 == "白色" then
+    return 上限 >= 1
+  end
+  if 装备品质 == "绿色" then
+    return 上限 >= 2
   end
   return false
+end
+
+_ENV["去卖货_卖货_品质是否允许出售"] = L0_1
+
+function L0_1()
+  return _ENV["去卖货_卖货_识别装备品质"]() ~= "白色"
 end
 
 _ENV["去卖货_卖货_判断是否稀有装备"] = L0_1
@@ -574,10 +594,12 @@ function L0_1()
   -- The legacy script used to enter equipment sales unconditionally. Keep the
   -- workbench's protective defaults authoritative: only scan/sell gear when the
   -- user explicitly enables sales and has not enabled the protection switch.
+  local 出售装备品质上限 = tonumberEx(_ENV["界面数据"]["出售装备品质上限"])
   local 允许出售装备 = _ENV["界面数据"]["出售装备"] == "true"
     and _ENV["界面数据"]["保护装备不出售"] ~= "true"
+    and 出售装备品质上限 >= 1
   local 当前任务3 = 允许出售装备 and "卖装备" or "买卖药"
-  _ENV["买了一次蓝"] = fasle
+  _ENV["买了一次蓝"] = false
   _ENV["买了一次红"] = false
   for i = 1, 200 do
     if _ENV["找到"](tz["对话页面"]) then
@@ -612,7 +634,8 @@ function L0_1()
       if _ENV["找到"](tz["商店选中装备属性页面"]) then
         hideToast()
         sleep(200)
-        local 是否稀有 = _ENV["去卖货_卖货_判断是否稀有装备"]()
+        local 装备品质 = _ENV["去卖货_卖货_识别装备品质"]()
+        local 是否稀有 = not _ENV["去卖货_卖货_品质是否允许出售"](装备品质, 出售装备品质上限)
         local 装备蓝条属性数组 = _ENV["去卖货_卖货_识别蓝条数量和属性"]()
         local 蓝条数量 = #装备蓝条属性数组
         if 是否稀有 then
@@ -718,7 +741,7 @@ function L0_1()
     end
     sleep(500)
   end
-  _ENV["买了一次蓝"] = fasle
+  _ENV["买了一次蓝"] = false
   _ENV["买了一次红"] = false
 end
 
@@ -909,7 +932,10 @@ function L0_1()
             _ENV["点击"](1173, 516, 2000)
             _ENV["点击"](808, 189, 2000)
           end
-          break
+          return true
+        else
+          toast("寻路超时，暂未到达挂机点")
+          return false
         end
       end
     end
@@ -918,6 +944,20 @@ function L0_1()
 end
 
 _ENV["去挂机点"] = L0_1
+
+function L0_1()
+  if _ENV["去挂机点"]() then
+    _ENV["需要去挂机点一次"] = false
+    _ENV["队员找不到队长组队次数"] = 0
+    return true
+  end
+  _ENV["需要去挂机点一次"] = true
+  _ENV["当前任务2"] = "回挂机点失败，等待重试"
+  toast("回挂机点失败，稍后重试")
+  return false
+end
+
+_ENV["执行返回挂机点"] = L0_1
 
 function L0_1()
   _ENV["找到点击"]("@@选区失败页面_关闭按钮", tz["选区失败页面_关闭按钮"])
@@ -936,11 +976,11 @@ _ENV["登录_判断一轮"] = L0_1
 
 function L0_1()
   local 空格子 = 0
-  for yy = 149, 655, 71 do
+  for yy = 149, 575, 71 do
     for xx = 670, 1035, 71 do
-      if 1024 < xx or 646 < yy then
+      if 1024 < xx then
       else
-        local rtn, x, y = findPic(xx, yy, xx + 30, yy + 30, "空格子0.png", "101010", 0, 0.95)
+        local rtn, x, y = findPic(xx, yy, xx + 68, yy + 72, "空格子0.png", "101010", 0, 0.95)
         if 0 < x then
           print(rtn, x, y)
           空格子 = 空格子 + 1
@@ -1047,10 +1087,19 @@ function L0_1()
   for i = 1, #检测数量数组 do
     print("第" .. i .. "个数量", 检测数量数组[i])
   end
+  local 数量识别有效 = true
+  for i = 1, #检测数量数组 do
+    if 检测数量数组[i] == nil or not tostring(检测数量数组[i]):match("%d") then
+      数量识别有效 = false
+      break
+    end
+  end
   _ENV["小红数量"] = tonumberEx(检测数量数组[1])
   _ENV["大红数量"] = tonumberEx(检测数量数组[2])
   _ENV["小蓝数量"] = tonumberEx(检测数量数组[3])
   _ENV["大蓝数量"] = tonumberEx(检测数量数组[4])
+  _ENV["药品数量识别有效"] = 数量识别有效
+  return 数量识别有效
 end
 
 _ENV["检测背包_主页面识别红蓝数量"] = L0_1
@@ -1063,7 +1112,10 @@ function L0_1()
   end
   if _ENV["上次检测背包"] == nil or tickCount() - _ENV["上次检测背包"] > 1000 * _ENV["背包检测间隔秒"] then
     if _ENV["在主页面"]() then
-      _ENV["检测背包_主页面识别红蓝数量"]()
+      if not _ENV["检测背包_主页面识别红蓝数量"]() then
+        toast("药品数量识别失败，本轮跳过补给交易")
+        return true
+      end
       print("检测背包" .. "完成")
       if _ENV["界面数据"]["购买小红"] == "true" then
         print(_ENV["小红数量"], _ENV["大红数量"], _ENV["界面数据"]["红的数量低于"])
@@ -1365,6 +1417,15 @@ end
 _ENV["组队_识别队长名称"] = L0_1
 
 function L0_1()
+  if _ENV["界面数据"]["自动战斗"] ~= "true" then
+    return false
+  end
+  return _ENV["找到点击"]("@@自动挂机按钮_未开启", tz["自动挂机按钮_未开启"])
+end
+
+_ENV["执行自动战斗"] = L0_1
+
+function L0_1()
   _ENV["当前任务1"] = "挂机模式"
   _ENV["当前任务2"] = ""
   while true do
@@ -1516,21 +1577,16 @@ function L0_1()
         end
       end
       if _ENV["需要去挂机点一次"] then
-        _ENV["去挂机点"]()
-        _ENV["需要去挂机点一次"] = false
-        _ENV["队员找不到队长组队次数"] = 0
+        if not _ENV["执行返回挂机点"]() then sleep(3000) end
       else
-        if _ENV["界面数据"]["自动战斗"] == "true" then
-          _ENV["找到点击"]("@@自动挂机按钮_未开启", tz["自动挂机按钮_未开启"])
-        end
+        _ENV["执行自动战斗"]()
       end
     end
     _ENV["通用关闭"]()
     if _ENV["在主页面"]() and _ENV["检测背包"]() == false then
       toast("前往卖货")
       _ENV["去卖货"]()
-      _ENV["去挂机点"]()
-      _ENV["需要去挂机点一次"] = false
+      _ENV["执行返回挂机点"]()
     end
     sleep(1000)
   end

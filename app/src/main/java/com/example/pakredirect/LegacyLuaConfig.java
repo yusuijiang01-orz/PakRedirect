@@ -8,6 +8,17 @@ import java.util.Map;
 final class LegacyLuaConfig {
     private LegacyLuaConfig() { }
 
+    /** Converts the workbench's exclusive blue-stat filter into the legacy flags. */
+    static String[] blueFilterFlags(String selectedMode) {
+        if (selectedMode == null || selectedMode.trim().isEmpty()) return null;
+        final int selected;
+        try { selected = Integer.parseInt(selectedMode.trim()); }
+        catch (NumberFormatException invalid) { return null; }
+        if (selected < 0 || selected > 3) return null;
+        return new String[]{Boolean.toString(selected == 1), Boolean.toString(selected == 2),
+                Boolean.toString(selected == 3)};
+    }
+
     static Map<String, String> defaults() {
         Map<String, String> values = new LinkedHashMap<>();
         values.put("自动战斗", "false");
@@ -50,6 +61,8 @@ final class LegacyLuaConfig {
         values.put("队员找不到队长组队就回家次数", "2");
         values.put("保护装备不出售", "true");
         values.put("出售装备", "false");
+        values.put("出售装备品质上限", "0");
+        values.put("出售装备二次确认", "true");
         return Collections.unmodifiableMap(values);
     }
 }
