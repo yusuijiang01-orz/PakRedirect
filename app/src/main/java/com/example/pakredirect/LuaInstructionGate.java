@@ -17,6 +17,16 @@ final class LuaInstructionGate {
     private final ScriptExecutionControl control;
     private final LuaValue setHook;
     private final ReentrantLock vmLock = new ReentrantLock(true);
+    private final Thread primaryJavaThread;
+    private final LuaThread primaryLuaThread;
+    private final ThreadLocal<LuaThread> workerLuaThread = new ThreadLocal<LuaThread>() {
+        @Override protected LuaThread initialValue() {
+            LuaThread thread = new LuaThread(globals);
+            install(thread);
+            return thread;
+        }
+    };
+    private final Globals globals;
     private final LuaValue hook = new ZeroArgFunction() {
         @Override public LuaValue call() {
             try { control.checkpoint(); }
@@ -26,7 +36,9 @@ final class LuaInstructionGate {
     };
 
     LuaInstructionGate(Globals globals, ScriptExecutionControl control) {
+        this.globals = globals;
         this.control = control;
+        this.primaryJavaThread = Thread.currentThread();
         globals.load(new DebugLib());
         LuaValue debug = globals.get("debug");
         if (!debug.istable() || !debug.get("sethook").isfunction()) {
@@ -35,7 +47,8 @@ final class LuaInstructionGate {
         setHook = debug.get("sethook");
         // Keep the hook private so recovered scripts cannot disable cancellation.
         globals.set("debug", LuaValue.NIL);
-        install(globals.running);
+        primaryLuaThread = globals.running;
+        install(primaryLuaThread);
     }
 
     LuaValue invoke(LuaFunction function, Varargs args) {
@@ -45,13 +58,17 @@ final class LuaInstructionGate {
             control.checkpoint();
             throw new IllegalStateException("Interrupted while waiting for the Lua runtime", interrupted);
         }
+        LuaThread previous = globals.running;
         try {
+            globals.running = Thread.currentThread() == primaryJavaThread
+                    ? primaryLuaThread : workerLuaThread.get();
             try { return function.invoke(args).arg1(); }
             catch (StopSignal stop) {
                 control.checkpoint();
                 throw stop;
             }
         } finally {
+            globals.running = previous;
             vmLock.unlock();
         }
     }

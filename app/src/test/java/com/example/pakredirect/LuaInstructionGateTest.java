@@ -14,6 +14,7 @@ import org.luaj.vm2.lib.jse.JsePlatform;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class LuaInstructionGateTest {
     @Test public void pauseAndStopInterruptPureLuaBusyLoop() throws Exception {
@@ -113,6 +114,41 @@ public class LuaInstructionGateTest {
         assertEquals(ScriptExecutionControl.State.STOPPED, control.getState());
     }
 
+    @Test public void concurrentLuaWorkersKeepIndependentDebugStacks() throws Exception {
+        ScriptExecutionControl control = new ScriptExecutionControl();
+        Globals globals = JsePlatform.standardGlobals();
+        LuaInstructionGate gate = new LuaInstructionGate(globals, control);
+        globals.set("pauseForTest", new ZeroArgFunction() {
+            @Override public LuaValue call() { gate.sleep(40); return LuaValue.NONE; }
+        });
+        LuaFunction first = (LuaFunction) globals.load(
+                "local function nested(n) if n == 0 then pauseForTest(); error('original-first') end return nested(n - 1) end nested(12)",
+                "first-error");
+        LuaFunction second = (LuaFunction) globals.load(
+                "local function nested(n) if n == 0 then pauseForTest(); error('original-second') end return nested(n - 1) end nested(12)",
+                "second-error");
+        AtomicReference<Throwable> firstFailure = new AtomicReference<>();
+        AtomicReference<Throwable> secondFailure = new AtomicReference<>();
+        CountDownLatch ready = new CountDownLatch(2);
+        control.start();
+        Thread firstWorker = errorRunner(control, gate, first, firstFailure, ready);
+        Thread secondWorker = errorRunner(control, gate, second, secondFailure, ready);
+        firstWorker.start();
+        secondWorker.start();
+
+        assertTrue(ready.await(1, TimeUnit.SECONDS));
+        firstWorker.join(2_000);
+        secondWorker.join(2_000);
+        assertFalse("first Lua worker must return its Lua error", firstWorker.isAlive());
+        assertFalse("second Lua worker must return its Lua error", secondWorker.isAlive());
+        assertTrue("first Lua error must not be replaced by a debug-stack failure: " + firstFailure.get(),
+                firstFailure.get() != null && firstFailure.get().getMessage().contains("original-first"));
+        assertTrue("second Lua error must not be replaced by a debug-stack failure: " + secondFailure.get(),
+                secondFailure.get() != null && secondFailure.get().getMessage().contains("original-second"));
+        assertTrue(control.requestStop());
+        control.complete();
+    }
+
     private static AtomicInteger addPulse(Globals globals) {
         AtomicInteger ticks = new AtomicInteger();
         globals.set("pulse", pulse(ticks));
@@ -132,6 +168,18 @@ public class LuaInstructionGateTest {
             started.countDown();
             try { gate.invoke(function, LuaValue.NONE); }
             catch (ScriptExecutionControl.StopRequestedException expected) { }
+            finally { control.detachCurrentThread(); }
+        });
+    }
+
+    private static Thread errorRunner(ScriptExecutionControl control, LuaInstructionGate gate,
+                                      LuaFunction function, AtomicReference<Throwable> failure,
+                                      CountDownLatch ready) {
+        return new Thread(() -> {
+            control.attachCurrentThread();
+            ready.countDown();
+            try { gate.invoke(function, LuaValue.NONE); }
+            catch (Throwable error) { failure.set(error); }
             finally { control.detachCurrentThread(); }
         });
     }
