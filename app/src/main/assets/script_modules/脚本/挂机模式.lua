@@ -1451,6 +1451,31 @@ end
 
 _ENV["执行自动战斗"] = L0_1
 
+function L0_1(识别名称1, 识别名称2, 期望队长名称)
+  期望队长名称 = tostring(期望队长名称 or "")
+  期望队长名称 = string.gsub(期望队长名称, "^%s*(.-)%s*$", "%1")
+  if 期望队长名称 == "" then
+    return "未配置"
+  end
+  local 有效识别结果 = false
+  for _, 名称 in ipairs({识别名称1 or "", 识别名称2 or ""}) do
+    名称 = tostring(名称)
+    名称 = string.gsub(名称, "^%s*(.-)%s*$", "%1")
+    if 名称 ~= "" then
+      有效识别结果 = true
+      if 0.95 <= w.stringSimilarity.levenshteinNormalized(名称, 期望队长名称) then
+        return "匹配"
+      end
+    end
+  end
+  if not 有效识别结果 then
+    return "无法识别"
+  end
+  return "不匹配"
+end
+
+_ENV["组队_判断队长名称"] = L0_1
+
 function L0_1()
   _ENV["当前任务1"] = "挂机模式"
   _ENV["当前任务2"] = ""
@@ -1513,25 +1538,25 @@ function L0_1()
           end
           if _ENV["找到"](tz["组队_附近玩家页面"]) or _ENV["找到"](tz["组队_附近队伍页面"]) then
             local 队长名称 = _ENV["组队_识别队长名称"]()
-            local sim = w.stringSimilarity.levenshteinNormalized(队长名称, _ENV["队长名称数组"][1])
-            if 0.95 <= sim then
+            local 队长名称2 = ""
+            local 判断结果 = _ENV["组队_判断队长名称"](队长名称, 队长名称2, _ENV["队长名称数组"][1])
+            if 判断结果 == "不匹配" then
+              队长名称2 = _ENV["组队_识别队长名称2"]()
+              判断结果 = _ENV["组队_判断队长名称"](队长名称, 队长名称2, _ENV["队长名称数组"][1])
+            end
+            if 判断结果 == "匹配" then
               toast(string.format("[%s]==[%s] ", 队长名称, _ENV["队长名称数组"][1]))
               sleep(1000)
               _ENV["上次检测队长名字"] = tickCount()
+            elseif 判断结果 == "不匹配" then
+              toast(string.format("[%s]!=[%s]", 队长名称, _ENV["队长名称数组"][1]))
+              sleep(1000)
+              _ENV["点击"]("@@解散队伍", 477, 630, 1000)
+              _ENV["点击"]("@@解散队伍", 477, 630, 1000)
+              _ENV["需要去挂机点一次"] = true
             else
-              local 队长名称2 = _ENV["组队_识别队长名称2"]()
-              local sim = w.stringSimilarity.levenshteinNormalized(队长名称2, _ENV["队长名称数组"][1])
-              if 0.95 <= sim then
-                toast(string.format("[%s]==[%s] ", 队长名称, _ENV["队长名称数组"][1]))
-                sleep(1000)
-                _ENV["上次检测队长名字"] = tickCount()
-              else
-                toast(string.format("[%s]!=[%s]", 队长名称, _ENV["队长名称数组"][1]))
-                sleep(1000)
-                _ENV["点击"]("@@解散队伍", 477, 630, 1000)
-                _ENV["点击"]("@@解散队伍", 477, 630, 1000)
-                _ENV["需要去挂机点一次"] = true
-              end
+              toast(判断结果 == "未配置" and "未填写队长名，跳过队长校验" or "未识别到队长名，跳过解散操作")
+              _ENV["上次检测队长名字"] = tickCount()
             end
           end
           if _ENV["找到"](tz["组队_附近玩家页面"]) or _ENV["找到"](tz["组队_附近队伍页面"]) then

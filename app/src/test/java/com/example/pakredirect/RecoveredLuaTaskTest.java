@@ -37,6 +37,30 @@ import org.luaj.vm2.lib.jse.JsePlatform;
 
 /** Directly executes one recovered Lua task without building or launching the APK. */
 public final class RecoveredLuaTaskTest {
+    @Test public void recoveredPartyLeaderCheckNeverDisbandsOnMissingOrUnreadableNames() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.ZERO; }
+        });
+        Path scriptRoot = scriptRoot();
+        String compatibilitySource = Files.readString(scriptRoot.resolve("w.lua"), StandardCharsets.UTF_8);
+        globals.set("w", globals.load(LuaSourceCompat.normalizeUnicodeIdentifiers(compatibilitySource),
+                "w.lua", globals).call());
+        for (String module : Arrays.asList("中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot.resolve(module), module);
+        }
+
+        LuaFunction judge = globals.get("组队_判断队长名称").checkfunction();
+        assertEquals("未配置", judge.call(LuaValue.valueOf("player"), LuaValue.valueOf("player"),
+                LuaValue.valueOf("  ")).tojstring());
+        assertEquals("无法识别", judge.call(LuaValue.valueOf(""), LuaValue.valueOf("  "),
+                LuaValue.valueOf("leader")).tojstring());
+        assertEquals("匹配", judge.call(LuaValue.valueOf("leader"), LuaValue.valueOf(""),
+                LuaValue.valueOf("leader")).tojstring());
+        assertEquals("不匹配", judge.call(LuaValue.valueOf("wrong"), LuaValue.valueOf("other"),
+                LuaValue.valueOf("leader")).tojstring());
+    }
+
     @Test public void stuckDetectorUsesRealGameScreenshotsAndTripsAfterTenUnchangedFrames() throws Exception {
         Path scriptRoot = scriptRoot();
         Globals globals = JsePlatform.standardGlobals();
