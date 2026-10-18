@@ -1528,6 +1528,15 @@ end
 
 _ENV["组队_判断队长名称"] = L0_1
 
+function L0_1(上次检查时间, 当前时间, 检查间隔秒)
+  if 上次检查时间 == nil then
+    return false
+  end
+  return 当前时间 - tonumberEx(上次检查时间) > 1000 * tonumberEx(检查间隔秒)
+end
+
+_ENV["组队_是否到队长检查时间"] = L0_1
+
 function L0_1()
   _ENV["当前任务1"] = "挂机模式"
   _ENV["当前任务2"] = ""
@@ -1577,7 +1586,7 @@ function L0_1()
         if _ENV["上次检测队长名字"] == nil then
           _ENV["上次检测队长名字"] = tickCount()
         end
-        if tickCount() - _ENV["上次检测队长名字"] > 1000 * tonumberEx(_ENV["界面数据"]["检测队长名字频率秒"]) then
+        if _ENV["组队_是否到队长检查时间"](_ENV["上次检测队长名字"], tickCount(), _ENV["界面数据"]["检测队长名字频率秒"]) then
           toast("去检测队长名字是否正确")
           sleep(1000)
           if _ENV["在主页面"]() then
@@ -1599,7 +1608,6 @@ function L0_1()
             if 判断结果 == "匹配" then
               toast(string.format("[%s]==[%s] ", 队长名称, _ENV["队长名称数组"][1]))
               sleep(1000)
-              _ENV["上次检测队长名字"] = tickCount()
             elseif 判断结果 == "不匹配" then
               toast(string.format("[%s]!=[%s]", 队长名称, _ENV["队长名称数组"][1]))
               sleep(1000)
@@ -1608,12 +1616,12 @@ function L0_1()
               _ENV["需要去挂机点一次"] = true
             else
               toast(判断结果 == "未配置" and "未填写队长名，跳过队长校验" or "未识别到队长名，跳过解散操作")
-              _ENV["上次检测队长名字"] = tickCount()
             end
           end
           if _ENV["找到"](tz["组队_附近玩家页面"]) or _ENV["找到"](tz["组队_附近队伍页面"]) then
             _ENV["点击"]("@@关闭队伍页面", 1201, 126, 1500)
           end
+          _ENV["上次检测队长名字"] = tickCount()
         end
         if _ENV["上次检测是否有队伍"] == nil then
           _ENV["上次检测是否有队伍"] = tickCount()
