@@ -93,8 +93,13 @@ public final class ScriptRuntimeService extends Service {
                 control.complete();
                 publish("已停止");
             } catch (Throwable failure) {
-                control.fail();
-                publish("脚本失败：" + rootMessage(failure));
+                if (control.isStopRequested()) {
+                    control.complete();
+                    publish("已停止");
+                } else {
+                    control.fail();
+                    publish("脚本失败：" + rootMessage(failure));
+                }
             } finally {
                 stopForeground(true);
                 stopSelf();

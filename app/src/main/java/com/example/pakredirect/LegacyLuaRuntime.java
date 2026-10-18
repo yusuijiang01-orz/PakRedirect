@@ -45,6 +45,7 @@ final class LegacyLuaRuntime {
     private volatile Bitmap latestFrame;
     private volatile int[] ocrRegion = new int[]{0, 0, 0, 0};
     private ScriptOcr ocr;
+    private LuaInstructionGate instructionGate;
     private volatile float touchStartX, touchStartY, touchEndX, touchEndY;
     private Globals globals;
 
@@ -64,6 +65,7 @@ final class LegacyLuaRuntime {
 
     void run() throws Exception {
         globals = JsePlatform.standardGlobals();
+        instructionGate = new LuaInstructionGate(globals, control);
         restrictDangerousLibraries();
         installHostApi();
         control.attachCurrentThread();
@@ -101,7 +103,7 @@ final class LegacyLuaRuntime {
     private void installHostApi() {
         globals.set("sleep", new OneArgFunction() {
             @Override public LuaValue call(LuaValue millis) {
-                control.sleep(Math.max(0, millis.optlong(0)));
+                instructionGate.sleep(Math.max(0, millis.optlong(0)));
                 return LuaValue.NONE;
             }
         });
@@ -350,10 +352,11 @@ final class LegacyLuaRuntime {
     private Thread spawnLuaWorker(LuaFunction function, Varargs args, String name) {
         Thread worker = new Thread(() -> {
             control.attachCurrentThread();
-            try { function.invoke(args); }
+            try { instructionGate.invoke(function, args); }
             catch (ScriptExecutionControl.StopRequestedException ignored) { }
             catch (Throwable error) {
-                if (listener != null) listener.onStatus("后台脚本线程失败：" + error.getMessage());
+                if (!control.isCurrentThreadCancellationRequested() && !control.isStopRequested()
+                        && listener != null) listener.onStatus("后台脚本线程失败：" + error.getMessage());
             } finally {
                 control.detachCurrentThread();
                 threads.remove(Thread.currentThread());
@@ -740,7 +743,7 @@ final class LegacyLuaRuntime {
             int read;
             while ((read = reader.read(buffer)) != -1) source.append(buffer, 0, read);
             String compatibleSource = LuaSourceCompat.normalizeUnicodeIdentifiers(source.toString());
-            LuaValue value = globals.load(compatibleSource, assetPath, globals).call();
+            LuaValue value = instructionGate.invoke(globals.load(compatibleSource, assetPath, globals), LuaValue.NONE);
             return value.isnil() ? LuaValue.TRUE : value;
         } catch (ScriptExecutionControl.StopRequestedException stopped) { throw stopped; }
         catch (Exception error) { throw new LuaError("Lua 模块加载失败：" + assetPath + "：" + error.getMessage()); }

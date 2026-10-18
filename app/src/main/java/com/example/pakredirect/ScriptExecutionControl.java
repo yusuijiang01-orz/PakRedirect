@@ -17,6 +17,16 @@ public final class ScriptExecutionControl {
 
     public State getState() { return state; }
 
+    public boolean isCurrentThreadCancellationRequested() {
+        State currentState = state;
+        return currentState == State.STOP_REQUESTED || currentState == State.STOPPED
+                || cancelledWorkers.contains(Thread.currentThread()) || Thread.currentThread().isInterrupted();
+    }
+
+    public boolean isStopRequested() {
+        return state == State.STOP_REQUESTED || state == State.STOPPED;
+    }
+
     public void start() {
         lock.lock();
         try {
@@ -95,7 +105,7 @@ public final class ScriptExecutionControl {
         try {
             while (state == State.PAUSED) changed.await();
             Thread current = Thread.currentThread();
-            boolean workerCancelled = cancelledWorkers.remove(current);
+            boolean workerCancelled = cancelledWorkers.contains(current);
             if (state == State.STOP_REQUESTED || state == State.STOPPED
                     || workerCancelled || current.isInterrupted()) {
                 if (state == State.STOP_REQUESTED || state == State.STOPPED) {
@@ -107,7 +117,7 @@ public final class ScriptExecutionControl {
             if (state != State.RUNNING) throw new IllegalStateException("Script is not running: " + state);
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
-            boolean workerCancelled = cancelledWorkers.remove(Thread.currentThread());
+            boolean workerCancelled = cancelledWorkers.contains(Thread.currentThread());
             if (state == State.STOP_REQUESTED || workerCancelled) {
                 if (state == State.STOP_REQUESTED) state = State.STOPPED;
                 throw new StopRequestedException();
