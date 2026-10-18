@@ -68,7 +68,28 @@
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="用户主动开启的脚本控制悬浮窗；当前仅提供 UI 预览与设置入口，运行宿主接入后用于显示运行控制状态。" />
+                android:value="用户主动开启的 RYLUX 脚本控制悬浮窗；提供启动、暂停、设置和停止入口。" />
+        </service>
+
+        <service
+            android:name=".ScriptRuntimeService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="用户主动启动的 Lua 游戏脚本运行宿主；提供游戏自动化、暂停和停止控制。" />
+        </service>
+
+        <service
+            android:name=".ScriptGameAdapter"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/script_accessibility_service" />
         </service>
 
         <service

@@ -1,0 +1,3 @@
+<resources>
+    <string name="script_accessibility_description">仅在你主动启动封神榜脚本时，用于读取屏幕画面和发送触控操作。</string>
+</resources>

@@ -256,74 +256,13 @@ end
 _ENV["监控子线程"] = L0_1
 
 function L0_1()
-  while _ENV["界面数据"]["手机编号"]:gsub(" ", "") == "" do
-    toast("手机编号为空")
-    sleep2(1000)
-  end
-  _ENV["初始化数据库_设备"]()
-  g_thread = Thread.newThread(_ENV["挂机模式"])
+  -- RYLUX owns local start/pause/stop. Do not depend on the retired remote
+  -- command server, which could also deliver arbitrary Lua code.
   _ENV["监控子线程_初始化"]()
+  g_thread = Thread.newThread(_ENV["挂机模式"])
   while true do
     _ENV["监控子线程"]()
-    local sql = "select 命令 from fengshenbangjiqi where 手机编号='" .. _ENV["界面数据"]["手机编号"] .. "'"
-    local rtn = httpPost("http://119.29.253.58/sql.php", "action=query&query=" .. sql)
-    print(rtn)
-    if rtn:find("命令") then
-      local json = jsonLib.decode(rtn)
-      local 命令 = json[1]["命令"]
-      if 命令 ~= "" then
-        toast("收到命令=" .. 命令)
-        _ENV["修改数据库"]("命令", "")
-      end
-      if 命令 == "重启脚本" then
-        sleep2(1000)
-        restartScript()
-        sleep2(3000)
-        exitScript()
-      end
-      if 命令 == "关闭游戏" then
-        stopApp(_ENV["游戏包名"])
-        sleep2(1000)
-      end
-      if 命令 == "重启手机" then
-        exec("reboot")
-        sleep2(3000)
-        exitScript()
-      end
-      if 命令 == "截图" then
-        _ENV["上传截图"](false)
-      end
-      if 命令:find("执行代码|") then
-        _ENV["全局间隔执行变量"] = {}
-        releaseCapture()
-        _ENV["当前任务1"] = ""
-        _ENV["当前任务2"] = ""
-        if g_thread ~= nil then
-          g_thread:stopThread()
-        end
-        sleep2(500)
-        local 代码 = 命令:gsub("执行代码|", "")
-        g_thread = Thread.newThread(function()
-          local a, b = pcall(function()
-            print(代码)
-            load(代码)()
-          end)
-          if a == false then
-            while true do
-              toast(b)
-              sleep2(1000)
-            end
-          end
-        end)
-      end
-      if 命令:find("修改界面数据") then
-        local 新界面数据 = 命令:gsub("修改界面数据|", "")
-        _ENV["修改界面数据"](新界面数据)
-        restartScript()
-        sleep2(1000)
-      end
-    end
-    sleep2(2000)
+    sleep2(1000)
   end
 end
 

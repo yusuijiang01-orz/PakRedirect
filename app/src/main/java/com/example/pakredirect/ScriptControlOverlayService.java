@@ -5,6 +5,10 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Intent;
+import android.content.BroadcastReceiver;
+import android.content.IntentFilter;
+import android.content.SharedPreferences;
+import android.os.Build;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.graphics.Typeface;
@@ -20,9 +24,10 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
-/** RYLUX-styled script control overlay. Runtime actions remain unavailable until a Lua host is connected. */
+/** RYLUX-styled floating controls for the explicitly started Lua runtime. */
 public final class ScriptControlOverlayService extends Service {
     public static final String ACTION_PREVIEW = "com.example.pakredirect.script.PREVIEW_OVERLAY";
+    public static final String ACTION_RUNTIME = "com.example.pakredirect.script.RUNTIME_OVERLAY";
     private static final String CHANNEL_ID = "script_control_overlay";
     private static final int NOTIFICATION_ID = 48;
     private static final int BG = Color.rgb(17, 19, 24);
@@ -36,9 +41,25 @@ public final class ScriptControlOverlayService extends Service {
     private WindowManager windowManager;
     private View overlay;
     private WindowManager.LayoutParams params;
+    private TextView statusLabel;
+    private Button pauseAction;
+    private String runtimeState = ScriptExecutionControl.State.IDLE.name();
+    private final BroadcastReceiver runtimeStatus = new BroadcastReceiver() {
+        @Override public void onReceive(android.content.Context context, Intent intent) {
+            if (statusLabel == null) return;
+            String state = intent.getStringExtra(ScriptRuntimeService.EXTRA_STATE);
+            String message = intent.getStringExtra(ScriptRuntimeService.EXTRA_MESSAGE);
+            runtimeState = state == null ? ScriptExecutionControl.State.IDLE.name() : state;
+            statusLabel.setText((state == null ? "运行" : state) + " · " + (message == null ? "" : message));
+            if (pauseAction != null) pauseAction.setText(ScriptExecutionControl.State.PAUSED.name().equals(runtimeState) ? "继续" : "暂停");
+        }
+    };
 
     @Override public void onCreate() {
         super.onCreate();
+        IntentFilter filter = new IntentFilter(ScriptRuntimeService.ACTION_STATUS);
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(runtimeStatus, filter, RECEIVER_NOT_EXPORTED);
+        else registerReceiver(runtimeStatus, filter);
         createNotificationChannel();
         startForeground(NOTIFICATION_ID, buildNotification());
         if (Build.VERSION.SDK_INT >= 23 && !android.provider.Settings.canDrawOverlays(this)) {
@@ -80,14 +101,17 @@ public final class ScriptControlOverlayService extends Service {
         header.setGravity(Gravity.CENTER_VERTICAL);
         TextView mark = text("RYLUX", 15, TEXT, true);
         header.addView(mark, new LinearLayout.LayoutParams(0, dp(30), 1));
-        TextView state = text("● 预览 · 宿主未接入", 10, MUTED, false);
-        header.addView(state);
+        statusLabel = text("● 已就绪 · 点击启动后运行", 10, MUTED, false);
+        header.addView(statusLabel);
         header.setOnTouchListener(new DragListener());
         card.addView(header);
 
         LinearLayout first = row();
-        first.addView(action("启动", BLUE, v -> unavailable("启动")), cellParams(true));
-        first.addView(action("暂停", SOFT, v -> unavailable("暂停")), cellParams(false));
+        first.addView(action("启动", BLUE, v -> startRuntime()), cellParams(true));
+        pauseAction = action("暂停", SOFT, v -> sendRuntimeAction(
+                ScriptExecutionControl.State.PAUSED.name().equals(runtimeState)
+                        ? ScriptRuntimeService.ACTION_RESUME : ScriptRuntimeService.ACTION_PAUSE));
+        first.addView(pauseAction, cellParams(false));
         card.addView(first);
 
         LinearLayout second = row();
@@ -97,15 +121,32 @@ public final class ScriptControlOverlayService extends Service {
             startActivity(open);
         }), cellParams(true));
         second.addView(action("退出", Color.rgb(74, 41, 48), v -> {
-            Toast.makeText(this, "已关闭悬浮窗预览；脚本宿主未运行", Toast.LENGTH_SHORT).show();
+            sendRuntimeAction(ScriptRuntimeService.ACTION_STOP);
+            Toast.makeText(this, "已请求停止脚本并关闭悬浮窗", Toast.LENGTH_SHORT).show();
             stopSelf();
         }), cellParams(false));
         card.addView(second);
         return card;
     }
 
-    private void unavailable(String action) {
-        Toast.makeText(this, action + "不可用：Lua 运行宿主尚未接入", Toast.LENGTH_LONG).show();
+    private void startRuntime() {
+        SharedPreferences preferences = getSharedPreferences("script_workbench_profiles_v1", MODE_PRIVATE);
+        String selected = preferences.getString("selected", "默认方案");
+        String config = preferences.getString("profile:" + selected, "{}");
+        sendRuntimeAction(ScriptRuntimeService.ACTION_START, config);
+    }
+
+    private void sendRuntimeAction(String action) { sendRuntimeAction(action, null); }
+
+    private void sendRuntimeAction(String action, String config) {
+        Intent command = new Intent(this, ScriptRuntimeService.class).setAction(action);
+        if (config != null) command.putExtra(ScriptRuntimeService.EXTRA_CONFIG, config);
+        try {
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(command);
+            else startService(command);
+        } catch (RuntimeException error) {
+            Toast.makeText(this, "无法控制脚本服务：" + error.getMessage(), Toast.LENGTH_LONG).show();
+        }
     }
 
     private LinearLayout row() {
@@ -165,7 +206,7 @@ public final class ScriptControlOverlayService extends Service {
                 : new Notification.Builder(this);
         return builder.setSmallIcon(android.R.drawable.ic_media_play)
                 .setContentTitle("RYLUX 脚本控制")
-                .setContentText("悬浮窗预览中；脚本运行宿主未接入")
+                .setContentText("脚本控制就绪；只有点击启动才运行")
                 .setOngoing(true).build();
     }
 
@@ -200,6 +241,7 @@ public final class ScriptControlOverlayService extends Service {
     }
 
     @Override public void onDestroy() {
+        try { unregisterReceiver(runtimeStatus); } catch (RuntimeException ignored) { }
         if (overlay != null && windowManager != null) {
             try { windowManager.removeView(overlay); }
             catch (RuntimeException ignored) { }

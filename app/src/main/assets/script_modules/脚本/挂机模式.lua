@@ -571,7 +571,12 @@ _ENV["去卖货_卖货_执行红蓝处理"] = L0_1
 function L0_1()
   local 格子x = 0
   local 格子y = 0
-  local 当前任务3 = "卖装备"
+  -- The legacy script used to enter equipment sales unconditionally. Keep the
+  -- workbench's protective defaults authoritative: only scan/sell gear when the
+  -- user explicitly enables sales and has not enabled the protection switch.
+  local 允许出售装备 = _ENV["界面数据"]["出售装备"] == "true"
+    and _ENV["界面数据"]["保护装备不出售"] ~= "true"
+  local 当前任务3 = 允许出售装备 and "卖装备" or "买卖药"
   _ENV["买了一次蓝"] = fasle
   _ENV["买了一次红"] = false
   for i = 1, 200 do

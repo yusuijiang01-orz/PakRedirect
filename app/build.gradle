@@ -57,6 +57,10 @@ android {
 
 dependencies {
     implementation project(':Bcore')
+    implementation 'org.luaj:luaj-jse:3.0.1'
+    // Bundled OCR models work without a Play Services model download at first use.
+    implementation 'com.google.mlkit:text-recognition:16.0.1'
+    implementation 'com.google.mlkit:text-recognition-chinese:16.0.1'
     implementation 'com.alipay.sdk:alipay-sdk-android:15.8.09@aar'
     implementation 'com.tencent.mm.opensdk:wechat-sdk-android:6.8.40'
     implementation 'androidx.core:core:1.13.1'
@@ -67,4 +71,6 @@ dependencies {
         exclude group: 'androidx.appcompat'
         exclude group: 'com.google.android.material'
     }
+
+    testImplementation 'junit:junit:4.13.2'
 }

@@ -3,6 +3,7 @@ package com.example.pakredirect;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
+import android.content.ComponentName;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.net.Uri;
@@ -16,9 +17,12 @@ import android.text.InputFilter;
 import android.text.InputType;
 import android.text.TextWatcher;
 import android.view.Gravity;
+import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.RadioButton;
@@ -79,6 +83,10 @@ public final class ScriptToolsActivity extends Activity {
     private String profileName;
     private LinearLayout root;
     private TextView environment;
+    private TextView accessibilityState;
+    private int selectedTab;
+    private final ArrayList<ScrollView> tabPages = new ArrayList<>();
+    private final ArrayList<Button> tabButtons = new ArrayList<>();
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -91,44 +99,69 @@ public final class ScriptToolsActivity extends Activity {
     @Override protected void onResume() {
         super.onResume();
         if (environment != null) environment.setText(environmentText());
+        if (accessibilityState != null) accessibilityState.setText(accessibilityStatus());
     }
 
     private void buildUi() {
-        ScrollView page = new ScrollView(this);
-        page.setFillViewport(true);
-        page.setBackgroundColor(BG);
-        root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(18), dp(14), dp(18), dp(28));
-        page.addView(root, new ScrollView.LayoutParams(-1, -2));
+        tabPages.clear();
+        tabButtons.clear();
+        LinearLayout screen = new LinearLayout(this);
+        screen.setOrientation(LinearLayout.VERTICAL);
+        screen.setBackgroundColor(BG);
+
+        LinearLayout header = new LinearLayout(this);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setPadding(dp(18), dp(12), dp(18), dp(8));
+        screen.addView(header, new LinearLayout.LayoutParams(-1, -2));
         Button back = button("‹  返回沙箱", SOFT);
         back.setOnClickListener(v -> finish());
-        root.addView(back, new LinearLayout.LayoutParams(-1, dp(44)));
-        TextView title = label("脚本工作台", 23, TEXT, true);
-        title.setPadding(0, dp(18), 0, dp(5));
-        root.addView(title);
-        root.addView(label("封神榜脚本配置 · 打开页面不会启动游戏或脚本。", 13, MUTED, false));
+        header.addView(back, new LinearLayout.LayoutParams(dp(112), dp(42)));
+        TextView title = label("脚本工作台", 21, TEXT, true);
+        title.setGravity(Gravity.CENTER);
+        header.addView(title, new LinearLayout.LayoutParams(0, dp(42), 1));
+        Button settings = button("⚙", SOFT);
+        settings.setTextSize(24);
+        settings.setContentDescription("设置");
+        settings.setOnClickListener(v -> showSettings());
+        header.addView(settings, new LinearLayout.LayoutParams(dp(44), dp(42)));
 
-        LinearLayout selection = section("游戏与脚本", "目前只有一个已识别的目标游戏和主脚本。其余 8 个文件是依赖与插件。");
-        selection.addView(label("目标游戏  封神榜 · " + GAME, 13, TEXT, true));
-        selection.addView(label(gameStatus(), 12, MUTED, false));
-        Button gamePicker = button("选择目标游戏", SOFT);
-        gamePicker.setOnClickListener(v -> new AlertDialog.Builder(this)
-                .setTitle("目标游戏")
-                .setSingleChoiceItems(new String[]{"封神榜 · " + GAME}, 0, (dialog, which) -> dialog.dismiss())
-                .setNegativeButton("关闭", null).show());
-        addButton(selection, gamePicker);
-        TextView script = label("已选脚本  " + SCRIPT, 13, TEXT, true);
-        script.setPadding(0, dp(9), 0, 0);
-        selection.addView(script);
-        Button scriptPicker = button("选择主脚本", SOFT);
-        scriptPicker.setOnClickListener(v -> new AlertDialog.Builder(this)
-                .setTitle("主脚本")
-                .setSingleChoiceItems(new String[]{SCRIPT}, 0, (dialog, which) -> dialog.dismiss())
-                .setNegativeButton("关闭", null).show());
-        addButton(selection, scriptPicker);
-        selection.addView(label("9 个反编译重建 Lua 模块已作为只读资源打包；不是原始精确源码。", 12, MUTED, false));
-        selection.addView(label("运行状态：Lua 宿主与输入适配器未接入。", 12, MUTED, false));
+        TextView subtitle = label("封神榜配置 · 打开页面不会启动游戏或脚本", 12, MUTED, false);
+        subtitle.setPadding(dp(18), 0, dp(18), dp(8));
+        screen.addView(subtitle);
+
+        HorizontalScrollView tabs = new HorizontalScrollView(this);
+        tabs.setHorizontalScrollBarEnabled(false);
+        tabs.setFillViewport(false);
+        LinearLayout tabRow = new LinearLayout(this);
+        tabRow.setPadding(dp(14), dp(4), dp(14), dp(8));
+        tabs.addView(tabRow);
+        screen.addView(tabs, new LinearLayout.LayoutParams(-1, dp(54)));
+
+        FrameLayout content = new FrameLayout(this);
+        screen.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
+        String[] names = {"方案", "路线", "战斗", "背包", "队伍", "交易", "运行"};
+        for (int i = 0; i < names.length; i++) {
+            final int index = i;
+            Button tab = button(names[i], SOFT);
+            tab.setOnClickListener(v -> selectTab(index));
+            LinearLayout.LayoutParams tabLp = new LinearLayout.LayoutParams(-2, dp(40));
+            tabLp.leftMargin = dp(4);
+            tabLp.rightMargin = dp(4);
+            tabRow.addView(tab, tabLp);
+            tabButtons.add(tab);
+
+            ScrollView page = new ScrollView(this);
+            page.setFillViewport(true);
+            page.setVisibility(View.GONE);
+            LinearLayout body = new LinearLayout(this);
+            body.setOrientation(LinearLayout.VERTICAL);
+            body.setPadding(dp(18), dp(4), dp(18), dp(28));
+            page.addView(body, new ScrollView.LayoutParams(-1, -2));
+            content.addView(page, new FrameLayout.LayoutParams(-1, -1));
+            tabPages.add(page);
+        }
+
+        root = (LinearLayout) tabPages.get(0).getChildAt(0);
 
         LinearLayout profiles = section("配置方案", "本机自动保存当前方案，支持另存和切换。");
         profiles.addView(label("当前方案  " + profileName, 15, TEXT, true));
@@ -139,6 +172,7 @@ public final class ScriptToolsActivity extends Activity {
         saveAs.setOnClickListener(v -> saveAsProfile());
         addButton(profiles, saveAs);
 
+        root = (LinearLayout) tabPages.get(1).getChildAt(0);
         LinearLayout route = section("挂机与路线", "地图沿用回收脚本中的双语清单。");
         addMap(route, "挂机点地图");
         addNumber(route, "挂机点x", "挂机点 X 坐标", "100", "坐标", 0, 99999);
@@ -146,6 +180,7 @@ public final class ScriptToolsActivity extends Activity {
         addNumber(route, "挂机不移动秒", "无移动后返回挂机点", "60", "秒", 1, 86400);
         addNumber(route, "队员找不到队长组队就回家次数", "找不到队长后返回", "2", "次", 1, 999);
 
+        root = (LinearLayout) tabPages.get(2).getChildAt(0);
         LinearLayout supplies = section("战斗与补给", "开关和阈值仅写入本机方案；运行宿主接入前不会触发游戏操作。");
         addSwitch(supplies, "自动战斗", "自动战斗", false);
         addNumber(supplies, "战斗技能阈值", "技能触发阈值", "15", "%", 0, 100);
@@ -165,6 +200,7 @@ public final class ScriptToolsActivity extends Activity {
         addNumber(supplies, "蓝的数量低于", "蓝药购买阈值", "10", "个", 0, 99999);
         addNumber(supplies, "购买蓝的数量", "每次购买蓝药", "10", "个", 1, 99999);
 
+        root = (LinearLayout) tabPages.get(3).getChildAt(0);
         LinearLayout inventory = section("背包与装备", "装备保护是工作台安全偏好；未来适配器接入前无法保证回收脚本遵守。");
         addSwitch(inventory, "保护装备不出售", "保护装备不出售（建议开启）", true);
         addSwitch(inventory, "检测修理装备", "检测并修理装备", true);
@@ -181,6 +217,7 @@ public final class ScriptToolsActivity extends Activity {
         addNumber(inventory, "保留魔法出招数值", "魔法出招最低值", "15", "点", 0, 99999);
         addNumber(inventory, "保留武器出招数值", "武器出招最低值", "15", "点", 0, 99999);
 
+        root = (LinearLayout) tabPages.get(4).getChildAt(0);
         LinearLayout party = section("队伍", "队长、队员和不组队互斥；名称可按行填写多个。");
         addChoice(party, "是否队长", "组队角色", new String[]{"队长", "队员", "不组队"}, 0);
         addText(party, "队长名", "队长名（每行一个）", true);
@@ -188,6 +225,7 @@ public final class ScriptToolsActivity extends Activity {
         addNumber(party, "检测队长名字频率秒", "检测队长名字间隔", "180", "秒", 1, 86400);
         addNumber(party, "检测是否有队伍频率秒", "检测队伍间隔", "180", "秒", 1, 86400);
 
+        root = (LinearLayout) tabPages.get(5).getChildAt(0);
         LinearLayout trade = section("交易", "出售保护默认关闭；启用装备出售时仍需保留二次确认。");
         addMap(trade, "卖货地图");
         addSwitch(trade, "允许出售物品", "允许出售普通物品", false);
@@ -198,38 +236,88 @@ public final class ScriptToolsActivity extends Activity {
         addNumber(trade, "购买物品数量阈值", "物品数量低于阈值才购买", "10", "个", 0, 99999);
         addNumber(trade, "每次购买数量", "每次购买数量", "10", "个", 1, 99999);
 
-        LinearLayout advanced = section("运行环境与诊断", "首次运行时应在这里引导准备引擎与权限；当前执行宿主尚未接入，因此这些选项只记录，不申请权限、不启动服务。");
-        environment = label(environmentText(), 12, MUTED, false);
-        advanced.addView(environment);
-        addChoice(advanced, "引擎模式", "引擎模式（首次运行选择）",
-                new String[]{"手动截图与无障碍", "Root", "无障碍服务"}, 0);
-        advanced.addView(label("权限准备状态：无障碍服务、截图服务、Root 均未请求；待运行适配器接入后逐项检查。", 12, MUTED, false));
-        addText(advanced, "远程调试主机", "远程调试主机", false);
-        addNumber(advanced, "远程调试端口", "远程调试端口", "10192", "端口", 1, 65535);
-        addSwitch(advanced, "自动保存调试日志", "自动保存调试日志", true);
-        addSwitch(advanced, "日志行号文件名", "日志包含行号和文件名", true);
-        addNumber(advanced, "虚拟屏幕宽度", "虚拟屏幕宽度", "720", "像素", 1, 16384);
-        addNumber(advanced, "虚拟屏幕高度", "虚拟屏幕高度", "1280", "像素", 1, 16384);
-        addNumber(advanced, "虚拟屏幕DPI", "虚拟屏幕 DPI", "320", "DPI", 1, 2000);
-        addText(advanced, "手机编号", "手机编号", false);
-        addSwitch(advanced, "开启vpn", "原脚本 VPN 偏好", false);
-        Button modules = button("查看 9 个只读模块", SOFT);
-        modules.setOnClickListener(v -> showModules());
-        addButton(advanced, modules);
-
-        LinearLayout run = section("运行前检查", "点击后查看任务摘要。此版本不会向游戏发送任何操作。");
+        root = (LinearLayout) tabPages.get(6).getChildAt(0);
+        LinearLayout run = section("运行与状态", "打开工作台只读取配置；只有确认本次任务并点击开始后才会执行。");
         Button preflight = button("查看配置与运行前检查", BLUE);
         preflight.setOnClickListener(v -> showPreflight());
         addButton(run, preflight);
         Button previewOverlay = button("预览 RYLUX 脚本悬浮窗", SOFT);
         previewOverlay.setOnClickListener(v -> showOverlayPreview());
         addButton(run, previewOverlay);
-        run.addView(label("实际脚本启动成功后，由运行宿主自动显示悬浮窗。此处预览不会启动游戏或脚本。", 12, MUTED, false));
-        Button start = button("启动脚本 · 运行宿主未接入", SOFT);
-        start.setEnabled(false);
-        start.setAlpha(0.55f);
+        run.addView(label("运行宿主已接入 LuaJ 和系统截图/触控入口；旧脚本尚有不兼容接口，启动前会检查并阻止不安全执行。", 12, MUTED, false));
+        Button start = button("配置方案并启动", BLUE);
+        start.setOnClickListener(v -> confirmAndStart());
         addButton(run, start);
-        setContentView(page);
+        setContentView(screen);
+        selectTab(Math.max(0, Math.min(tabPages.size() - 1, selectedTab)));
+    }
+
+    private void selectTab(int index) {
+        selectedTab = index;
+        for (int i = 0; i < tabPages.size(); i++) {
+            boolean active = i == index;
+            tabPages.get(i).setVisibility(active ? View.VISIBLE : View.GONE);
+            Button tab = tabButtons.get(i);
+            tab.setBackground(round(active ? BLUE : SOFT, 12));
+            tab.setTextColor(active ? Color.WHITE : MUTED);
+            tab.setTypeface(Typeface.DEFAULT, active ? Typeface.BOLD : Typeface.NORMAL);
+            tab.setSelected(active);
+        }
+    }
+
+    private void showSettings() {
+        ScrollView page = new ScrollView(this);
+        page.setFillViewport(true);
+        page.setBackgroundColor(BG);
+        LinearLayout previousRoot = root;
+        root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(18), dp(4), dp(18), dp(28));
+        page.addView(root, new ScrollView.LayoutParams(-1, -2));
+
+        LinearLayout selection = section("目标游戏", "目前只有一个已识别的目标游戏。");
+        selection.addView(label("封神榜 · " + GAME, 13, TEXT, true));
+        selection.addView(label(gameStatus(), 12, MUTED, false));
+        Button gamePicker = button("选择目标游戏", SOFT);
+        gamePicker.setOnClickListener(v -> new AlertDialog.Builder(this)
+                .setTitle("目标游戏")
+                .setSingleChoiceItems(new String[]{"封神榜 · " + GAME}, 0, (dialog, which) -> dialog.dismiss())
+                .setNegativeButton("关闭", null).show());
+        addButton(selection, gamePicker);
+
+        LinearLayout advanced = section("运行环境与诊断", "权限仍由你在系统页面手动开启；进入工作台不会启动游戏或脚本。");
+        environment = label(environmentText(), 12, MUTED, false);
+        advanced.addView(environment);
+        accessibilityState = label(accessibilityStatus(), 13, TEXT, true);
+        accessibilityState.setPadding(0, dp(10), 0, 0);
+        advanced.addView(accessibilityState);
+        Button enableAccessibility = button("打开无障碍服务设置", SOFT);
+        enableAccessibility.setOnClickListener(v -> {
+            try {
+                startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+            } catch (RuntimeException error) {
+                Toast.makeText(this, "无法打开系统无障碍设置", Toast.LENGTH_SHORT).show();
+            }
+        });
+        addButton(advanced, enableAccessibility);
+        addChoice(advanced, "引擎模式", "引擎模式（首次运行选择）",
+                new String[]{"手动截图与无障碍", "Root", "无障碍服务"}, 0);
+        advanced.addView(label("Android 11 及以上通过无障碍服务读取画面；此权限必须由你在系统设置中启用。", 12, MUTED, false));
+
+        LinearLayout options = section("高级设置", "调试与虚拟屏幕偏好仅供记录。");
+        addText(options, "远程调试主机", "远程调试主机", false);
+        addNumber(options, "远程调试端口", "远程调试端口", "10192", "端口", 1, 65535);
+        addSwitch(options, "自动保存调试日志", "自动保存调试日志", true);
+        addSwitch(options, "日志行号文件名", "日志包含行号和文件名", true);
+        addNumber(options, "虚拟屏幕宽度", "虚拟屏幕宽度", "720", "像素", 1, 16384);
+        addNumber(options, "虚拟屏幕高度", "虚拟屏幕高度", "1280", "像素", 1, 16384);
+        addNumber(options, "虚拟屏幕DPI", "虚拟屏幕 DPI", "320", "DPI", 1, 2000);
+        addText(options, "手机编号", "手机编号", false);
+        addSwitch(options, "开启vpn", "原脚本 VPN 偏好", false);
+
+        root = previousRoot;
+        new AlertDialog.Builder(this).setTitle("设置").setView(page)
+                .setPositiveButton("完成", null).show();
     }
 
     private void showOverlayPreview() {
@@ -397,13 +485,19 @@ public final class ScriptToolsActivity extends Activity {
     }
 
     private String environmentText() {
-        int count = 0;
-        for (String path : MODULES) {
-            try (InputStream ignored = getAssets().open("script_modules/" + path)) { count++; }
-            catch (IOException ignored) { /* Show incomplete asset state. */ }
-        }
-        return "只读模块：" + count + "/9 已打包\n游戏环境：" + gameStatus()
-                + "\n运行宿主：未接入 · 输入适配器：未接入";
+        return "游戏环境：" + gameStatus()
+                + "\nLua 运行宿主：LuaJ 已接入，旧 API 兼容检查中\n截图/OCR/触控：" + accessibilityStatus()
+                + "\nOCR 使用本地 ML Kit 替代，尚未达到旧 TURING 字库的识别一致性";
+    }
+
+    private String accessibilityStatus() {
+        if (Build.VERSION.SDK_INT < 30) return "系统版本不支持无障碍截图（需要 Android 11+）";
+        String enabled = Settings.Secure.getString(getContentResolver(),
+                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+        String expected = new ComponentName(this, ScriptGameAdapter.class).flattenToString();
+        boolean active = enabled != null && enabled.toLowerCase(Locale.ROOT)
+                .contains(expected.toLowerCase(Locale.ROOT));
+        return active ? "游戏输入服务：已启用" : "游戏输入服务：未启用";
     }
 
     private String gameStatus() {
@@ -422,7 +516,7 @@ public final class ScriptToolsActivity extends Activity {
     private void showPreflight() {
         String[] roles = {"队长", "队员", "不组队"};
         String[] modes = {"不筛选", "回蓝 ≥", "魔法出招 ≥", "武器出招 ≥"};
-        String summary = "方案：" + profileName + "\n游戏：" + GAME + "\n脚本：" + SCRIPT
+        String summary = "方案：" + profileName + "\n游戏：" + GAME + "\n脚本：封神榜"
                 + "\n挂机点：" + mapName(values.optInt("挂机点地图", 0))
                 + " (" + values.optString("挂机点x", "100") + ", " + values.optString("挂机点y", "200") + ")"
                 + "\n卖货地图：" + mapName(values.optInt("卖货地图", 0))
@@ -444,10 +538,55 @@ public final class ScriptToolsActivity extends Activity {
                 + "\n\n游戏检查：" + gameStatus()
                 + "\n模块检查：" + (assetsComplete() ? "9/9 已打包" : "模块不完整")
                 + "\n配置检查：" + configurationIssues()
-                + "\nLua 运行宿主：未接入\n游戏输入适配器：未接入"
-                + "\n\n此版本无法启动脚本，也不会发送游戏输入。";
-        new AlertDialog.Builder(this).setTitle("运行前检查 · 无法启动")
+                + "\nLua 运行宿主：LuaJ 已接入\n游戏输入适配器：" + accessibilityStatus()
+                + "\n兼容说明：OCR 使用 ML Kit 替代旧字库；系统命令仅开放 /proc/uptime；文本输入依赖游戏提供可访问输入框"
+                + "\n脚本兼容阻塞项：" + scriptCompatibilityBlockers()
+                + "\n\n检查通过后才会开放开始操作。";
+        new AlertDialog.Builder(this).setTitle("运行前检查")
                 .setMessage(summary).setPositiveButton("知道了", null).show();
+    }
+
+    private void confirmAndStart() {
+        String blockers = scriptCompatibilityBlockers();
+        if (!blockers.isEmpty() || !ScriptGameAdapter.isConnected()
+                || gameStatus().contains("尚未导入") || gameStatus().contains("未就绪")) {
+            showPreflight();
+            return;
+        }
+        String summary = "方案：" + profileName + "\n目标：封神榜（越南版）\n运行模式：无障碍截图与触控"
+                + "\n路线：" + mapName(values.optInt("挂机点地图", 0))
+                + "（" + values.optString("挂机点x", "100") + ", " + values.optString("挂机点y", "200") + "）"
+                + "\n自动战斗：" + onOff("自动战斗")
+                + "\n装备出售：" + onOff("出售装备") + "；装备保护：" + onOff("保护装备不出售")
+                + "\n\n确认后脚本才会开始，并显示可暂停/停止的 RYLUX 悬浮控制窗。";
+        new AlertDialog.Builder(this).setTitle("确认本次运行").setMessage(summary)
+                .setNegativeButton("返回检查", null)
+                .setPositiveButton("开始", (dialog, which) -> startRuntime())
+                .show();
+    }
+
+    private void startRuntime() {
+        Intent command = new Intent(this, ScriptRuntimeService.class)
+                .setAction(ScriptRuntimeService.ACTION_START)
+                .putExtra(ScriptRuntimeService.EXTRA_CONFIG, values.toString());
+        try {
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(command);
+            else startService(command);
+            if (Build.VERSION.SDK_INT >= 23 && Settings.canDrawOverlays(this)) {
+                Intent overlay = new Intent(this, ScriptControlOverlayService.class)
+                        .setAction(ScriptControlOverlayService.ACTION_RUNTIME);
+                if (Build.VERSION.SDK_INT >= 26) startForegroundService(overlay);
+                else startService(overlay);
+            }
+            Toast.makeText(this, "已提交启动请求；运行状态会显示在控制悬浮窗", Toast.LENGTH_SHORT).show();
+        } catch (RuntimeException error) {
+            new AlertDialog.Builder(this).setTitle("无法启动脚本服务")
+                    .setMessage(error.getMessage()).setPositiveButton("知道了", null).show();
+        }
+    }
+
+    private String scriptCompatibilityBlockers() {
+        return String.join("；", LegacyLuaRuntime.compatibilityBlockers(this));
     }
 
     private String onOff(String key) {
@@ -477,15 +616,6 @@ public final class ScriptToolsActivity extends Activity {
             catch (IOException error) { return false; }
         }
         return true;
-    }
-
-    private void showModules() {
-        new AlertDialog.Builder(this).setTitle("反编译重建模块 · 只读")
-                .setItems(MODULES, (dialog, which) -> new AlertDialog.Builder(this)
-                        .setTitle(MODULES[which])
-                        .setMessage("来自 APK 反编译重建，不保证与原始源码完全一致。该模块不会在工作台执行。")
-                        .setPositiveButton("知道了", null).show())
-                .setNegativeButton("关闭", null).show();
     }
 
     private void chooseProfile() {
