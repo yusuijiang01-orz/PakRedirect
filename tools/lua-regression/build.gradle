@@ -22,8 +22,12 @@ sourceSets {
             include '**/LegacyLuaCompat.java'
             include '**/LegacyLuaConfig.java'
             include '**/LegacyCoordinateMapper.java'
+            include '**/LuaInstructionGate.java'
+            include '**/ScriptExecutionControl.java'
             include '**/RecoveredLuaTaskTest.java'
             include '**/LegacyLuaConfigTest.java'
+            include '**/LuaInstructionGateTest.java'
+            include '**/ScriptExecutionControlTest.java'
         }
         resources {
             setSrcDirs([new File(repositoryRoot, 'app/src/test/resources')])
