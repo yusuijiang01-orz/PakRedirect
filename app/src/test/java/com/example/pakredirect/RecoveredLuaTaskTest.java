@@ -1136,6 +1136,78 @@ public final class RecoveredLuaTaskTest {
         assertEquals("2/200", globals.get("当前背包重量").tojstring());
     }
 
+    @Test public void recoveredPotionIconMatcherReadsRedAndBlueItemsFromTheRealBackpackScreenshot() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        BufferedImage screen = readFixture("/game/inventory-backpack.png");
+        LegacyCoordinateMapper mapper = new LegacyCoordinateMapper(720, 1280,
+                screen.getWidth(), screen.getHeight());
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.ZERO; }
+        });
+        globals.set("findMultiColor", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                return findMultiColor(screen, mapper, args);
+            }
+        });
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot().resolve(module), module);
+        }
+
+        LuaFunction identify = globals.get("检测背包_识别红蓝数量_识别红蓝").checkfunction();
+        assertEquals("", identify.invoke(LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(670),
+                LuaValue.valueOf(149), LuaValue.valueOf(738), LuaValue.valueOf(221)})).tojstring());
+        assertEquals("", identify.invoke(LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(741),
+                LuaValue.valueOf(149), LuaValue.valueOf(809), LuaValue.valueOf(221)})).tojstring());
+        assertEquals("小红", identify.invoke(LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(812),
+                LuaValue.valueOf(149), LuaValue.valueOf(880), LuaValue.valueOf(221)})).tojstring());
+        assertEquals("小蓝", identify.invoke(LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(883),
+                LuaValue.valueOf(149), LuaValue.valueOf(951), LuaValue.valueOf(221)})).tojstring());
+    }
+
+    private static Varargs findMultiColor(BufferedImage image, LegacyCoordinateMapper mapper, Varargs args) {
+        int left = Math.max(0, mapper.left(args.arg(1).todouble()));
+        int top = Math.max(0, mapper.top(args.arg(2).todouble()));
+        int right = Math.min(image.getWidth() - 1, mapper.right(args.arg(3).todouble()));
+        int bottom = Math.min(image.getHeight() - 1, mapper.bottom(args.arg(4).todouble()));
+        int[] primary = parseColorTolerance(args.arg(5).tojstring());
+        String[] fields = args.arg(6).tojstring().split("\\|");
+        List<int[]> offsets = new ArrayList<>();
+        for (int i = 0; i + 2 < fields.length; i += 3) {
+            int[] color = parseColorTolerance(fields[i + 2]);
+            offsets.add(new int[]{mapper.toScreenDeltaX(Integer.parseInt(fields[i].trim())),
+                    mapper.toScreenDeltaY(Integer.parseInt(fields[i + 1].trim())), color[0], color[1]});
+        }
+        for (int y = top; y <= bottom; y++) for (int x = left; x <= right; x++) {
+            if (!colorMatches(image.getRGB(x, y), primary[0], primary[1])) continue;
+            boolean matched = true;
+            for (int[] offset : offsets) {
+                int px = x + offset[0], py = y + offset[1];
+                if (px < 0 || py < 0 || px >= image.getWidth() || py >= image.getHeight()
+                        || !colorMatches(image.getRGB(px, py), offset[2], offset[3])) {
+                    matched = false;
+                    break;
+                }
+            }
+            if (matched) {
+                return LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(mapper.toReferenceX(x)),
+                        LuaValue.valueOf(mapper.toReferenceY(y))});
+            }
+        }
+        return LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(-1), LuaValue.valueOf(-1)});
+    }
+
+    private static int[] parseColorTolerance(String encoded) {
+        String[] parts = encoded.split("-", 2);
+        return new int[]{Integer.parseInt(parts[0].trim(), 16),
+                parts.length == 2 ? Integer.parseInt(parts[1].trim(), 16) : 0};
+    }
+
+    private static boolean colorMatches(int actual, int expected, int tolerance) {
+        return Math.abs(((actual >> 16) & 255) - ((expected >> 16) & 255)) <= ((tolerance >> 16) & 255)
+                && Math.abs(((actual >> 8) & 255) - ((expected >> 8) & 255)) <= ((tolerance >> 8) & 255)
+                && Math.abs((actual & 255) - (expected & 255)) <= (tolerance & 255);
+    }
+
     private static BufferedImage scaleTemplate(BufferedImage source, int width, int height) {
         BufferedImage scaled = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
         Graphics2D graphics = scaled.createGraphics();
