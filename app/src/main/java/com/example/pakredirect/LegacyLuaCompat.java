@@ -5,9 +5,18 @@ import org.luaj.vm2.LuaValue;
 
 /** Small compatibility helpers shared by the recovered Lua host and regression tests. */
 final class LegacyLuaCompat {
+    private static final long DEFAULT_TOUCH_DURATION_MS = 350L;
+    private static final long MAX_TOUCH_DURATION_MS = 10_000L;
+
     private LegacyLuaCompat() { }
 
     interface PixelReader { int getPixel(int x, int y); }
+
+    static long normalizeTouchDuration(long durationMs) {
+        return Math.max(1L, Math.min(MAX_TOUCH_DURATION_MS, durationMs));
+    }
+
+    static long defaultTouchDurationMs() { return DEFAULT_TOUCH_DURATION_MS; }
 
     /** Implements the recovered cmpColorEx coordinate/color-list contract. */
     static boolean matchesColorPoints(String encodedPoints, double threshold, int width, int height,
@@ -51,6 +60,14 @@ final class LegacyLuaCompat {
             }
         }
         return null;
+    }
+
+    /** Implements the recovered findStr text/score behavior on ML Kit OCR lines. */
+    static LuaTable findOcrTextMatch(LuaTable lines, String target, double minimumScore) {
+        if (target == null || target.isEmpty()) return null;
+        LuaTable candidates = new LuaTable();
+        candidates.set(1, LuaValue.valueOf(target));
+        return findOcrMatch(lines, candidates, minimumScore);
     }
 
     static LuaTable splitStr(LuaValue source, LuaValue separator) {

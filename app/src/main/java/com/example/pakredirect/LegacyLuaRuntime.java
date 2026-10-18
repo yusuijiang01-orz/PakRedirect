@@ -4,6 +4,7 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.os.SystemClock;
+import android.os.Build;
 import android.util.Log;
 import android.widget.Toast;
 
@@ -50,6 +51,7 @@ final class LegacyLuaRuntime {
     private ScriptOcr ocr;
     private LuaInstructionGate instructionGate;
     private volatile float touchStartX, touchStartY, touchEndX, touchEndY;
+    private volatile long touchDurationMs = LegacyLuaCompat.defaultTouchDurationMs();
     private Globals globals;
 
     LegacyLuaRuntime(Context context, ScriptExecutionControl control, JSONObject config,
@@ -158,6 +160,7 @@ final class LegacyLuaRuntime {
                 control.checkpoint();
                 touchStartX = touchEndX = args.arg(2).tofloat();
                 touchStartY = touchEndY = args.arg(3).tofloat();
+                touchDurationMs = LegacyLuaCompat.defaultTouchDurationMs();
                 return LuaValue.TRUE;
             }
         });
@@ -168,15 +171,47 @@ final class LegacyLuaRuntime {
                 return LuaValue.TRUE;
             }
         });
+        globals.set("touchMoveEx", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                control.checkpoint();
+                touchEndX = args.arg(2).tofloat();
+                touchEndY = args.arg(3).tofloat();
+                touchDurationMs = LegacyLuaCompat.normalizeTouchDuration(
+                        args.arg(4).optlong(LegacyLuaCompat.defaultTouchDurationMs()));
+                return LuaValue.TRUE;
+            }
+        });
         globals.set("touchUp", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) {
                 control.checkpoint();
                 try {
                     boolean ok = ScriptGameAdapter.requireConnected().swipe(touchStartX, touchStartY,
-                            touchEndX, touchEndY, 350, 8000);
+                            touchEndX, touchEndY, touchDurationMs, 8000);
                     if (!ok) throw new LuaError("系统未接受触控手势");
                     return LuaValue.TRUE;
                 } catch (Exception error) { rethrowIfStopped(); throw new LuaError("触控失败：" + error.getMessage()); }
+            }
+        });
+        globals.set("getDevice", new ZeroFunction() {
+            @Override public LuaValue invoke() { return LuaValue.valueOf(Build.DEVICE); }
+        });
+        globals.set("getDisplaySize", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                android.util.DisplayMetrics metrics = context.getResources().getDisplayMetrics();
+                return LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(metrics.widthPixels),
+                        LuaValue.valueOf(metrics.heightPixels)});
+            }
+        });
+        globals.set("getDisplayDpi", new ZeroFunction() {
+            @Override public LuaValue invoke() {
+                return LuaValue.valueOf(context.getResources().getDisplayMetrics().densityDpi);
+            }
+        });
+        globals.set("exitScript", new ZeroFunction() {
+            @Override public LuaValue invoke() {
+                control.requestStop();
+                control.checkpoint();
+                return LuaValue.NONE;
             }
         });
         globals.set("keyPress", new OneArgFunction() {
@@ -437,6 +472,14 @@ final class LegacyLuaRuntime {
     }
 
     private void installOcrApi() {
+        // The replacement OCR uses ML Kit's on-device language model instead of the
+        // lost glyph dictionary. Accept the legacy selector so the helper can continue.
+        globals.set("useDict", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue dictionary) { return LuaValue.TRUE; }
+        });
+        globals.set("findStr", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return findText(args); }
+        });
         globals.set("tomocrtextall", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) {
                 LuaTable lines = recognizeTextRegion(args, "OCR 失败");
@@ -491,6 +534,19 @@ final class LegacyLuaRuntime {
                 } catch (Exception error) { rethrowIfStopped(); throw new LuaError("OCR 点击失败：" + error.getMessage()); }
             }
         });
+    }
+
+    /** Legacy seven-argument text finder backed by the local ML Kit OCR adapter. */
+    private Varargs findText(Varargs args) {
+        control.checkpoint();
+        LuaTable lines = recognizeTextRegion(args, "文字查找失败");
+        String target = args.arg(5).tojstring();
+        double minimumScore = Math.max(0d, Math.min(1d, args.arg(7).optdouble(0.8d)));
+        LuaTable match = LegacyLuaCompat.findOcrTextMatch(lines, target, minimumScore);
+        if (match == null) {
+            return LuaValue.varargsOf(new LuaValue[]{LuaValue.FALSE, LuaValue.valueOf(-1), LuaValue.valueOf(-1)});
+        }
+        return LuaValue.varargsOf(new LuaValue[]{LuaValue.TRUE, match.get("x"), match.get("y")});
     }
 
     private LuaTable recognizeTextRegion(Varargs args, String errorLabel) {

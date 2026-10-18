@@ -11,6 +11,13 @@ import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 public class LegacyLuaCompatTest {
+    @Test public void touchMoveDurationUsesLegacyDefaultAndStaysWithinGestureBounds() {
+        assertEquals(350L, LegacyLuaCompat.defaultTouchDurationMs());
+        assertEquals(1L, LegacyLuaCompat.normalizeTouchDuration(0L));
+        assertEquals(300L, LegacyLuaCompat.normalizeTouchDuration(300L));
+        assertEquals(10_000L, LegacyLuaCompat.normalizeTouchDuration(20_000L));
+    }
+
     @Test public void splitStrPreservesMapOrderAndSeparatesLiteralNewlines() {
         LuaTable maps = LegacyLuaCompat.splitStr(
                 LuaValue.valueOf("崇城野外,sùng thành\n北海,bắc hải"), LuaValue.valueOf("\n"));
@@ -57,5 +64,22 @@ public class LegacyLuaCompatTest {
         assertEquals("玩家申请允许进入队伍",
                 LegacyLuaCompat.findOcrMatch(lines, candidates, 0.8d).get("words").tojstring());
         assertNull(LegacyLuaCompat.findOcrMatch(lines, candidates, 0.99d));
+    }
+
+    @Test public void legacyFindStrMatchesRequestedTextAndReturnsScreenPoint() {
+        LuaTable lines = new LuaTable();
+        LuaTable match = new LuaTable();
+        match.set("words", LuaValue.valueOf("玩家申请允许进入队伍"));
+        match.set("x", LuaValue.valueOf(42));
+        match.set("y", LuaValue.valueOf(73));
+        match.set("score", LuaValue.valueOf(0.95d));
+        lines.set(1, match);
+
+        LuaTable found = LegacyLuaCompat.findOcrTextMatch(lines, "允许进入", 0.8d);
+        assertSame(match, found);
+        assertEquals(42, found.get("x").toint());
+        assertEquals(73, found.get("y").toint());
+        assertNull(LegacyLuaCompat.findOcrTextMatch(lines, "完全不存在", 0.8d));
+        assertNull(LegacyLuaCompat.findOcrTextMatch(lines, "允许进入", 0.99d));
     }
 }
