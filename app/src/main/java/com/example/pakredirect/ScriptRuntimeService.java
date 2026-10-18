@@ -141,7 +141,8 @@ public final class ScriptRuntimeService extends Service {
         Throwable cause = error;
         while (cause.getCause() != null && cause.getCause() != cause) cause = cause.getCause();
         String message = cause.getMessage();
-        return message == null ? cause.getClass().getSimpleName() : message;
+        String type = cause.getClass().getName();
+        return message == null || message.trim().isEmpty() ? type : type + ": " + message;
     }
 
     @Override public void onDestroy() {

@@ -77,6 +77,7 @@ public final class ScriptControlOverlayService extends Service {
         params = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT, type,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
                         | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT);
         params.gravity = Gravity.TOP | Gravity.START;
@@ -128,11 +129,12 @@ public final class ScriptControlOverlayService extends Service {
         statusLabel.setEllipsize(TextUtils.TruncateAt.END);
         statusLabel.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
         header.addView(statusLabel, new LinearLayout.LayoutParams(dp(120), -2));
-        TextView collapse = text("×", 22, MUTED, true);
+        TextView collapse = text("收起", 11, TEXT, true);
         collapse.setGravity(Gravity.CENTER);
+        collapse.setBackground(round(SOFT, 9, BORDER));
         collapse.setContentDescription("收起脚本控制");
         collapse.setOnClickListener(v -> setExpanded(false));
-        LinearLayout.LayoutParams collapseLp = new LinearLayout.LayoutParams(dp(34), dp(30));
+        LinearLayout.LayoutParams collapseLp = new LinearLayout.LayoutParams(dp(46), dp(30));
         collapseLp.leftMargin = dp(5);
         header.addView(collapse, collapseLp);
         panel.addView(header);
@@ -164,6 +166,7 @@ public final class ScriptControlOverlayService extends Service {
     private void setExpanded(boolean value) {
         expanded = value;
         if (panel != null) panel.setVisibility(value ? View.VISIBLE : View.GONE);
+        if (overlay != null) overlay.requestLayout();
         if (windowManager != null && overlay != null && params != null) {
             try { windowManager.updateViewLayout(overlay, params); }
             catch (RuntimeException ignored) { }

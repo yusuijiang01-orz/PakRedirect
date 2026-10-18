@@ -5,6 +5,11 @@
 -dontwarn com.alipay.**
 -keep class org.amnezia.awg.hevtunnel.TProxyService { *; }
 
+# LuaJ loads standard libraries and portions of its bytecode runtime by class name.
+# Keep the complete interpreter intact in the minified release APK; R8 otherwise
+# removes inner library implementations that appear unused from Java call sites.
+-keep class org.luaj.** { *; }
+
 # BlackBox creates Android framework proxies from runtime annotations on
 # generated black.android.* wrappers. Preserve their annotations and members
 # through the host app's R8 pass (the library consumer rules don't cover them).
