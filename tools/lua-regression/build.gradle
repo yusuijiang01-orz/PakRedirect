@@ -1,0 +1,47 @@
+plugins {
+    id 'java'
+}
+
+repositories {
+    mavenCentral()
+}
+
+def repositoryRoot = file('../..').canonicalFile
+
+sourceCompatibility = JavaVersion.VERSION_11
+targetCompatibility = JavaVersion.VERSION_11
+
+sourceSets {
+    test {
+        java {
+            setSrcDirs([
+                new File(repositoryRoot, 'app/src/main/java'),
+                new File(repositoryRoot, 'app/src/test/java')
+            ])
+            include '**/LuaSourceCompat.java'
+            include '**/LegacyLuaCompat.java'
+            include '**/LegacyCoordinateMapper.java'
+            include '**/RecoveredLuaTaskTest.java'
+        }
+        resources {
+            setSrcDirs([new File(repositoryRoot, 'app/src/test/resources')])
+        }
+    }
+}
+
+dependencies {
+    testImplementation 'org.luaj:luaj-jse:3.0.1'
+    testImplementation 'junit:junit:4.13.2'
+}
+
+tasks.withType(Test).configureEach {
+    workingDir repositoryRoot
+    systemProperty 'user.dir', repositoryRoot.absolutePath
+    testLogging {
+        events 'passed', 'failed', 'skipped'
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
