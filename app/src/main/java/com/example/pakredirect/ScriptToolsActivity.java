@@ -605,6 +605,23 @@ public final class ScriptToolsActivity extends Activity {
     }
 
     private void startRuntime() {
+        Toast.makeText(this, "正在准备汉化并启动沙箱游戏…", Toast.LENGTH_SHORT).show();
+        // Use the same localization readiness gate as the sandbox launch flow
+        // before starting the script host or routing this package to BlackBoxCore.
+        new Thread(this::prepareLocalizationThenStartRuntime, "RYLUX-Script-Launch").start();
+    }
+
+    private void prepareLocalizationThenStartRuntime() {
+        try {
+            LocalizationLaunchPreparation.prepare(this, message -> runOnUiThread(
+                    () -> Toast.makeText(this, message, Toast.LENGTH_SHORT).show()));
+            runOnUiThread(this::startRuntimeServicesAndLaunchGame);
+        } catch (Exception error) {
+            failRuntimeLaunch(error.getMessage());
+        }
+    }
+
+    private void startRuntimeServicesAndLaunchGame() {
         // Start the host and overlay while this activity is still foreground. The
         // sandbox game must be launched last: finishing this activity after
         // launch returns Android to the launcher and moves BlackBox's proxy task
@@ -621,26 +638,26 @@ public final class ScriptToolsActivity extends Activity {
                     .putExtra(ScriptRuntimeService.EXTRA_CONFIG, values.toString());
             if (Build.VERSION.SDK_INT >= 26) startForegroundService(command);
             else startService(command);
-            Toast.makeText(this, "已启动沙箱游戏和脚本；可用 RYLUX 悬浮面板控制", Toast.LENGTH_SHORT).show();
-        } catch (RuntimeException error) {
-            showRyluxDialog("无法启动脚本服务", String.valueOf(error.getMessage()), null, "知道了", null);
-            return;
-        }
 
-        // BlackBoxCore routes this launch to the virtualized package; never use
-        // the Android host PackageManager launch intent for the game. Keep this
-        // activity behind the guest game so the launch does not fall through to
-        // the launcher when the game task is created.
-        try {
+            // BlackBoxCore routes this launch to the virtualized package.
             if (!BlackBoxCore.get().launchApk(GAME, 0)) {
-                stopPendingRuntime();
-                showRyluxDialog("沙箱游戏启动失败", "RYLUX 无法打开沙箱中的封神榜。请返回沙箱页检查应用状态。",
-                        null, "知道了", null);
+                failRuntimeLaunch("RYLUX 无法打开沙箱中的封神榜。请返回沙箱页检查应用状态。");
+                return;
             }
+            Toast.makeText(this,
+                    "汉化已就绪，沙箱游戏和脚本已启动；可用 RYLUX 悬浮面板控制",
+                    Toast.LENGTH_SHORT).show();
         } catch (RuntimeException error) {
-            stopPendingRuntime();
-            showRyluxDialog("沙箱游戏启动失败", String.valueOf(error.getMessage()), null, "知道了", null);
+            failRuntimeLaunch(error.getMessage());
         }
+    }
+
+    private void failRuntimeLaunch(String message) {
+        runOnUiThread(() -> {
+            stopPendingRuntime();
+            showRyluxDialog("沙箱游戏启动失败", message == null ? "RYLUX 无法启动沙箱游戏。" : message,
+                    null, "知道了", null);
+        });
     }
 
     private void stopPendingRuntime() {

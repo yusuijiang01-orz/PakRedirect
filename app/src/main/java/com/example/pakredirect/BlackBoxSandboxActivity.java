@@ -319,24 +319,8 @@ public final class BlackBoxSandboxActivity extends Activity {
         worker.execute(() -> {
             try {
                 if (withLocalization && LOCALIZED_GAME_PACKAGE.equals(packageName)) {
-                    if (!LocalizationSettings.isEnabled(this)) {
-                        throw new IllegalStateException("RYLUX 汉化开关已关闭，请在首页开启后重试");
-                    }
-                    if (!InterceptService.isRunning()) {
-                        LaunchProgress.begin("正在准备 RYLUX 汉化资源…");
-                        Intent service = new Intent(this, InterceptService.class)
-                                .setAction(InterceptService.ACTION_START);
-                        if (Build.VERSION.SDK_INT >= 26) startForegroundService(service);
-                        else startService(service);
-                        if (!waitForLocalizationReady()) {
-                            String error = LaunchProgress.error();
-                            if (error == null || error.trim().isEmpty()) {
-                                error = LaunchProgress.message();
-                            }
-                            throw new IllegalStateException(error == null || error.trim().isEmpty()
-                                    ? "RYLUX 汉化服务未能就绪" : error);
-                        }
-                    }
+                    LocalizationLaunchPreparation.prepare(this,
+                            message -> runOnUiThread(() -> setBusy(true, message)));
                 }
                 boolean launched = BlackBoxCore.get().launchApk(packageName, 0);
                 String result = launched
@@ -348,25 +332,6 @@ public final class BlackBoxSandboxActivity extends Activity {
                 runOnUiThread(() -> setBusy(false, prefix + safe(error.getMessage())));
             }
         });
-    }
-
-    private boolean waitForLocalizationReady() throws InterruptedException {
-        long deadline = System.currentTimeMillis() + 5L * 60L * 1000L;
-        String lastMessage = null;
-        while (System.currentTimeMillis() < deadline) {
-            if (InterceptService.isRunning()) return true;
-            String error = LaunchProgress.error();
-            if (!LaunchProgress.isStarting() && error != null && !error.trim().isEmpty()) return false;
-            String message = LaunchProgress.message();
-            if (message != null && !message.trim().isEmpty() && !message.equals(lastMessage)) {
-                lastMessage = message;
-                String progressMessage = message;
-                runOnUiThread(() -> setBusy(true, progressMessage));
-            }
-            Thread.sleep(200L);
-        }
-        LaunchProgress.fail("等待 RYLUX 汉化服务超时");
-        return false;
     }
 
     private void setBusy(boolean busy, String message) {
