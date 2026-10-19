@@ -605,18 +605,10 @@ public final class ScriptToolsActivity extends Activity {
     }
 
     private void startRuntime() {
-        // BlackBoxCore routes this launch to the virtualized package; never use the
-        // Android host PackageManager launch intent for the game.
-        try {
-            if (!BlackBoxCore.get().launchApk(GAME, 0)) {
-                showRyluxDialog("沙箱游戏启动失败", "RYLUX 无法打开沙箱中的封神榜。请返回沙箱页检查应用状态。",
-                        null, "知道了", null);
-                return;
-            }
-        } catch (RuntimeException error) {
-            showRyluxDialog("沙箱游戏启动失败", String.valueOf(error.getMessage()), null, "知道了", null);
-            return;
-        }
+        // Start the host and overlay while this activity is still foreground. The
+        // sandbox game must be launched last: finishing this activity after
+        // launch returns Android to the launcher and moves BlackBox's proxy task
+        // behind it, which makes both the game and the foreground gate fail.
         try {
             if (Build.VERSION.SDK_INT >= 23 && Settings.canDrawOverlays(this)) {
                 Intent overlay = new Intent(this, ScriptControlOverlayService.class)
@@ -630,10 +622,32 @@ public final class ScriptToolsActivity extends Activity {
             if (Build.VERSION.SDK_INT >= 26) startForegroundService(command);
             else startService(command);
             Toast.makeText(this, "已启动沙箱游戏和脚本；可用 RYLUX 悬浮面板控制", Toast.LENGTH_SHORT).show();
-            finish();
         } catch (RuntimeException error) {
             showRyluxDialog("无法启动脚本服务", String.valueOf(error.getMessage()), null, "知道了", null);
+            return;
         }
+
+        // BlackBoxCore routes this launch to the virtualized package; never use
+        // the Android host PackageManager launch intent for the game. Keep this
+        // activity behind the guest game so the launch does not fall through to
+        // the launcher when the game task is created.
+        try {
+            if (!BlackBoxCore.get().launchApk(GAME, 0)) {
+                stopPendingRuntime();
+                showRyluxDialog("沙箱游戏启动失败", "RYLUX 无法打开沙箱中的封神榜。请返回沙箱页检查应用状态。",
+                        null, "知道了", null);
+            }
+        } catch (RuntimeException error) {
+            stopPendingRuntime();
+            showRyluxDialog("沙箱游戏启动失败", String.valueOf(error.getMessage()), null, "知道了", null);
+        }
+    }
+
+    private void stopPendingRuntime() {
+        Intent stop = new Intent(this, ScriptRuntimeService.class)
+                .setAction(ScriptRuntimeService.ACTION_STOP);
+        try { startService(stop); } catch (RuntimeException ignored) { }
+        stopService(new Intent(this, ScriptControlOverlayService.class));
     }
 
     private void showRyluxDialog(String title, String message, String secondaryLabel,
