@@ -45,26 +45,23 @@ public class ScriptForegroundTargetTest {
                 "top.niunaijun.blackbox.proxy.ProxyActivity$P0Fake", true, TARGET, TARGET));
     }
 
-    @Test public void acceptsLiveBlackBoxHostWindowWithTargetVirtualTop() {
-        assertTrue(ScriptForegroundTarget.isActiveWindowTarget(HOST, true, TARGET, TARGET));
-        assertFalse(ScriptForegroundTarget.isActiveWindowTarget(HOST, false, TARGET, TARGET));
-        assertFalse(ScriptForegroundTarget.isActiveWindowTarget(HOST, true, "com.example.othergame", TARGET));
-        assertFalse(ScriptForegroundTarget.isActiveWindowTarget("com.other.host", true, TARGET, TARGET));
+    @Test public void acceptsLiveBlackBoxHostWindowWhenAccessibilityWindowIdsDiffer() {
+        assertTrue(ScriptForegroundTarget.isActiveSandboxGameWindow(
+                HOST, TARGET, "com.jxclient.release.jxclient", TARGET, TARGET));
+        assertTrue(ScriptForegroundTarget.isActiveSandboxGameWindow(
+                HOST, HOST, PROXY, TARGET, TARGET));
+        assertFalse(ScriptForegroundTarget.isActiveSandboxGameWindow(
+                HOST, HOST, "com.example.pakredirect.ScriptToolsActivity", TARGET, TARGET));
+        assertFalse(ScriptForegroundTarget.isActiveSandboxGameWindow(
+                HOST, TARGET, "com.jxclient.release.jxclient", "com.example.othergame", TARGET));
+        assertFalse(ScriptForegroundTarget.isActiveSandboxGameWindow(
+                "com.other.host", TARGET, PROXY, TARGET, TARGET));
     }
 
     @Test public void acceptsDirectGameActiveWindow() {
-        assertTrue(ScriptForegroundTarget.isActiveWindowTarget(TARGET, false, null, TARGET));
-        assertFalse(ScriptForegroundTarget.isActiveWindowTarget("com.example.othergame", true, null, TARGET));
-    }
-
-    @Test public void acceptsGuestActivityEventFromActiveBlackBoxWindow() {
-        // Some BlackBox versions expose the guest activity name in accessibility events
-        // instead of the ProxyActivity class, while the active Android window is still host-owned.
-        assertTrue(ScriptForegroundTarget.isActiveSandboxGameEvent(true, TARGET,
-                "com.jxclient.release.jxclient", TARGET));
-        assertFalse(ScriptForegroundTarget.isActiveSandboxGameEvent(false, TARGET,
-                "com.jxclient.release.jxclient", TARGET));
-        assertFalse(ScriptForegroundTarget.isActiveSandboxGameEvent(true, HOST,
-                "com.example.pakredirect.ScriptToolsActivity", TARGET));
+        assertTrue(ScriptForegroundTarget.isActiveSandboxGameWindow(
+                TARGET, HOST, "com.example.pakredirect.ScriptToolsActivity", null, TARGET));
+        assertFalse(ScriptForegroundTarget.isActiveSandboxGameWindow(
+                "com.example.othergame", HOST, PROXY, null, TARGET));
     }
 }

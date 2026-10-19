@@ -23,14 +23,20 @@ final class ScriptForegroundTarget {
      * Checks the live active accessibility window instead of relying on a potentially
      * stale window-state event. BlackBox renders its guest activity in a host window.
      */
-    static boolean isActiveWindowTarget(String activeWindowPackage,
-                                        boolean activeWindowEventIsSandboxGame,
-                                        String virtualTopPackage,
-                                        String targetPackage) {
+    static boolean isActiveSandboxGameWindow(String activeWindowPackage,
+                                             String eventPackage,
+                                             String eventClass,
+                                             String virtualTopPackage,
+                                             String targetPackage) {
         if (activeWindowPackage == null || targetPackage == null || targetPackage.isEmpty()) return false;
         if (targetPackage.equals(activeWindowPackage)) return true;
-        return HOST_PACKAGE.equals(activeWindowPackage) && activeWindowEventIsSandboxGame
-                && targetPackage.equals(virtualTopPackage);
+        if (!HOST_PACKAGE.equals(activeWindowPackage) || !targetPackage.equals(virtualTopPackage)) {
+            return false;
+        }
+        // Accessibility events and live windows can use different ids in BlackBox on
+        // some Android builds. Correlate the current host application window with the
+        // guest activity identity and BlackBox's current virtual top activity instead.
+        return targetPackage.equals(eventPackage) || isProxyActivity(eventClass);
     }
 
     static boolean isProxyActivity(String className) {
@@ -47,9 +53,4 @@ final class ScriptForegroundTarget {
         return true;
     }
 
-    static boolean isActiveSandboxGameEvent(boolean eventWindowIsActive, String eventPackage,
-                                            String eventClass, String targetPackage) {
-        if (!eventWindowIsActive || targetPackage == null || targetPackage.isEmpty()) return false;
-        return targetPackage.equals(eventPackage) || isProxyActivity(eventClass);
-    }
 }
