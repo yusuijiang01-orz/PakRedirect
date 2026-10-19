@@ -39,6 +39,10 @@ jobs:
         shell: bash
         run: git -C vendor/BlackBoxReborn apply "$GITHUB_WORKSPACE/patches/blackbox-api33-components.patch"
 
+      - name: Apply BlackBox foreground activity query patch
+        shell: bash
+        run: git -C vendor/BlackBoxReborn apply "$GITHUB_WORKSPACE/patches/blackbox-foreground-top-activity.patch"
+
       - name: Check Gitee release credential
         if: inputs.publish_release
         env:

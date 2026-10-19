@@ -1,0 +1,78 @@
+diff --git a/Bcore/src/main/aidl/top/niunaijun/blackbox/core/system/am/IBActivityManagerService.aidl b/Bcore/src/main/aidl/top/niunaijun/blackbox/core/system/am/IBActivityManagerService.aidl
+index 5c7245e..ce5dcec 100644
+--- a/Bcore/src/main/aidl/top/niunaijun/blackbox/core/system/am/IBActivityManagerService.aidl
++++ b/Bcore/src/main/aidl/top/niunaijun/blackbox/core/system/am/IBActivityManagerService.aidl
+@@ -45,6 +45,7 @@ interface IBActivityManagerService {
+     void onActivityResumed(IBinder token);
+     void onActivityDestroyed(IBinder token);
+     void onFinishActivity(IBinder token);
++    ComponentName getTopActivity(int userId);
+ 
+     RunningAppProcessInfo getRunningAppProcesses(String callerPackage, int userId);
+     RunningServiceInfo getRunningServices(String callerPackage, int userId);
+diff --git a/Bcore/src/main/java/top/niunaijun/blackbox/core/system/am/ActivityStack.java b/Bcore/src/main/java/top/niunaijun/blackbox/core/system/am/ActivityStack.java
+index 7d31655..7ea93c8 100644
+--- a/Bcore/src/main/java/top/niunaijun/blackbox/core/system/am/ActivityStack.java
++++ b/Bcore/src/main/java/top/niunaijun/blackbox/core/system/am/ActivityStack.java
+@@ -320,14 +320,16 @@ public class ActivityStack {
+         return 0;
+     }
+ 
+-    private ActivityRecord getTopActivityRecord() {
++    public ComponentName getTopActivityComponent() {
+         synchronized (mTasks) {
+             synchronizeTasks();
++            if (mTasks.isEmpty()) return null;
++            // synchronizeTasks preserves Android's recent-task order; the last
++            // task is the foreground BlackBox task, not just any running guest.
++            List<TaskRecord> tasks = new LinkedList<>(mTasks.values());
++            ActivityRecord top = tasks.get(tasks.size() - 1).getTopActivityRecord();
++            return top == null ? null : top.component;
+         }
+-        List<TaskRecord> tasks = new LinkedList<>(mTasks.values());
+-        if (tasks.isEmpty())
+-            return null;
+-        return tasks.get(tasks.size() - 1).getTopActivityRecord();
+     }
+ 
+     private Intent getStartStubActivityIntentInner(Intent intent, int vpid,
+diff --git a/Bcore/src/main/java/top/niunaijun/blackbox/core/system/am/BActivityManagerService.java b/Bcore/src/main/java/top/niunaijun/blackbox/core/system/am/BActivityManagerService.java
+index 6ef4967..f5ed299 100644
+--- a/Bcore/src/main/java/top/niunaijun/blackbox/core/system/am/BActivityManagerService.java
++++ b/Bcore/src/main/java/top/niunaijun/blackbox/core/system/am/BActivityManagerService.java
+@@ -157,6 +157,14 @@ public class BActivityManagerService extends IBActivityManagerService.Stub imple
+         }
+     }
+ 
++    @Override
++    public ComponentName getTopActivity(int userId) {
++        UserSpace userSpace = getOrCreateSpaceLocked(userId);
++        synchronized (userSpace.mStack) {
++            return userSpace.mStack.getTopActivityComponent();
++        }
++    }
++
+     @Override
+     public RunningAppProcessInfo getRunningAppProcesses(String callerPackage, int userId) throws RemoteException {
+         ActivityManager manager = (ActivityManager)
+diff --git a/Bcore/src/main/java/top/niunaijun/blackbox/fake/frameworks/BActivityManager.java b/Bcore/src/main/java/top/niunaijun/blackbox/fake/frameworks/BActivityManager.java
+index 5cffce0..261dd45 100644
+--- a/Bcore/src/main/java/top/niunaijun/blackbox/fake/frameworks/BActivityManager.java
++++ b/Bcore/src/main/java/top/niunaijun/blackbox/fake/frameworks/BActivityManager.java
+@@ -375,6 +375,16 @@ public class BActivityManager extends BlackManager<IBActivityManagerService> {
+         }
+     }
+ 
++    public ComponentName getTopActivity(int userId) {
++        try {
++            IBActivityManagerService service = getService();
++            return service == null ? null : service.getTopActivity(userId);
++        } catch (RemoteException e) {
++            Slog.e(TAG, "Unable to read top virtual activity", e);
++            return null;
++        }
++    }
++
+     public RunningAppProcessInfo getRunningAppProcesses(String callerPackage, int userId) throws RemoteException {
+         try {
+             return getService().getRunningAppProcesses(callerPackage, userId);

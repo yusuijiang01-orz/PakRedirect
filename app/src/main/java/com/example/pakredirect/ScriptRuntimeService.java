@@ -144,7 +144,7 @@ public final class ScriptRuntimeService extends Service {
     private void awaitTargetGameForeground() throws Exception {
         try {
             ScriptForegroundGate.await(
-                    () -> ScriptGameAdapter.TARGET_GAME_PACKAGE.equals(ScriptGameAdapter.foregroundPackage()),
+                    ScriptGameAdapter::isTargetGameForeground,
                     control::checkpoint,
                     15_000L,
                     "15 秒内未检测到沙箱中的汉化版封神榜处于前台；已阻止脚本截图和触控");

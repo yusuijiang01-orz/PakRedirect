@@ -2,6 +2,7 @@ package com.example.pakredirect;
 
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
+import android.content.ComponentName;
 import android.graphics.Bitmap;
 import android.graphics.ColorSpace;
 import android.graphics.Path;
@@ -10,17 +11,34 @@ import android.os.Build;
 import android.view.Display;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
+import android.view.accessibility.AccessibilityWindowInfo;
 import android.os.Bundle;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.List;
+
+import top.niunaijun.blackbox.fake.frameworks.BActivityManager;
 
 /** Display-level screenshot and touch adapter. The user must enable its accessibility service. */
 public final class ScriptGameAdapter extends AccessibilityService {
     static final String TARGET_GAME_PACKAGE = "com.tepaylink.tamgioiphantranhmobile";
     private static volatile ScriptGameAdapter instance;
-    private volatile String foregroundPackage = "";
+    private volatile ForegroundEvent foregroundEvent = ForegroundEvent.EMPTY;
+
+    private static final class ForegroundEvent {
+        static final ForegroundEvent EMPTY = new ForegroundEvent("", "", -1);
+        final String packageName;
+        final String className;
+        final int windowId;
+
+        ForegroundEvent(String packageName, String className, int windowId) {
+            this.packageName = packageName;
+            this.className = className;
+            this.windowId = windowId;
+        }
+    }
 
     public static boolean isConnected() { return instance != null; }
 
@@ -32,30 +50,70 @@ public final class ScriptGameAdapter extends AccessibilityService {
 
     @Override protected void onServiceConnected() {
         super.onServiceConnected();
-        foregroundPackage = "";
+        foregroundEvent = ForegroundEvent.EMPTY;
         instance = this;
     }
 
     @Override public void onAccessibilityEvent(AccessibilityEvent event) {
         if (event == null || event.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return;
-        if (event.getPackageName() == null) {
-            foregroundPackage = "";
-            return;
-        }
-        // Include RYLUX itself: otherwise the last game package could remain cached
-        // after the user returns to the console and incorrectly pass startup gating.
-        foregroundPackage = event.getPackageName().toString();
+        // Keep the Android activity class and window identity with the package.
+        // A host-package event alone also describes the RYLUX workbench.
+        foregroundEvent = new ForegroundEvent(
+                event.getPackageName() == null ? "" : event.getPackageName().toString(),
+                event.getClassName() == null ? "" : event.getClassName().toString(),
+                event.getWindowId());
     }
     @Override public void onInterrupt() { }
 
     public static String foregroundPackage() {
         ScriptGameAdapter current = instance;
-        return current == null ? "" : current.foregroundPackage;
+        return current == null ? "" : current.foregroundEvent.packageName;
+    }
+
+    public static boolean isTargetGameForeground() {
+        ScriptGameAdapter current = instance;
+        return current != null && current.hasTargetGameForeground();
+    }
+
+    private boolean hasTargetGameForeground() {
+        ForegroundEvent event = foregroundEvent;
+        boolean currentWindow = false;
+        List<AccessibilityWindowInfo> windows;
+        try {
+            windows = getWindows();
+        } catch (RuntimeException unavailable) {
+            return false;
+        }
+        if (event.windowId >= 0 && windows != null) {
+            try {
+                for (AccessibilityWindowInfo window : windows) {
+                    if (window.isActive() && window.getId() == event.windowId) {
+                        currentWindow = true;
+                        break;
+                    }
+                }
+            } finally {
+                for (AccessibilityWindowInfo window : windows) {
+                    if (window != null) window.recycle();
+                }
+            }
+        }
+        String virtualTopPackage = null;
+        if (currentWindow && getPackageName().equals(event.packageName)) {
+            try {
+                ComponentName top = BActivityManager.get().getTopActivity(0);
+                if (top != null) virtualTopPackage = top.getPackageName();
+            } catch (RuntimeException ignored) {
+                // A failed BlackBox query must keep input blocked.
+            }
+        }
+        return ScriptForegroundTarget.isTarget(event.packageName, event.className,
+                currentWindow, virtualTopPackage, TARGET_GAME_PACKAGE);
     }
 
     private void requireTargetGameForeground() {
         ScriptForegroundGate.requireReady(
-                () -> TARGET_GAME_PACKAGE.equals(foregroundPackage),
+                this::hasTargetGameForeground,
                 "沙箱中的汉化版封神榜不在前台，已阻止截图、输入和触控");
     }
 
@@ -74,7 +132,13 @@ public final class ScriptGameAdapter extends AccessibilityService {
             if (focused == null) focused = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY);
             if (focused == null || !focused.isEditable()) return false;
             CharSequence nodePackage = focused.getPackageName();
-            if (nodePackage == null || !TARGET_GAME_PACKAGE.contentEquals(nodePackage)) return false;
+            ForegroundEvent event = foregroundEvent;
+            if (nodePackage == null || focused.getWindowId() != event.windowId) return false;
+            boolean directGameNode = TARGET_GAME_PACKAGE.contentEquals(nodePackage);
+            boolean sandboxProxyNode = getPackageName().contentEquals(event.packageName)
+                    && ScriptForegroundTarget.isProxyActivity(event.className)
+                    && getPackageName().contentEquals(nodePackage);
+            if (!directGameNode && !sandboxProxyNode) return false;
             Bundle arguments = new Bundle();
             arguments.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
                     text == null ? "" : text);
