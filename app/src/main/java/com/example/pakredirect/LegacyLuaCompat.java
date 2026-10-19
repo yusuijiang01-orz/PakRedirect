@@ -124,6 +124,36 @@ final class LegacyLuaCompat {
         return result;
     }
 
+    /** UTF-8 character-index helpers used by the recovered legacy scripts. */
+    static LuaTable createUtf8Compat() {
+        LuaTable utf8 = new LuaTable();
+        utf8.set("inStr", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                int start = Math.max(1, args.arg(1).optint(1));
+                String source = args.arg(2).isnil() ? "" : args.arg(2).tojstring();
+                String needle = args.arg(3).isnil() ? "" : args.arg(3).tojstring();
+                if (needle.isEmpty()) return LuaValue.valueOf(start);
+                int codePoints = source.codePointCount(0, source.length());
+                if (start > codePoints) return LuaValue.ZERO;
+                int byteOffset = source.offsetByCodePoints(0, start - 1);
+                int found = source.indexOf(needle, byteOffset);
+                if (found < 0) return LuaValue.ZERO;
+                return LuaValue.valueOf(source.codePointCount(0, found) + 1);
+            }
+        });
+        utf8.set("left", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                String source = args.arg(1).isnil() ? "" : args.arg(1).tojstring();
+                int length = args.arg(2).optint(0);
+                if (length <= 0 || source.isEmpty()) return LuaValue.valueOf("");
+                int codePoints = source.codePointCount(0, source.length());
+                int end = source.offsetByCodePoints(0, Math.min(length, codePoints));
+                return LuaValue.valueOf(source.substring(0, end));
+            }
+        });
+        return utf8;
+    }
+
     private static int parseColor(String value) {
         try { return (int) Long.parseLong(value.trim(), 16) & 0x00ffffff; }
         catch (RuntimeException ignored) { return 0; }

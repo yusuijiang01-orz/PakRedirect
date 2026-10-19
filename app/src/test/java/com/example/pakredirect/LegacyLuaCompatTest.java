@@ -36,6 +36,15 @@ public class LegacyLuaCompatTest {
         assertTrue(LegacyLuaCompat.splitStr(LuaValue.valueOf(""), LuaValue.valueOf("\n")).get(1).isnil());
     }
 
+    @Test public void utf8CompatibilityUsesCharacterIndexesForChineseText() {
+        LuaTable utf8 = LegacyLuaCompat.createUtf8Compat();
+        LuaValue source = LuaValue.valueOf("点击队伍[附近]");
+        assertEquals(5, utf8.get("inStr").invoke(LuaValue.varargsOf(new LuaValue[]{
+                LuaValue.ONE, source, LuaValue.valueOf("[")})).toint());
+        assertEquals("点击队伍", utf8.get("left").call(source, LuaValue.valueOf(4)).tojstring());
+        assertEquals("点击", utf8.get("left").call(source, LuaValue.valueOf(2)).tojstring());
+    }
+
     @Test public void cmpColorExUsesAbsolutePointsPerChannelToleranceAndSimilarityThreshold() {
         String points = "1|1|ff0000-101010,2|2|00ff00-000000";
         LegacyLuaCompat.PixelReader pixels = (x, y) -> x == 1 && y == 1 ? 0xf50000 : 0x000000;

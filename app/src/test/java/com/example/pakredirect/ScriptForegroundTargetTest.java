@@ -46,13 +46,14 @@ public class ScriptForegroundTargetTest {
     }
 
     @Test public void acceptsLiveBlackBoxHostWindowWithTargetVirtualTop() {
-        assertTrue(ScriptForegroundTarget.isActiveWindowTarget(HOST, TARGET, TARGET));
-        assertFalse(ScriptForegroundTarget.isActiveWindowTarget(HOST, "com.example.othergame", TARGET));
-        assertFalse(ScriptForegroundTarget.isActiveWindowTarget("com.other.host", TARGET, TARGET));
+        assertTrue(ScriptForegroundTarget.isActiveWindowTarget(HOST, true, TARGET, TARGET));
+        assertFalse(ScriptForegroundTarget.isActiveWindowTarget(HOST, false, TARGET, TARGET));
+        assertFalse(ScriptForegroundTarget.isActiveWindowTarget(HOST, true, "com.example.othergame", TARGET));
+        assertFalse(ScriptForegroundTarget.isActiveWindowTarget("com.other.host", true, TARGET, TARGET));
     }
 
     @Test public void acceptsDirectGameActiveWindow() {
-        assertTrue(ScriptForegroundTarget.isActiveWindowTarget(TARGET, null, TARGET));
-        assertFalse(ScriptForegroundTarget.isActiveWindowTarget("com.example.othergame", null, TARGET));
+        assertTrue(ScriptForegroundTarget.isActiveWindowTarget(TARGET, false, null, TARGET));
+        assertFalse(ScriptForegroundTarget.isActiveWindowTarget("com.example.othergame", true, null, TARGET));
     }
 }

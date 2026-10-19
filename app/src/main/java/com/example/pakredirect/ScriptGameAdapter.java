@@ -68,7 +68,10 @@ public final class ScriptGameAdapter extends AccessibilityService {
 
     public static String foregroundPackage() {
         ScriptGameAdapter current = instance;
-        return current == null ? "" : current.foregroundEvent.packageName;
+        if (current == null) return "";
+        // Legacy game scripts expect the guest package name, not BlackBox's Android host package.
+        return current.hasTargetGameForeground()
+                ? TARGET_GAME_PACKAGE : current.foregroundEvent.packageName;
     }
 
     public static boolean isTargetGameForeground() {
@@ -125,6 +128,7 @@ public final class ScriptGameAdapter extends AccessibilityService {
             }
         }
         if (ScriptForegroundTarget.isActiveWindowTarget(activeWindowPackage,
+                ScriptForegroundTarget.isProxyActivity(event.className),
                 virtualTopPackage, TARGET_GAME_PACKAGE)) return true;
 
         // Compatibility fallback for devices where a window root cannot be retrieved.

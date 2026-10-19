@@ -110,6 +110,7 @@ final class LegacyLuaRuntime {
     }
 
     private void installHostApi() {
+        globals.set("utf8", LegacyLuaCompat.createUtf8Compat());
         globals.set("sleep", new OneArgFunction() {
             @Override public LuaValue call(LuaValue millis) {
                 instructionGate.sleep(Math.max(0, millis.optlong(0)));

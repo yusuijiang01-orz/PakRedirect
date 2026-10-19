@@ -24,11 +24,12 @@ final class ScriptForegroundTarget {
      * stale window-state event. BlackBox renders its guest activity in a host window.
      */
     static boolean isActiveWindowTarget(String activeWindowPackage,
+                                        boolean activeWindowIsBlackBoxProxy,
                                         String virtualTopPackage,
                                         String targetPackage) {
         if (activeWindowPackage == null || targetPackage == null || targetPackage.isEmpty()) return false;
         if (targetPackage.equals(activeWindowPackage)) return true;
-        return HOST_PACKAGE.equals(activeWindowPackage)
+        return HOST_PACKAGE.equals(activeWindowPackage) && activeWindowIsBlackBoxProxy
                 && targetPackage.equals(virtualTopPackage);
     }
 
