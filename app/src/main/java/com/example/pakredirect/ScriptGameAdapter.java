@@ -8,6 +8,7 @@ import android.graphics.ColorSpace;
 import android.graphics.Path;
 import android.hardware.HardwareBuffer;
 import android.os.Build;
+import android.os.SystemClock;
 import android.view.Display;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
@@ -177,41 +178,69 @@ public final class ScriptGameAdapter extends AccessibilityService {
     }
 
     public Bitmap captureDisplay(long timeoutMs) throws Exception {
-        requireTargetGameForeground();
         if (Build.VERSION.SDK_INT < 30) {
             throw new UnsupportedOperationException("系统版本过低：截图需要 Android 11 或更新版本");
         }
-        CountDownLatch done = new CountDownLatch(1);
-        Bitmap[] result = new Bitmap[1];
-        Throwable[] failure = new Throwable[1];
-        takeScreenshot(Display.DEFAULT_DISPLAY, getMainExecutor(), new TakeScreenshotCallback() {
-            @Override public void onSuccess(ScreenshotResult screenshot) {
-                HardwareBuffer buffer = screenshot.getHardwareBuffer();
-                try {
-                    Bitmap hardware = Bitmap.wrapHardwareBuffer(buffer, ColorSpace.get(ColorSpace.Named.SRGB));
-                    if (hardware == null) {
-                        failure[0] = new IllegalStateException("截图缓冲区不可用");
-                    } else {
-                        result[0] = hardware.copy(Bitmap.Config.ARGB_8888, false);
-                        hardware.recycle();
-                        if (result[0] == null) failure[0] = new IllegalStateException("无法读取截图像素");
+        long deadline = SystemClock.elapsedRealtime() + Math.max(1L, timeoutMs);
+        int lastErrorCode = 0;
+        do {
+            requireTargetGameForeground();
+            CountDownLatch done = new CountDownLatch(1);
+            Bitmap[] result = new Bitmap[1];
+            Throwable[] failure = new Throwable[1];
+            int[] errorCode = new int[1];
+            takeScreenshot(Display.DEFAULT_DISPLAY, getMainExecutor(), new TakeScreenshotCallback() {
+                @Override public void onSuccess(ScreenshotResult screenshot) {
+                    HardwareBuffer buffer = screenshot.getHardwareBuffer();
+                    try {
+                        Bitmap hardware = Bitmap.wrapHardwareBuffer(buffer,
+                                ColorSpace.get(ColorSpace.Named.SRGB));
+                        if (hardware == null) {
+                            failure[0] = new IllegalStateException("截图缓冲区不可用");
+                        } else {
+                            result[0] = hardware.copy(Bitmap.Config.ARGB_8888, false);
+                            hardware.recycle();
+                            if (result[0] == null) failure[0] = new IllegalStateException("无法读取截图像素");
+                        }
+                    } catch (Throwable error) {
+                        failure[0] = error;
+                    } finally {
+                        buffer.close();
+                        done.countDown();
                     }
-                } catch (Throwable error) {
-                    failure[0] = error;
-                } finally {
-                    buffer.close();
+                }
+
+                @Override public void onFailure(int code) {
+                    errorCode[0] = code;
                     done.countDown();
                 }
+            });
+            long remaining = deadline - SystemClock.elapsedRealtime();
+            if (remaining <= 0 || !done.await(remaining, TimeUnit.MILLISECONDS)) {
+                throw new IllegalStateException("等待游戏截图超时");
             }
+            if (result[0] != null) return result[0];
+            if (failure[0] != null) throw new IllegalStateException("无法获取游戏画面", failure[0]);
+            lastErrorCode = errorCode[0];
+            if (lastErrorCode != ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT) {
+                throw new IllegalStateException("系统截图失败：" + screenshotErrorDescription(lastErrorCode)
+                        + "（错误码 " + lastErrorCode + "）");
+            }
+            long delay = Math.min(250L, deadline - SystemClock.elapsedRealtime());
+            if (delay > 0) SystemClock.sleep(delay);
+        } while (SystemClock.elapsedRealtime() < deadline);
+        throw new IllegalStateException("系统截图请求过于频繁，等待重试超时（错误码 " + lastErrorCode + "）");
+    }
 
-            @Override public void onFailure(int errorCode) {
-                failure[0] = new IllegalStateException("系统截图失败，错误码 " + errorCode);
-                done.countDown();
-            }
-        });
-        if (!done.await(timeoutMs, TimeUnit.MILLISECONDS)) throw new IllegalStateException("等待游戏截图超时");
-        if (failure[0] != null) throw new IllegalStateException("无法获取游戏画面", failure[0]);
-        return result[0];
+    private static String screenshotErrorDescription(int errorCode) {
+        if (errorCode == ERROR_TAKE_SCREENSHOT_NO_ACCESSIBILITY_ACCESS) return "无障碍服务没有截图权限";
+        if (errorCode == ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT) return "两次截图间隔过短";
+        if (errorCode == ERROR_TAKE_SCREENSHOT_INVALID_DISPLAY) return "目标显示屏无效";
+        if (Build.VERSION.SDK_INT >= 34 && errorCode == ERROR_TAKE_SCREENSHOT_INVALID_WINDOW) {
+            return "目标窗口已失效";
+        }
+        if (errorCode == ERROR_TAKE_SCREENSHOT_INTERNAL_ERROR) return "系统截图内部错误";
+        return "未知截图错误";
     }
 
     public boolean tap(float x, float y, long durationMs, long timeoutMs) throws Exception {
