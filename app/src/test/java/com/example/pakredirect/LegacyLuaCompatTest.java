@@ -40,7 +40,7 @@ public class LegacyLuaCompatTest {
         LuaTable utf8 = LegacyLuaCompat.createUtf8Compat();
         LuaValue source = LuaValue.valueOf("点击队伍[附近]");
         assertEquals(5, utf8.get("inStr").invoke(LuaValue.varargsOf(new LuaValue[]{
-                LuaValue.ONE, source, LuaValue.valueOf("[")})).toint());
+                LuaValue.ONE, source, LuaValue.valueOf("[")})).arg1().toint());
         assertEquals("点击队伍", utf8.get("left").call(source, LuaValue.valueOf(4)).tojstring());
         assertEquals("点击", utf8.get("left").call(source, LuaValue.valueOf(2)).tojstring());
     }
