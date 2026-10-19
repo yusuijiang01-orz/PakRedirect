@@ -56,4 +56,15 @@ public class ScriptForegroundTargetTest {
         assertTrue(ScriptForegroundTarget.isActiveWindowTarget(TARGET, false, null, TARGET));
         assertFalse(ScriptForegroundTarget.isActiveWindowTarget("com.example.othergame", true, null, TARGET));
     }
+
+    @Test public void acceptsGuestActivityEventFromActiveBlackBoxWindow() {
+        // Some BlackBox versions expose the guest activity name in accessibility events
+        // instead of the ProxyActivity class, while the active Android window is still host-owned.
+        assertTrue(ScriptForegroundTarget.isActiveSandboxGameEvent(true, TARGET,
+                "com.jxclient.release.jxclient", TARGET));
+        assertFalse(ScriptForegroundTarget.isActiveSandboxGameEvent(false, TARGET,
+                "com.jxclient.release.jxclient", TARGET));
+        assertFalse(ScriptForegroundTarget.isActiveSandboxGameEvent(true, HOST,
+                "com.example.pakredirect.ScriptToolsActivity", TARGET));
+    }
 }

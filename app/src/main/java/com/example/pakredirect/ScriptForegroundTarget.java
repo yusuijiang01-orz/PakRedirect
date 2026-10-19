@@ -24,12 +24,12 @@ final class ScriptForegroundTarget {
      * stale window-state event. BlackBox renders its guest activity in a host window.
      */
     static boolean isActiveWindowTarget(String activeWindowPackage,
-                                        boolean activeWindowIsBlackBoxProxy,
+                                        boolean activeWindowEventIsSandboxGame,
                                         String virtualTopPackage,
                                         String targetPackage) {
         if (activeWindowPackage == null || targetPackage == null || targetPackage.isEmpty()) return false;
         if (targetPackage.equals(activeWindowPackage)) return true;
-        return HOST_PACKAGE.equals(activeWindowPackage) && activeWindowIsBlackBoxProxy
+        return HOST_PACKAGE.equals(activeWindowPackage) && activeWindowEventIsSandboxGame
                 && targetPackage.equals(virtualTopPackage);
     }
 
@@ -45,5 +45,11 @@ final class ScriptForegroundTarget {
             if (suffix.charAt(i) < '0' || suffix.charAt(i) > '9') return false;
         }
         return true;
+    }
+
+    static boolean isActiveSandboxGameEvent(boolean eventWindowIsActive, String eventPackage,
+                                            String eventClass, String targetPackage) {
+        if (!eventWindowIsActive || targetPackage == null || targetPackage.isEmpty()) return false;
+        return targetPackage.equals(eventPackage) || isProxyActivity(eventClass);
     }
 }

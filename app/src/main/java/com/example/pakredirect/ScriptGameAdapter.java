@@ -127,8 +127,10 @@ public final class ScriptGameAdapter extends AccessibilityService {
                 // A failed BlackBox query must keep input blocked.
             }
         }
+        boolean activeEventIsSandboxGame = ScriptForegroundTarget.isActiveSandboxGameEvent(
+                eventWindowActive, event.packageName, event.className, TARGET_GAME_PACKAGE);
         if (ScriptForegroundTarget.isActiveWindowTarget(activeWindowPackage,
-                ScriptForegroundTarget.isProxyActivity(event.className),
+                activeEventIsSandboxGame,
                 virtualTopPackage, TARGET_GAME_PACKAGE)) return true;
 
         // Compatibility fallback for devices where a window root cannot be retrieved.
