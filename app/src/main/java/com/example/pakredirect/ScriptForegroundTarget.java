@@ -19,6 +19,19 @@ final class ScriptForegroundTarget {
                 && targetPackage.equals(virtualTopPackage);
     }
 
+    /**
+     * Checks the live active accessibility window instead of relying on a potentially
+     * stale window-state event. BlackBox renders its guest activity in a host window.
+     */
+    static boolean isActiveWindowTarget(String activeWindowPackage,
+                                        String virtualTopPackage,
+                                        String targetPackage) {
+        if (activeWindowPackage == null || targetPackage == null || targetPackage.isEmpty()) return false;
+        if (targetPackage.equals(activeWindowPackage)) return true;
+        return HOST_PACKAGE.equals(activeWindowPackage)
+                && targetPackage.equals(virtualTopPackage);
+    }
+
     static boolean isProxyActivity(String className) {
         if (className == null) return false;
         String suffix;

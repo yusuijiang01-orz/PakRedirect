@@ -44,4 +44,15 @@ public class ScriptForegroundTargetTest {
         assertFalse(ScriptForegroundTarget.isTarget(HOST,
                 "top.niunaijun.blackbox.proxy.ProxyActivity$P0Fake", true, TARGET, TARGET));
     }
+
+    @Test public void acceptsLiveBlackBoxHostWindowWithTargetVirtualTop() {
+        assertTrue(ScriptForegroundTarget.isActiveWindowTarget(HOST, TARGET, TARGET));
+        assertFalse(ScriptForegroundTarget.isActiveWindowTarget(HOST, "com.example.othergame", TARGET));
+        assertFalse(ScriptForegroundTarget.isActiveWindowTarget("com.other.host", TARGET, TARGET));
+    }
+
+    @Test public void acceptsDirectGameActiveWindow() {
+        assertTrue(ScriptForegroundTarget.isActiveWindowTarget(TARGET, null, TARGET));
+        assertFalse(ScriptForegroundTarget.isActiveWindowTarget("com.example.othergame", null, TARGET));
+    }
 }

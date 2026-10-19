@@ -78,19 +78,34 @@ public final class ScriptGameAdapter extends AccessibilityService {
     private boolean hasTargetGameForeground() {
         ForegroundEvent event = foregroundEvent;
         boolean currentWindow = false;
+        boolean eventWindowActive = false;
+        String activeWindowPackage = null;
         List<AccessibilityWindowInfo> windows;
         try {
             windows = getWindows();
         } catch (RuntimeException unavailable) {
             return false;
         }
-        if (event.windowId >= 0 && windows != null) {
+        if (windows != null) {
             try {
                 for (AccessibilityWindowInfo window : windows) {
-                    if (window.isActive() && window.getId() == event.windowId) {
-                        currentWindow = true;
-                        break;
+                    if (window == null || !window.isActive()
+                            || window.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+                    currentWindow = true;
+                    eventWindowActive = event.windowId >= 0 && window.getId() == event.windowId;
+                    // In BlackBox the Android window belongs to the host app even though
+                    // its rendered content and virtual activity belong to the guest game.
+                    AccessibilityNodeInfo root = null;
+                    try {
+                        root = window.getRoot();
+                        CharSequence rootPackage = root == null ? null : root.getPackageName();
+                        if (rootPackage != null) activeWindowPackage = rootPackage.toString();
+                    } catch (RuntimeException ignored) {
+                        // Keep the active-window fact; the event path below is a safe fallback.
+                    } finally {
+                        if (root != null) root.recycle();
                     }
+                    break;
                 }
             } finally {
                 for (AccessibilityWindowInfo window : windows) {
@@ -99,7 +114,8 @@ public final class ScriptGameAdapter extends AccessibilityService {
             }
         }
         String virtualTopPackage = null;
-        if (currentWindow && getPackageName().equals(event.packageName)) {
+        if (currentWindow && (getPackageName().equals(activeWindowPackage)
+                || getPackageName().equals(event.packageName))) {
             try {
                 ComponentName top = BActivityManager.get().getTopActivity(0);
                 if (top != null) virtualTopPackage = top.getPackageName();
@@ -107,8 +123,12 @@ public final class ScriptGameAdapter extends AccessibilityService {
                 // A failed BlackBox query must keep input blocked.
             }
         }
+        if (ScriptForegroundTarget.isActiveWindowTarget(activeWindowPackage,
+                virtualTopPackage, TARGET_GAME_PACKAGE)) return true;
+
+        // Compatibility fallback for devices where a window root cannot be retrieved.
         return ScriptForegroundTarget.isTarget(event.packageName, event.className,
-                currentWindow, virtualTopPackage, TARGET_GAME_PACKAGE);
+                eventWindowActive, virtualTopPackage, TARGET_GAME_PACKAGE);
     }
 
     private void requireTargetGameForeground() {
