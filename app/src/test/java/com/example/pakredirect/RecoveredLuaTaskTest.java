@@ -1,6 +1,7 @@
 package com.example.pakredirect;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assume.assumeTrue;
@@ -455,6 +456,126 @@ public final class RecoveredLuaTaskTest {
         title.set("背包");
         globals.get("通用处理").checkfunction().call();
         assertTrue("Unrelated screens must not receive the party-page close tap", clicks.isEmpty());
+    }
+
+    @Test public void localizedActivityPanelClosesOnlyWhenItsTitleAndMenuAreVisible() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        AtomicReference<String> title = new AtomicReference<>("活动");
+        AtomicReference<String> menu = new AtomicReference<>("签到|幸运转轮|每日");
+        List<String> clicks = new ArrayList<>();
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.ZERO; }
+        });
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot().resolve(module), module);
+        }
+        globals.set("找到", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue ignored) { return LuaValue.FALSE; }
+        });
+        globals.set("tomocrtext", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                String region = args.arg(1).toint() + "|" + args.arg(2).toint() + "|"
+                        + args.arg(3).toint() + "|" + args.arg(4).toint();
+                if ("270|35|445|105".equals(region)) return LuaValue.valueOf(title.get());
+                return LuaValue.valueOf("");
+            }
+        });
+        globals.set("tomocrtexttable", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                String region = args.arg(1).toint() + "|" + args.arg(2).toint() + "|"
+                        + args.arg(3).toint() + "|" + args.arg(4).toint();
+                LuaTable rows = new LuaTable();
+                if ("1050|170|1190|540".equals(region)) {
+                    int index = 1;
+                    for (String label : menu.get().split("\\|")) {
+                        LuaTable row = new LuaTable();
+                        row.set("words", LuaValue.valueOf(label));
+                        row.set("score", LuaValue.valueOf(0.95));
+                        rows.set(index++, row);
+                    }
+                }
+                return rows;
+            }
+        });
+        globals.set("点击", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                clicks.add(args.arg(1).tojstring() + "|" + args.arg(2).tojstring()
+                        + "|" + args.arg(3).tojstring());
+                return LuaValue.TRUE;
+            }
+        });
+        globals.set("找到点击", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return LuaValue.FALSE; }
+        });
+        globals.set("取上次点击时间", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.ZERO; }
+        });
+        globals.set("检测卡死", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.FALSE; }
+        });
+        globals.set("appIsRunning", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue ignored) { return LuaValue.TRUE; }
+        });
+        globals.set("frontAppName", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                return LuaValue.valueOf("com.tepaylink.tamgioiphantranhmobile");
+            }
+        });
+        globals.set("游戏包名", LuaValue.valueOf("com.tepaylink.tamgioiphantranhmobile"));
+
+        assertTrue("The title plus two activity-menu labels should recognize the modal",
+                globals.get("活动_页面已打开").checkfunction().call().toboolean());
+        globals.get("通用处理").checkfunction().call();
+        assertEquals("@@关闭活动页面|1203|130", clicks.get(0));
+
+        clicks.clear();
+        title.set("主页面");
+        globals.get("通用处理").checkfunction().call();
+        assertTrue("A main screen must never receive the activity-modal close tap", clicks.isEmpty());
+        title.set("活动");
+        menu.set("签到");
+        assertFalse("A lone matching menu label must not trigger a blind close",
+                globals.get("活动_页面已打开").checkfunction().call().toboolean());
+    }
+
+    @Test public void localizedCreateTeamUsesTheOcrButtonCenterAndRequiresTeamMarker() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        AtomicReference<Boolean> teamMarkerVisible = new AtomicReference<>(false);
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.ZERO; }
+        });
+        globals.set("sleep", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue ignored) { return LuaValue.NONE; }
+        });
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot().resolve(module), module);
+        }
+        globals.set("找到", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue ignored) {
+                return LuaValue.valueOf(teamMarkerVisible.get());
+            }
+        });
+        globals.set("tomocrtexttable", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                LuaTable rows = new LuaTable();
+                LuaTable row = new LuaTable();
+                row.set("words", LuaValue.valueOf("创建队伍"));
+                row.set("x", LuaValue.valueOf(917.5));
+                row.set("y", LuaValue.valueOf(640.5));
+                row.set("score", LuaValue.valueOf(0.93));
+                rows.set(1, row);
+                return rows;
+            }
+        });
+        Varargs button = globals.get("组队_识别创建队伍按钮").checkfunction().invoke(LuaValue.NONE);
+        assertEquals("The team create tap must follow the actual localized OCR row center",
+                917, button.arg1().toint());
+        assertEquals(640, button.arg(2).toint());
+        assertFalse("The team page must remain unconfirmed when its left team marker is absent",
+                globals.get("组队_已确认创建成功").checkfunction().call().toboolean());
+        teamMarkerVisible.set(true);
+        assertTrue("Only the visible team marker confirms successful creation",
+                globals.get("组队_已确认创建成功").checkfunction().call().toboolean());
     }
 
     @Test public void localizedServerClusterRequiresChineseTitleAndConfirmBeforeTap() throws Exception {

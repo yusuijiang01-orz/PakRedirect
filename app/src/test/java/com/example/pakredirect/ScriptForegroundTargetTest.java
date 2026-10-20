@@ -84,6 +84,19 @@ public class ScriptForegroundTargetTest {
                 "com.example.pakredirect.ScriptToolsActivity", TARGET, TARGET));
     }
 
+    @Test public void genericHostTitleRequiresTheActualForegroundBlackBoxProxy() {
+        assertTrue(ScriptForegroundTarget.isTargetForeground(
+                true, HOST, "RYLUX", "封神榜手游", HOST,
+                "com.example.pakredirect.ScriptToolsActivity",
+                PROXY, TARGET, TARGET));
+        assertFalse(ScriptForegroundTarget.isTargetForeground(
+                true, HOST, "RYLUX", "封神榜手游", HOST, PROXY,
+                "com.example.pakredirect.ScriptToolsActivity", TARGET, TARGET));
+        assertFalse(ScriptForegroundTarget.isTargetForeground(
+                true, HOST, "RYLUX", "封神榜手游", HOST, PROXY,
+                PROXY, "com.example.othergame", TARGET));
+    }
+
     @Test public void nullRootRequiresLiveGameTitleAndVirtualTopTarget() {
         assertTrue(ScriptForegroundTarget.isTargetForeground(
                 true, null, "封神榜手游", "封神榜手游", HOST, PROXY,

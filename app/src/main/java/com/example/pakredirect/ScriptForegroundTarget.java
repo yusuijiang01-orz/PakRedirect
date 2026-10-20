@@ -53,7 +53,28 @@ final class ScriptForegroundTarget {
                                       String eventClass,
                                       String virtualTopPackage,
                                       String targetPackage) {
+        return isTargetForeground(activeApplicationWindow, activeWindowPackage,
+                activeWindowTitle, targetWindowTitle, eventPackage, eventClass,
+                null, virtualTopPackage, targetPackage);
+    }
+
+    static boolean isTargetForeground(boolean activeApplicationWindow,
+                                      String activeWindowPackage,
+                                      String activeWindowTitle,
+                                      String targetWindowTitle,
+                                      String eventPackage,
+                                      String eventClass,
+                                      String hostTopActivityClass,
+                                      String virtualTopPackage,
+                                      String targetPackage) {
         if (!activeApplicationWindow || targetPackage == null || targetPackage.isEmpty()) return false;
+        // BlackBox may expose its host app label ("RYLUX") instead of the guest
+        // game's label. Accept that window only when Android's actual foreground
+        // host Activity is a BlackBox proxy and BlackBox confirms this guest is
+        // its virtual top activity. A running guest behind the workbench is not enough.
+        if (isHostPackage(activeWindowPackage)
+                && isProxyActivity(hostTopActivityClass)
+                && targetPackage.equals(virtualTopPackage)) return true;
         if (activeWindowPackage == null) {
             // BlackBox may expose the active game window and title without a root node.
             // A stale proxy event alone cannot identify that window.

@@ -139,12 +139,45 @@ function L0_1()
 end
 _ENV["组队_关闭页面"] = L0_1
 
+-- The localized activity window has the same close-button position as the
+-- party window. Require both its centered title and the right-hand menu so
+-- the activity shortcut on the unobstructed game screen cannot trigger it.
+function L0_1()
+  local titleOk, title = pcall(tomocrtext, 270, 35, 445, 105)
+  if not titleOk then return false end
+  title = string.gsub(tostring(title or ""), "%s+", "")
+  if title ~= "活动" then return false end
+  local menuOk, rows = pcall(tomocrtexttable, 1050, 170, 1190, 540)
+  if not menuOk or type(rows) ~= "table" then return false end
+  local menu = ""
+  for i = 1, #rows do
+    local row = rows[i]
+    if (tonumber(row.score or row.confidence) or 0) >= 0.6 then
+      menu = menu .. string.gsub(tostring(row.words or row.text or ""), "%s+", "")
+    end
+  end
+  local menuMatches = 0
+  for _, label in ipairs({"签到", "幸运转轮", "每日", "GiftCode"}) do
+    if string.find(menu, label, 1, true) then menuMatches = menuMatches + 1 end
+  end
+  return menuMatches >= 2
+end
+_ENV["活动_页面已打开"] = L0_1
+
+function L0_1()
+  if not _ENV["活动_页面已打开"]() then return false end
+  _ENV["点击"]("@@关闭活动页面", 1203, 130, 1000)
+  return true
+end
+_ENV["活动_关闭页面"] = L0_1
+
 function L0_1()
   local 返回值 = false
   local tt1 = tickCount()
   local t1 = _ENV["取上次点击时间"]()
   -- Recover the modal before running screenshot-heavy health checks. If one of
   -- those checks fails, the localized party window must still get a close attempt.
+  _ENV["活动_关闭页面"]()
   _ENV["组队_关闭页面"]()
   if _ENV["找到"]("@@登录横竖不对", tz["登录横竖不对"]) then
     keyPress("home")
@@ -2182,6 +2215,33 @@ end
 
 _ENV["组队_检查间隔已到"] = L0_1
 
+-- The translated create button can move with the team panel. OCR must find
+-- its actual label; an exact text match also avoids the script's own toast.
+function L0_1()
+  local ok, rows = pcall(tomocrtexttable, 430, 570, 1070, 685)
+  if not ok or type(rows) ~= "table" then return nil, nil end
+  local bestScore, bestX, bestY = 0.7, nil, nil
+  for i = 1, #rows do
+    local row = rows[i]
+    local label = string.gsub(tostring(row.words or row.text or ""), "%s+", "")
+    local score = tonumber(row.score or row.confidence) or 0
+    local x, y = tonumber(row.x), tonumber(row.y)
+    if label == "创建队伍" and score > bestScore and x and y
+        and x >= 430 and x <= 1070 and y >= 570 and y <= 685 then
+      bestScore, bestX, bestY = score, math.floor(x), math.floor(y)
+    end
+  end
+  return bestX, bestY
+end
+_ENV["组队_识别创建队伍按钮"] = L0_1
+
+function L0_1()
+  -- The left-side team flag is still visible outside the modal. A missing
+  -- create label by itself is not proof that a team was created.
+  return not _ENV["没有创建队伍"]()
+end
+_ENV["组队_已确认创建成功"] = L0_1
+
 function L0_1()
   _ENV["当前任务1"] = "挂机模式"
   _ENV["当前任务2"] = ""
@@ -2220,10 +2280,29 @@ function L0_1()
           end
         elseif _ENV["找到点击"]("@@有人申请", tz["有人申请组队提示按钮"]) then
         elseif _ENV["没有创建队伍"]() then
-          _ENV["点击"]("@@点队伍按钮", 1114, 556, 2000)
-          if _ENV["组队_页面已打开"]() then
-            _ENV["点击"]("@@点创建队伍按钮", 909, 638, 1500)
-            _ENV["组队_关闭页面"]()
+          local 上次尝试 = _ENV["上次尝试创建队伍"]
+          if 上次尝试 == nil or tickCount() - 上次尝试 >= 30000 then
+            _ENV["上次尝试创建队伍"] = tickCount()
+            _ENV["点击"]("@@点队伍按钮", 1114, 556, 2000)
+            if _ENV["组队_页面已打开"]() then
+              hideToast()
+              sleep(200)
+              local x, y = _ENV["组队_识别创建队伍按钮"]()
+              if x and y then
+                _ENV["点击"]("@@点创建队伍按钮", x, y, 1500)
+                hideToast()
+                if _ENV["组队_已确认创建成功"]() then
+                  _ENV["当前任务2"] = "队伍创建成功"
+                else
+                  _ENV["当前任务2"] = "创建队伍未确认，稍后重试"
+                end
+              else
+                _ENV["当前任务2"] = "未识别到创建队伍按钮，稍后重试"
+              end
+              _ENV["组队_关闭页面"]()
+            end
+          else
+            _ENV["当前任务2"] = "创建队伍待重试"
           end
         end
       end

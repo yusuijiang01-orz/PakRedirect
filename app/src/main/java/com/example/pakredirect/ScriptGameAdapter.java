@@ -1,5 +1,6 @@
 package com.example.pakredirect;
 
+import android.app.ActivityManager;
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
 import android.content.ComponentName;
@@ -152,6 +153,7 @@ public final class ScriptGameAdapter extends AccessibilityService {
             }
         }
         String virtualTopPackage = null;
+        String hostTopActivityClass = null;
         if (currentWindow && (activeWindowPackage == null
                 || getPackageName().equals(activeWindowPackage))) {
             try {
@@ -160,10 +162,20 @@ public final class ScriptGameAdapter extends AccessibilityService {
             } catch (RuntimeException ignored) {
                 // A failed BlackBox query must keep input blocked.
             }
+            try {
+                ActivityManager activityManager = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
+                List<ActivityManager.RunningTaskInfo> tasks = activityManager == null
+                        ? null : activityManager.getRunningTasks(1);
+                if (tasks != null && !tasks.isEmpty() && tasks.get(0).topActivity != null) {
+                    hostTopActivityClass = tasks.get(0).topActivity.getClassName();
+                }
+            } catch (RuntimeException ignored) {
+                // This is only a fallback for host windows whose title is generic.
+            }
         }
         return ScriptForegroundTarget.isTargetForeground(
                 currentWindow, activeWindowPackage, activeWindowTitle, targetGameLabel,
-                event.packageName, event.className,
+                event.packageName, event.className, hostTopActivityClass,
                 virtualTopPackage, TARGET_GAME_PACKAGE);
     }
 
@@ -221,9 +233,21 @@ public final class ScriptGameAdapter extends AccessibilityService {
         } catch (RuntimeException failure) {
             virtualTop = "读取失败:" + failure.getClass().getSimpleName();
         }
+        String hostTopActivity = "";
+        try {
+            ActivityManager activityManager = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
+            List<ActivityManager.RunningTaskInfo> tasks = activityManager == null
+                    ? null : activityManager.getRunningTasks(1);
+            if (tasks != null && !tasks.isEmpty() && tasks.get(0).topActivity != null) {
+                hostTopActivity = tasks.get(0).topActivity.flattenToShortString();
+            }
+        } catch (RuntimeException failure) {
+            hostTopActivity = "读取失败:" + failure.getClass().getSimpleName();
+        }
         return "activeWindow=" + activePackage + "/" + activeTitle
                 + ", event=" + event.packageName + "/" + event.className + "#" + event.windowId
-                + ", virtualTop=" + virtualTop + ", gameLabel=" + targetGameLabel
+                + ", hostTop=" + hostTopActivity + ", virtualTop=" + virtualTop
+                + ", gameLabel=" + targetGameLabel
                 + (windowError.isEmpty() ? "" : ", windowsError=" + windowError);
     }
 
