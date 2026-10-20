@@ -1621,7 +1621,83 @@ function L0_1()
 end
 _ENV["登录_汉化账号确认"] = L0_1
 
+-- The localized game can leave a blocking "正在登录游戏" dialog open forever.
+-- Watch it with a bounded timeout, close it using its visible 返回 button, then
+-- back off before letting the normal role-selection logic retry the login.
+_ENV["登录_弹窗检测中"] = false
+_ENV["登录_弹窗开始时间"] = nil
+_ENV["登录_弹窗最后看到"] = nil
+_ENV["登录_弹窗下次检测"] = 0
+_ENV["登录_重试允许时间"] = nil
+_ENV["登录_失败次数"] = 0
 function L0_1()
+  local now = tickCount()
+  local retryAt = tonumber(_ENV["登录_重试允许时间"])
+  if retryAt ~= nil and now < retryAt then
+    return true
+  end
+  if retryAt ~= nil then
+    _ENV["登录_重试允许时间"] = nil
+  end
+  if now < (tonumber(_ENV["登录_弹窗下次检测"]) or 0) then
+    return _ENV["登录_弹窗检测中"] == true
+  end
+  _ENV["登录_弹窗下次检测"] = now + 2000
+  local ok, rows = pcall(tomocrtexttable, 390, 180, 895, 555)
+  if not ok or type(rows) ~= "table" then
+    local lastSeen = tonumber(_ENV["登录_弹窗最后看到"])
+    if _ENV["登录_弹窗检测中"] and lastSeen ~= nil and now - lastSeen > 8000 then
+      _ENV["登录_弹窗检测中"] = false
+      _ENV["登录_弹窗开始时间"] = nil
+    end
+    return _ENV["登录_弹窗检测中"] == true
+  end
+  local pageText = ""
+  local returnX, returnY
+  for _, row in pairs(rows) do
+    if type(row) == "table" then
+      local text = tostring(row.words or row.text or ""):gsub("%s", ""):gsub("　", "")
+      pageText = pageText .. text
+      local x, y = tonumber(row.x), tonumber(row.y)
+      if x and y and string.find(text, "返回", 1, true) ~= nil
+          and x >= 530 and x <= 750 and y >= 400 and y <= 510 then
+        returnX, returnY = x, y
+      end
+    end
+  end
+  if string.find(pageText, "正在登录", 1, true) == nil then
+    local lastSeen = tonumber(_ENV["登录_弹窗最后看到"])
+    if _ENV["登录_弹窗检测中"] and lastSeen ~= nil and now - lastSeen > 8000 then
+      _ENV["登录_弹窗检测中"] = false
+      _ENV["登录_弹窗开始时间"] = nil
+    end
+    return _ENV["登录_弹窗检测中"] == true
+  end
+  _ENV["登录_弹窗检测中"] = true
+  _ENV["登录_弹窗最后看到"] = now
+  if _ENV["登录_弹窗开始时间"] == nil then
+    _ENV["登录_弹窗开始时间"] = now
+  end
+  if now - tonumber(_ENV["登录_弹窗开始时间"]) < 45000 then
+    return true
+  end
+  -- The screenshot-confirmed dialog's centered 返回 button is at roughly
+  -- (640, 450) in the game's 1280x720 reference coordinates.
+  _ENV["点击"]("@@登录超时关闭提示", returnX or 640, returnY or 450, 1000)
+  local failures = (tonumber(_ENV["登录_失败次数"]) or 0) + 1
+  _ENV["登录_失败次数"] = failures
+  local backoff = math.min(180000, 15000 * (2 ^ math.min(failures - 1, 4)))
+  _ENV["登录_重试允许时间"] = now + backoff
+  _ENV["登录_弹窗检测中"] = false
+  _ENV["登录_弹窗开始时间"] = nil
+  _ENV["登录_弹窗最后看到"] = nil
+  toast("登录等待超时，已关闭提示；" .. math.floor(backoff / 1000) .. " 秒后重试登录")
+  return true
+end
+_ENV["登录_处理超时"] = L0_1
+
+function L0_1()
+  if _ENV["登录_处理超时"]() then return end
   _ENV["找到点击"]("@@选区失败页面_关闭按钮", tz["选区失败页面_关闭按钮"])
   if _ENV["找到"](tz["选区页面"]) then
     _ENV["点击"]("@@选区确定", 749, 664, 1000)

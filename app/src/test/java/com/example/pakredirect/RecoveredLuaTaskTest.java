@@ -680,6 +680,53 @@ public final class RecoveredLuaTaskTest {
         assertTrue("The localized login helper must require all positioned anchors", clicks.isEmpty());
     }
 
+    @Test public void localizedLoginTimeoutClosesBusyDialogAndWaitsBeforeRetry() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        AtomicLong clock = new AtomicLong(1_000);
+        AtomicReference<LuaTable> rows = new AtomicReference<>(new LuaTable());
+        List<String> clicks = new ArrayList<>();
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.valueOf(clock.get()); }
+        });
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot().resolve(module), module);
+        }
+        globals.set("tomocrtexttable", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return rows.get(); }
+        });
+        globals.set("点击", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                clicks.add(args.arg(1).tojstring() + "|" + args.arg(2).toint()
+                        + "|" + args.arg(3).toint());
+                return LuaValue.TRUE;
+            }
+        });
+        globals.set("toast", noOpFunction());
+
+        LuaTable busyDialog = new LuaTable();
+        busyDialog.set(1, ocrRow("正在登录游戏", 640, 300));
+        busyDialog.set(2, ocrRow("返回", 640, 450));
+        rows.set(busyDialog);
+        LuaFunction handleTimeout = globals.get("登录_处理超时").checkfunction();
+        assertTrue("A visible login-in-progress dialog must block role-selection taps",
+                handleTimeout.call().toboolean());
+        assertTrue("The dialog must get a real timeout before the script backs out", clicks.isEmpty());
+
+        clock.set(46_001);
+        assertTrue("After 45 seconds the script must close the stuck login dialog",
+                handleTimeout.call().toboolean());
+        assertEquals(Arrays.asList("@@登录超时关闭提示|640|450"), clicks);
+
+        clock.set(50_000);
+        assertTrue("The script must wait through the retry backoff", handleTimeout.call().toboolean());
+        assertEquals("No duplicate login tap is allowed during backoff", 1, clicks.size());
+
+        rows.set(new LuaTable());
+        clock.set(62_000);
+        assertTrue("When the busy dialog is gone, normal login detection may resume",
+                !handleTimeout.call().toboolean());
+    }
+
     @Test public void localizedLoginMatchesObservedRapidOcrRowsFromCurrentLoginScreenshot() throws Exception {
         Globals globals = JsePlatform.standardGlobals();
         LuaTable rows = new LuaTable();
