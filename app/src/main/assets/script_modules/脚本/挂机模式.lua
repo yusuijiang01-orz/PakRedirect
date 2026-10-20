@@ -1449,6 +1449,31 @@ function L0_1()
 end
 _ENV["登录_汉化选区确认"] = L0_1
 
+-- Localized login screens keep the recovered account layout but replace the
+-- image-template pixels. Require the page's right-side account actions, the
+-- localized login button, and a non-empty saved account before submitting.
+function L0_1()
+  local forgotOk, forgot = pcall(tomocrtext, 1100, 90, 1240, 145)
+  if not forgotOk or string.find(tostring(forgot or ""), "忘记密码", 1, true) == nil then
+    return false
+  end
+  local registerOk, register = pcall(tomocrtext, 1100, 160, 1240, 225)
+  if not registerOk or string.find(tostring(register or ""), "注册账号", 1, true) == nil then
+    return false
+  end
+  local accountOk, account = pcall(tomocrtext, 460, 270, 830, 325)
+  if not accountOk or string.match(tostring(account or ""), "%S") == nil then
+    return false
+  end
+  local loginOk, login = pcall(tomocrtext, 490, 490, 810, 565)
+  if not loginOk or string.find(tostring(login or ""), "登录", 1, true) == nil then
+    return false
+  end
+  _ENV["点击"]("@@汉化账号密码登录", 660, 525, 2000)
+  return true
+end
+_ENV["登录_汉化账号确认"] = L0_1
+
 function L0_1()
   _ENV["找到点击"]("@@选区失败页面_关闭按钮", tz["选区失败页面_关闭按钮"])
   if _ENV["找到"](tz["选区页面"]) then
@@ -1458,6 +1483,8 @@ function L0_1()
   end
   if _ENV["找到"](tz["账号密码页面"]) then
     _ENV["点击"]("@@确定账号密码", 660, 525, 1000)
+  else
+    _ENV["登录_汉化账号确认"]()
   end
   if _ENV["找到"](tz["选角色页面"]) then
     _ENV["点击"]("@@确定角色", 1090, 551, 1000)

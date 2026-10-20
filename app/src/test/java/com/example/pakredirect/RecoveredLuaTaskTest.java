@@ -461,6 +461,53 @@ public final class RecoveredLuaTaskTest {
         assertTrue("The helper requires both OCR signatures", clicks.isEmpty());
     }
 
+    @Test public void localizedLoginRequiresKnownChinesePageAndSavedAccount() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        AtomicReference<String> forgot = new AtomicReference<>("忘记密码?");
+        AtomicReference<String> register = new AtomicReference<>("注册账号");
+        AtomicReference<String> account = new AtomicReference<>("sbs139502");
+        AtomicReference<String> login = new AtomicReference<>("登录");
+        List<String> clicks = new ArrayList<>();
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.ZERO; }
+        });
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot().resolve(module), module);
+        }
+        globals.set("tomocrtext", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                int x = args.arg(1).toint();
+                int y = args.arg(2).toint();
+                if (x >= 1000) return LuaValue.valueOf(y < 150 ? forgot.get() : register.get());
+                if (x < 480) return LuaValue.valueOf(account.get());
+                return LuaValue.valueOf(login.get());
+            }
+        });
+        globals.set("点击", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                clicks.add(args.arg(1).tojstring() + "|" + args.arg(2).tojstring()
+                        + "|" + args.arg(3).tojstring());
+                return LuaValue.TRUE;
+            }
+        });
+
+        assertTrue("The known localized login page with a saved account should submit once",
+                globals.get("登录_汉化账号确认").checkfunction().call().toboolean());
+        assertEquals("@@汉化账号密码登录|660|525", clicks.get(0));
+
+        clicks.clear();
+        account.set("   ");
+        assertTrue("An empty account field must never trigger login",
+                !globals.get("登录_汉化账号确认").checkfunction().call().toboolean());
+        assertTrue("No tap is allowed when the saved account is empty", clicks.isEmpty());
+
+        account.set("sbs139502");
+        register.set("角色选择");
+        assertTrue("An unrelated screen with a login-like label must not trigger login",
+                !globals.get("登录_汉化账号确认").checkfunction().call().toboolean());
+        assertTrue("All localized page anchors are required", clicks.isEmpty());
+    }
+
     @Test public void recoveredPartyNameUsesOnlyConfidentOcrRows() throws Exception {
         Globals globals = JsePlatform.standardGlobals();
         AtomicReference<LuaTable> rows = new AtomicReference<>(new LuaTable());
