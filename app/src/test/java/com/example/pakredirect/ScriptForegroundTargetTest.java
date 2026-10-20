@@ -118,4 +118,20 @@ public class ScriptForegroundTargetTest {
                 true, HOST, "封神榜手游", "封神榜手游", HOST, PROXY,
                 TARGET, TARGET));
     }
+
+    @Test public void diagnosticHostSuffixAcceptsItsLiveGuestWindow() {
+        String diagnosticHost = HOST + ".hookdiag";
+        assertTrue(ScriptForegroundTarget.isTarget(diagnosticHost, PROXY,
+                true, TARGET, TARGET));
+        assertFalse(ScriptForegroundTarget.isTarget(HOST + "hookdiag", PROXY,
+                true, TARGET, TARGET));
+        assertTrue(ScriptForegroundTarget.isTargetForeground(
+                true, diagnosticHost, "Tam Giới Phân Tranh Mobile",
+                "Tam Giới Phân Tranh Mobile", diagnosticHost,
+                "com.jxclient.release.jxclient#109", TARGET, TARGET));
+        assertFalse(ScriptForegroundTarget.isTargetForeground(
+                true, diagnosticHost, "RYLUX 脚本工作台",
+                "Tam Giới Phân Tranh Mobile", diagnosticHost,
+                PROXY, TARGET, TARGET));
+    }
 }

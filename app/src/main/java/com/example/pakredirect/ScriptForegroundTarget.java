@@ -14,7 +14,7 @@ final class ScriptForegroundTarget {
                             String targetPackage) {
         if (!currentActiveWindow || targetPackage == null || targetPackage.isEmpty()) return false;
         if (targetPackage.equals(androidPackage)) return true;
-        return HOST_PACKAGE.equals(androidPackage)
+        return isHostPackage(androidPackage)
                 && isProxyActivity(androidClass)
                 && targetPackage.equals(virtualTopPackage);
     }
@@ -32,7 +32,7 @@ final class ScriptForegroundTarget {
                                              String targetPackage) {
         if (activeWindowPackage == null || targetPackage == null || targetPackage.isEmpty()) return false;
         if (targetPackage.equals(activeWindowPackage)) return true;
-        if (!HOST_PACKAGE.equals(activeWindowPackage) || !targetPackage.equals(virtualTopPackage)) {
+        if (!isHostPackage(activeWindowPackage) || !targetPackage.equals(virtualTopPackage)) {
             return false;
         }
         // The live window title takes priority over an event that may describe the
@@ -67,6 +67,16 @@ final class ScriptForegroundTarget {
 
     private static boolean hasText(String value) {
         return value != null && !value.trim().isEmpty();
+    }
+
+    private static boolean isHostPackage(String packageName) {
+        // Test and diagnostic APKs use applicationIdSuffixes such as
+        // "com.example.pakredirect.hookdiag". BlackBox windows belong to that
+        // installed host package, so exact equality with the release ID would
+        // reject the game's real active window even when its virtual activity
+        // and guest label are correct.
+        return HOST_PACKAGE.equals(packageName)
+                || (packageName != null && packageName.startsWith(HOST_PACKAGE + "."));
     }
 
     private static boolean sameNonEmptyText(String left, String right) {

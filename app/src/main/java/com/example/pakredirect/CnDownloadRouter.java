@@ -94,7 +94,12 @@ public final class CnDownloadRouter {
             String tag = githubUrl != null && githubUrl.contains("/pak-test/") ? "pak-test" : "pak-latest";
             return new String[]{"https://gitee.com/" + GITEE_REPO + "/releases/download/" + tag + "/" + safeName};
         }
-        return new String[]{GITEE_RAW_BASE + "pak/" + safeName};
+        // linkspak.txt is part of the same authorized content bundle as the
+        // encrypted PAKs. Preserve the manifest-selected channel (pak or
+        // pak-test); always routing it to production makes beta manifests fail
+        // their SHA-256 check before the sandbox can launch.
+        String mapped = mapOwnedGithubUrl(githubUrl == null ? "" : githubUrl.trim());
+        return new String[]{mapped == null ? githubUrl : mapped};
     }
 
     private static String mapOwnedGithubUrl(String value) {

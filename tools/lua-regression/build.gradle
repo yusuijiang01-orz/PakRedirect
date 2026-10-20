@@ -28,6 +28,7 @@ sourceSets {
             include '**/ScriptExecutionControl.java'
             include '**/ScriptForegroundGate.java'
             include '**/ScriptForegroundTarget.java'
+            include '**/CnDownloadRouter.java'
             include '**/ScriptStartupTerms.java'
             include '**/ScriptHudStatus.java'
             include '**/RecoveredLuaTaskTest.java'
@@ -38,6 +39,7 @@ sourceSets {
             include '**/ScriptExecutionControlTest.java'
             include '**/ScriptForegroundGateTest.java'
             include '**/ScriptForegroundTargetTest.java'
+            include '**/CnDownloadRouterTest.java'
             include '**/ScriptStartupTermsTest.java'
             include '**/ScriptHudStatusTest.java'
         }
