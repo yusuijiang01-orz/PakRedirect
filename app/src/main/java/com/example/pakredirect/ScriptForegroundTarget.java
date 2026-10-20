@@ -26,6 +26,8 @@ final class ScriptForegroundTarget {
     static boolean isActiveSandboxGameWindow(String activeWindowPackage,
                                              String eventPackage,
                                              String eventClass,
+                                             String activeWindowTitle,
+                                             String targetWindowTitle,
                                              String virtualTopPackage,
                                              String targetPackage) {
         if (activeWindowPackage == null || targetPackage == null || targetPackage.isEmpty()) return false;
@@ -33,10 +35,38 @@ final class ScriptForegroundTarget {
         if (!HOST_PACKAGE.equals(activeWindowPackage) || !targetPackage.equals(virtualTopPackage)) {
             return false;
         }
-        // Accessibility events and live windows can use different ids in BlackBox on
-        // some Android builds. Correlate the current host application window with the
-        // guest activity identity and BlackBox's current virtual top activity instead.
+        // The live window title takes priority over an event that may describe the
+        // previously focused RYLUX workbench or BlackBox proxy activity.
+        if (hasText(activeWindowTitle) && hasText(targetWindowTitle)) {
+            return sameNonEmptyText(activeWindowTitle, targetWindowTitle);
+        }
+        // Some builds expose no title. Fall back to the event only after confirming
+        // the active host window and BlackBox's current virtual top activity.
         return targetPackage.equals(eventPackage) || isProxyActivity(eventClass);
+    }
+
+    static boolean isTargetForeground(String activeWindowPackage,
+                                      String activeWindowTitle,
+                                      String targetWindowTitle,
+                                      String eventPackage,
+                                      String eventClass,
+                                      boolean eventWindowActive,
+                                      String virtualTopPackage,
+                                      String targetPackage) {
+        if (isActiveSandboxGameWindow(activeWindowPackage, eventPackage, eventClass,
+                activeWindowTitle, targetWindowTitle, virtualTopPackage, targetPackage)) return true;
+        // An event cannot override a live window with a known root package.
+        return activeWindowPackage == null && isTarget(eventPackage, eventClass,
+                eventWindowActive, virtualTopPackage, targetPackage);
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
+    }
+
+    private static boolean sameNonEmptyText(String left, String right) {
+        return hasText(left) && hasText(right)
+                && left.trim().equalsIgnoreCase(right.trim());
     }
 
     static boolean isProxyActivity(String className) {

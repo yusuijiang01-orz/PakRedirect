@@ -22,12 +22,22 @@ sourceSets {
             include '**/LegacyLuaCompat.java'
             include '**/LegacyLuaConfig.java'
             include '**/LegacyCoordinateMapper.java'
+            include '**/LegacyImageMatcher.java'
+            include '**/LegacyTuringCompat.java'
             include '**/LuaInstructionGate.java'
             include '**/ScriptExecutionControl.java'
+            include '**/ScriptForegroundGate.java'
+            include '**/ScriptForegroundTarget.java'
+            include '**/ScriptHudStatus.java'
             include '**/RecoveredLuaTaskTest.java'
             include '**/LegacyLuaConfigTest.java'
+            include '**/LegacyLuaCompatTest.java'
+            include '**/RecoveredLuaStartupTest.java'
             include '**/LuaInstructionGateTest.java'
             include '**/ScriptExecutionControlTest.java'
+            include '**/ScriptForegroundGateTest.java'
+            include '**/ScriptForegroundTargetTest.java'
+            include '**/ScriptHudStatusTest.java'
         }
         resources {
             setSrcDirs([new File(repositoryRoot, 'app/src/test/resources')])

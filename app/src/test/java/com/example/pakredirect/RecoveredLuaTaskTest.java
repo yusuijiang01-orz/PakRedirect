@@ -3,10 +3,12 @@ package com.example.pakredirect;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assume.assumeTrue;
 
 import java.awt.image.BufferedImage;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
+import java.io.ByteArrayInputStream;
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -22,6 +24,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.TimeUnit;
 
 import javax.imageio.ImageIO;
 
@@ -39,6 +42,133 @@ import org.luaj.vm2.lib.jse.JsePlatform;
 
 /** Directly executes one recovered Lua task without building or launching the APK. */
 public final class RecoveredLuaTaskTest {
+    @Test public void recoveredLuaClickOpensAndClosesTheLiveSandboxBackpackOverAdb() throws Exception {
+        String adb = System.getenv("RYLUX_ADB_EXECUTABLE");
+        String serial = System.getenv("RYLUX_ADB_DEVICE");
+        assumeTrue("Set RYLUX_ADB_EXECUTABLE and RYLUX_ADB_DEVICE for an opt-in emulator touch check",
+                adb != null && serial != null);
+
+        String windows = runDeviceCommand(adb, serial, "shell", "dumpsys", "window");
+        assertTrue("The active app must be the BlackBox game proxy",
+                windows.contains("mFocusedApp=") && windows.contains("com.example.pakredirect")
+                        && windows.contains("ProxyActivity"));
+        assertTrue("The focused guest window must be the localized game",
+                windows.contains("mCurrentFocus=")
+                        && windows.contains("com.tepaylink.tamgioiphantranhmobile"));
+
+        BufferedImage before = readDeviceScreenshot(adb, serial);
+        LegacyCoordinateMapper mapper = new LegacyCoordinateMapper(720, 1280,
+                before.getWidth(), before.getHeight());
+        Globals globals = JsePlatform.standardGlobals();
+        globals.set("_ENV", globals);
+        AtomicLong ticks = new AtomicLong();
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.valueOf(ticks.addAndGet(1_000)); }
+        });
+        globals.set("tap", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                int x = mapper.toScreenX(args.arg(1).toint());
+                int y = mapper.toScreenY(args.arg(2).toint());
+                try { runDeviceCommand(adb, serial, "shell", "input", "tap", String.valueOf(x), String.valueOf(y)); }
+                catch (Exception error) { throw new org.luaj.vm2.LuaError("ADB touch failed: " + error.getMessage()); }
+                return LuaValue.TRUE;
+            }
+        });
+        globals.set("sleep", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue millis) { return LuaValue.NONE; }
+        });
+        globals.set("releaseCapture", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.NONE; }
+        });
+        globals.set("print", noOpFunction());
+        globals.set("toast", noOpFunction());
+        globals.set("hideToast", noOpFunction());
+        loadModule(globals, scriptRoot().resolve("w.lua"), "w.lua");
+        LuaFunction click = globals.get("点击").checkfunction();
+
+        boolean opened = false;
+        try {
+            click.invoke(LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(902),
+                    LuaValue.valueOf(655), LuaValue.valueOf(1000)}));
+            Thread.sleep(900);
+            opened = true;
+            BufferedImage backpack = readDeviceScreenshot(adb, serial);
+            long openedDifference = sampledDifference(before, backpack);
+            assertTrue("The recovered Lua click must open the inventory panel on the live game",
+                    openedDifference > 500);
+
+            click.invoke(LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(1244),
+                    LuaValue.valueOf(109), LuaValue.valueOf(1000)}));
+            Thread.sleep(900);
+            opened = false;
+            BufferedImage after = readDeviceScreenshot(adb, serial);
+            long closedDifference = sampledDifference(before, after);
+            assertTrue("The recovered Lua click must close the inventory and restore gameplay",
+                    closedDifference < openedDifference / 4);
+        } finally {
+            if (opened) {
+                click.invoke(LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(1244),
+                        LuaValue.valueOf(109), LuaValue.valueOf(1000)}));
+            }
+        }
+    }
+
+    @Test public void recoveredLuaParsesQuantityFromLiveSandboxBackpackOcr() throws Exception {
+        String screenshotPath = System.getenv("RYLUX_LIVE_DEVICE_SCREENSHOT");
+        String ocrPath = System.getenv("RYLUX_LIVE_DEVICE_OCR_CSV");
+        assumeTrue("Set RYLUX_LIVE_DEVICE_SCREENSHOT and RYLUX_LIVE_DEVICE_OCR_CSV for an opt-in emulator check",
+                screenshotPath != null && ocrPath != null);
+
+        BufferedImage screenshot = ImageIO.read(Paths.get(screenshotPath).toFile());
+        assertTrue("The screenshot must come from the live 1600x900 sandbox display",
+                screenshot != null && screenshot.getWidth() == 1600 && screenshot.getHeight() == 900);
+        List<String[]> ocrRows = new ArrayList<>();
+        List<String> csv = Files.readAllLines(Paths.get(ocrPath), StandardCharsets.UTF_8);
+        assertEquals("text,raw_center_x,raw_center_y,confidence", csv.get(0));
+        for (int i = 1; i < csv.size(); i++) ocrRows.add(csv.get(i).split(",", 4));
+
+        LegacyCoordinateMapper mapper = new LegacyCoordinateMapper(720, 1280,
+                screenshot.getWidth(), screenshot.getHeight());
+        Globals globals = JsePlatform.standardGlobals();
+        globals.set("_ENV", globals);
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.ZERO; }
+        });
+        globals.set("tomocrtexttable", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                double left = args.arg(1).todouble(), top = args.arg(2).todouble();
+                double right = args.arg(3).todouble(), bottom = args.arg(4).todouble();
+                LuaTable rows = new LuaTable();
+                int index = 1;
+                for (String[] values : ocrRows) {
+                    double x = mapper.toReferenceX(Double.parseDouble(values[1]));
+                    double y = mapper.toReferenceY(Double.parseDouble(values[2]));
+                    if (x < left || x > right || y < top || y > bottom) continue;
+                    LuaTable row = new LuaTable();
+                    row.set("words", LuaValue.valueOf(values[0]));
+                    row.set("x", LuaValue.valueOf(x));
+                    row.set("y", LuaValue.valueOf(y));
+                    row.set("score", LuaValue.valueOf(Double.parseDouble(values[3])));
+                    rows.set(index++, row);
+                }
+                return rows;
+            }
+        });
+        globals.set("print", noOpFunction());
+        globals.set("toast", noOpFunction());
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot().resolve(module), module);
+        }
+
+        // RapidOCR observed the blue-potion stack's literal count at screen pixel (1214, 250).
+        // The legacy 1280x720 Lua reference maps that OCR box to approximately (971, 200).
+        LuaValue quantity = globals.get("去卖货_识别物品数量").checkfunction().invoke(
+                LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(950), LuaValue.valueOf(180),
+                        LuaValue.valueOf(995), LuaValue.valueOf(220)})).arg1();
+        assertEquals("Recovered Lua should accept the high-confidence count from the live sandbox screen",
+                100, quantity.toint());
+    }
+
     @Test public void recoveredInventoryImageTemplateIsPresentForTheLuaFindPicCalls() throws Exception {
         Path imageTemplate = scriptRoot().resolve("空格子0.png");
         String inventoryScript = Files.readString(scriptRoot().resolve("挂机模式.lua"), StandardCharsets.UTF_8);
@@ -2870,6 +3000,51 @@ public final class RecoveredLuaTaskTest {
             if (Files.isDirectory(candidate)) return candidate;
         }
         throw new IOException("Could not locate recovered Lua scripts from " + workingDirectory);
+    }
+
+    private static byte[] runDeviceBytes(String adb, String serial, String... args) throws Exception {
+        List<String> command = new ArrayList<>();
+        command.add(adb);
+        command.add("-s");
+        command.add(serial);
+        command.addAll(Arrays.asList(args));
+        Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
+        byte[] output = process.getInputStream().readAllBytes();
+        if (!process.waitFor(15, TimeUnit.SECONDS)) {
+            process.destroyForcibly();
+            throw new IOException("ADB command timed out: " + String.join(" ", command));
+        }
+        if (process.exitValue() != 0) {
+            throw new IOException("ADB command failed (" + process.exitValue() + "): "
+                    + new String(output, StandardCharsets.UTF_8));
+        }
+        return output;
+    }
+
+    private static String runDeviceCommand(String adb, String serial, String... args) throws Exception {
+        return new String(runDeviceBytes(adb, serial, args), StandardCharsets.UTF_8);
+    }
+
+    private static BufferedImage readDeviceScreenshot(String adb, String serial) throws Exception {
+        BufferedImage image = ImageIO.read(new ByteArrayInputStream(
+                runDeviceBytes(adb, serial, "exec-out", "screencap", "-p")));
+        if (image == null) throw new IOException("ADB returned an unreadable screenshot");
+        return image;
+    }
+
+    private static long sampledDifference(BufferedImage left, BufferedImage right) {
+        if (left.getWidth() != right.getWidth() || left.getHeight() != right.getHeight()) return Long.MAX_VALUE;
+        long changed = 0;
+        for (int y = 40; y < left.getHeight() - 40; y += 16) {
+            for (int x = 40; x < left.getWidth() - 40; x += 16) {
+                int a = left.getRGB(x, y), b = right.getRGB(x, y);
+                int difference = Math.abs(((a >> 16) & 255) - ((b >> 16) & 255))
+                        + Math.abs(((a >> 8) & 255) - ((b >> 8) & 255))
+                        + Math.abs((a & 255) - (b & 255));
+                if (difference > 30) changed++;
+            }
+        }
+        return changed;
     }
 
     private static BufferedImage readFixture(String resourceName) throws IOException {

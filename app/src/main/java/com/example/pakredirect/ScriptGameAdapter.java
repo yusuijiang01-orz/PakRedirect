@@ -3,6 +3,7 @@ package com.example.pakredirect;
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
 import android.content.ComponentName;
+import android.content.pm.ApplicationInfo;
 import android.graphics.Bitmap;
 import android.graphics.ColorSpace;
 import android.graphics.Path;
@@ -27,6 +28,7 @@ public final class ScriptGameAdapter extends AccessibilityService {
     static final String TARGET_GAME_PACKAGE = "com.tepaylink.tamgioiphantranhmobile";
     private static volatile ScriptGameAdapter instance;
     private volatile ForegroundEvent foregroundEvent = ForegroundEvent.EMPTY;
+    private volatile String targetGameLabel = "";
 
     private static final class ForegroundEvent {
         static final ForegroundEvent EMPTY = new ForegroundEvent("", "", -1);
@@ -52,6 +54,7 @@ public final class ScriptGameAdapter extends AccessibilityService {
     @Override protected void onServiceConnected() {
         super.onServiceConnected();
         foregroundEvent = ForegroundEvent.EMPTY;
+        targetGameLabel = loadTargetGameLabel();
         instance = this;
     }
 
@@ -79,11 +82,17 @@ public final class ScriptGameAdapter extends AccessibilityService {
         return current != null && current.hasTargetGameForeground();
     }
 
+    public static String foregroundDiagnostic() {
+        ScriptGameAdapter current = instance;
+        return current == null ? "无障碍服务未连接" : current.describeForegroundState();
+    }
+
     private boolean hasTargetGameForeground() {
         ForegroundEvent event = foregroundEvent;
         boolean currentWindow = false;
         boolean eventWindowActive = false;
         String activeWindowPackage = null;
+        String activeWindowTitle = null;
         List<AccessibilityWindowInfo> windows;
         try {
             windows = getWindows();
@@ -97,6 +106,8 @@ public final class ScriptGameAdapter extends AccessibilityService {
                             || window.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
                     currentWindow = true;
                     eventWindowActive = event.windowId >= 0 && window.getId() == event.windowId;
+                    CharSequence title = window.getTitle();
+                    activeWindowTitle = title == null ? null : title.toString();
                     // In BlackBox the Android window belongs to the host app even though
                     // its rendered content and virtual activity belong to the guest game.
                     AccessibilityNodeInfo root = null;
@@ -127,14 +138,70 @@ public final class ScriptGameAdapter extends AccessibilityService {
                 // A failed BlackBox query must keep input blocked.
             }
         }
-        boolean activeWindowIsSandboxGame = ScriptForegroundTarget.isActiveSandboxGameWindow(
-                activeWindowPackage, event.packageName, event.className,
+        return ScriptForegroundTarget.isTargetForeground(
+                activeWindowPackage, activeWindowTitle, targetGameLabel,
+                event.packageName, event.className, eventWindowActive,
                 virtualTopPackage, TARGET_GAME_PACKAGE);
-        if (activeWindowIsSandboxGame) return true;
+    }
 
-        // Compatibility fallback for devices where a window root cannot be retrieved.
-        return ScriptForegroundTarget.isTarget(event.packageName, event.className,
-                eventWindowActive, virtualTopPackage, TARGET_GAME_PACKAGE);
+    private String loadTargetGameLabel() {
+        try {
+            for (ApplicationInfo info : top.niunaijun.blackbox.BlackBoxCore.get()
+                    .getInstalledApplications(0, 0)) {
+                if (info == null || !TARGET_GAME_PACKAGE.equals(info.packageName)) continue;
+                CharSequence label = info.loadLabel(top.niunaijun.blackbox.BlackBoxCore.getPackageManager());
+                if (label != null) return label.toString();
+            }
+        } catch (RuntimeException ignored) {
+            // The proxy event/package checks remain available if the sandbox is not ready.
+        }
+        return "";
+    }
+
+    private String describeForegroundState() {
+        ForegroundEvent event = foregroundEvent;
+        String activePackage = "";
+        String activeTitle = "";
+        String windowError = "";
+        try {
+            List<AccessibilityWindowInfo> windows = getWindows();
+            if (windows != null) {
+                try {
+                    for (AccessibilityWindowInfo window : windows) {
+                        if (window == null || !window.isActive()
+                                || window.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+                        CharSequence title = window.getTitle();
+                        activeTitle = title == null ? "" : title.toString();
+                        AccessibilityNodeInfo root = null;
+                        try {
+                            root = window.getRoot();
+                            CharSequence name = root == null ? null : root.getPackageName();
+                            activePackage = name == null ? "" : name.toString();
+                        } finally {
+                            if (root != null) root.recycle();
+                        }
+                        break;
+                    }
+                } finally {
+                    for (AccessibilityWindowInfo window : windows) {
+                        if (window != null) window.recycle();
+                    }
+                }
+            }
+        } catch (RuntimeException failure) {
+            windowError = failure.getClass().getSimpleName();
+        }
+        String virtualTop = "";
+        try {
+            ComponentName top = BActivityManager.get().getTopActivity(0);
+            if (top != null) virtualTop = top.flattenToShortString();
+        } catch (RuntimeException failure) {
+            virtualTop = "读取失败:" + failure.getClass().getSimpleName();
+        }
+        return "activeWindow=" + activePackage + "/" + activeTitle
+                + ", event=" + event.packageName + "/" + event.className + "#" + event.windowId
+                + ", virtualTop=" + virtualTop + ", gameLabel=" + targetGameLabel
+                + (windowError.isEmpty() ? "" : ", windowsError=" + windowError);
     }
 
     private void requireTargetGameForeground() {

@@ -598,7 +598,8 @@ public final class ScriptToolsActivity extends Activity {
                 + "\n路线：" + mapName(values.optInt("挂机点地图", 0))
                 + "（" + values.optString("挂机点x", "100") + ", " + values.optString("挂机点y", "200") + "）"
                 + "\n自动战斗：" + onOff("自动战斗")
-                + "\n装备出售：" + onOff("出售装备") + "；装备保护：" + onOff("保护装备不出售")
+                + "\n装备出售：" + onOff("出售装备") + "；装备保护："
+                + (values.optBoolean("保护装备不出售", true) ? "开启" : "关闭")
                 + "\n启动目标：RYLUX 沙箱内的封神榜"
                 + "\n\n点击开始后会打开沙箱游戏并运行脚本，随后显示可暂停/停止的 RYLUX 悬浮控制面板。";
         showRyluxDialog("确认本次运行", summary, "返回检查", "开始", this::startRuntime);

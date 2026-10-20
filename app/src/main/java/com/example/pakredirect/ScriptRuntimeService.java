@@ -149,7 +149,9 @@ public final class ScriptRuntimeService extends Service {
                     15_000L,
                     "15 秒内未检测到沙箱中的汉化版封神榜处于前台；已阻止脚本截图和触控");
         } catch (TimeoutException timeout) {
-            throw new StartupTargetForegroundException(timeout.getMessage(), timeout);
+            String detail = timeout.getMessage() + "（诊断："
+                    + ScriptGameAdapter.foregroundDiagnostic() + "）";
+            throw new StartupTargetForegroundException(detail, timeout);
         }
     }
 

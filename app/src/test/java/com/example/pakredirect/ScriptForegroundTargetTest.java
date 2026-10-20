@@ -47,21 +47,40 @@ public class ScriptForegroundTargetTest {
 
     @Test public void acceptsLiveBlackBoxHostWindowWhenAccessibilityWindowIdsDiffer() {
         assertTrue(ScriptForegroundTarget.isActiveSandboxGameWindow(
-                HOST, TARGET, "com.jxclient.release.jxclient", TARGET, TARGET));
+                HOST, TARGET, "com.jxclient.release.jxclient", "封神榜手游", "封神榜手游",
+                TARGET, TARGET));
         assertTrue(ScriptForegroundTarget.isActiveSandboxGameWindow(
-                HOST, HOST, PROXY, TARGET, TARGET));
+                HOST, HOST, PROXY, "封神榜手游", "封神榜手游", TARGET, TARGET));
+        assertTrue(ScriptForegroundTarget.isActiveSandboxGameWindow(
+                HOST, HOST, "com.example.pakredirect.ScriptToolsActivity",
+                "封神榜手游", "封神榜手游", TARGET, TARGET));
         assertFalse(ScriptForegroundTarget.isActiveSandboxGameWindow(
-                HOST, HOST, "com.example.pakredirect.ScriptToolsActivity", TARGET, TARGET));
+                HOST, HOST, "com.example.pakredirect.ScriptToolsActivity",
+                "RYLUX 脚本工作台", "封神榜手游", TARGET, TARGET));
         assertFalse(ScriptForegroundTarget.isActiveSandboxGameWindow(
-                HOST, TARGET, "com.jxclient.release.jxclient", "com.example.othergame", TARGET));
+                HOST, HOST, PROXY, "RYLUX 脚本工作台", "封神榜手游", TARGET, TARGET));
+        assertTrue(ScriptForegroundTarget.isActiveSandboxGameWindow(
+                HOST, HOST, PROXY, null, "封神榜手游", TARGET, TARGET));
         assertFalse(ScriptForegroundTarget.isActiveSandboxGameWindow(
-                "com.other.host", TARGET, PROXY, TARGET, TARGET));
+                HOST, TARGET, "com.jxclient.release.jxclient", "封神榜手游", "封神榜手游",
+                "com.example.othergame", TARGET));
+        assertFalse(ScriptForegroundTarget.isActiveSandboxGameWindow(
+                "com.other.host", TARGET, PROXY, "封神榜手游", "封神榜手游", TARGET, TARGET));
     }
 
     @Test public void acceptsDirectGameActiveWindow() {
         assertTrue(ScriptForegroundTarget.isActiveSandboxGameWindow(
-                TARGET, HOST, "com.example.pakredirect.ScriptToolsActivity", null, TARGET));
+                TARGET, HOST, "com.example.pakredirect.ScriptToolsActivity", null, null, null, TARGET));
         assertFalse(ScriptForegroundTarget.isActiveSandboxGameWindow(
-                "com.example.othergame", HOST, PROXY, null, TARGET));
+                "com.example.othergame", HOST, PROXY, null, null, null, TARGET));
+    }
+
+    @Test public void liveWorkbenchWindowCannotBeOverriddenByStaleProxyEvent() {
+        assertFalse(ScriptForegroundTarget.isTargetForeground(
+                HOST, "RYLUX 脚本工作台", "封神榜手游", HOST, PROXY,
+                true, TARGET, TARGET));
+        assertTrue(ScriptForegroundTarget.isTargetForeground(
+                HOST, "封神榜手游", "封神榜手游", HOST,
+                "com.example.pakredirect.ScriptToolsActivity", false, TARGET, TARGET));
     }
 }

@@ -19,11 +19,10 @@ public final class ScriptForegroundGateTest {
     }
 
     @Test public void waitsUntilTheTargetBecomesForeground() throws Exception {
-        long readyAt = System.nanoTime() + 20_000_000L;
         AtomicInteger checks = new AtomicInteger();
-        ScriptForegroundGate.await(() -> System.nanoTime() >= readyAt,
-                checks::incrementAndGet, 1_000, "target did not become foreground");
-        assertTrue(checks.get() > 1);
+        ScriptForegroundGate.await(() -> checks.get() >= 3,
+                checks::incrementAndGet, 5_000, "target did not become foreground");
+        assertEquals(3, checks.get());
     }
 
     @Test public void timeoutPreventsWorkFromPassingTheGate() throws Exception {
