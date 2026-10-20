@@ -1557,7 +1557,8 @@ function L0_1()
   if not rowsOk or type(rows) ~= "table" then
     return false
   end
-  local forgotFound, registerFound, accountFound, loginFound = false, false, false, false
+  local accountFound = false
+  local loginX, loginY
   local function normalized(value)
     local text = tostring(value or ""):gsub("%s", ""):gsub("　", "")
     for _, punctuation in ipairs({"，", "。", "！", "？", "；", "：", "、", "…", "（", "）", "【", "】", "《", "》", "“", "”", "‘", "’", "·"}) do
@@ -1570,25 +1571,19 @@ function L0_1()
       local x, y = tonumber(row.x), tonumber(row.y)
       local text = normalized(row.words or row.text)
       if x ~= nil and y ~= nil and text ~= "" then
-        if x >= 1040 and x <= 1270 and y >= 70 and y <= 195
-            and string.find(text, "忘记密码", 1, true) ~= nil then
-          forgotFound = true
-        elseif x >= 1040 and x <= 1270 and y >= 190 and y <= 305
-            and string.find(text, "注册账号", 1, true) ~= nil then
-          registerFound = true
-        elseif x >= 430 and x <= 900 and y >= 250 and y <= 360 then
+        if x >= 430 and x <= 900 and y >= 250 and y <= 360 then
           accountFound = true
         elseif x >= 450 and x <= 900 and y >= 450 and y <= 590
             and string.find(text, "登录", 1, true) ~= nil then
-          loginFound = true
+          loginX, loginY = x, y
         end
       end
     end
   end
-  if not (forgotFound and registerFound and accountFound and loginFound) then
+  if not (accountFound and loginX ~= nil and loginY ~= nil) then
     return false
   end
-  _ENV["点击"]("@@汉化账号密码登录", 660, 525, 2000)
+  _ENV["点击"]("@@汉化账号密码登录", math.floor(loginX), math.floor(loginY), 2000)
   return true
 end
 _ENV["登录_汉化账号确认"] = L0_1

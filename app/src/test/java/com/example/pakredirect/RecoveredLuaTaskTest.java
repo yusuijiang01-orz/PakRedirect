@@ -530,12 +530,11 @@ public final class RecoveredLuaTaskTest {
         LuaTable shuffledRows = new LuaTable();
         shuffledRows.set(1, ocrRow("登录", 663, 525));
         shuffledRows.set(2, ocrRow(" sbs139502 ", 660, 300));
-        shuffledRows.set(3, ocrRow("注册账号。", 1160, 250));
-        shuffledRows.set(4, ocrRow("忘记密码？", 1160, 125));
         rows.set(shuffledRows);
-        assertTrue("The known localized login page with a saved account should submit once",
+        assertTrue("A saved account and login button should submit even if side-link OCR is missed",
                 globals.get("登录_汉化账号确认").checkfunction().call().toboolean());
-        assertEquals("@@汉化账号密码登录|660|525", clicks.get(0));
+        assertEquals("The OCR-recognized button center should be tapped",
+                "@@汉化账号密码登录|663|525", clicks.get(0));
         assertEquals("The helper should read one broad localized-login region",
                 Arrays.asList("400|70|1270|590"), regions);
 
@@ -591,7 +590,7 @@ public final class RecoveredLuaTaskTest {
 
         assertTrue("Observed localized login OCR should pass the Lua page classifier",
                 globals.get("登录_汉化账号确认").checkfunction().call().toboolean());
-        assertEquals(Arrays.asList("@@汉化账号密码登录|660|525"), clicks);
+        assertEquals(Arrays.asList("@@汉化账号密码登录|648|533"), clicks);
     }
 
     @Test public void localizedMapPickerIsRecognizedByObservedChineseOcrAnchors() throws Exception {
