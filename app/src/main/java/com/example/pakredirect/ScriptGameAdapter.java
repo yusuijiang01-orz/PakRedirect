@@ -154,7 +154,7 @@ public final class ScriptGameAdapter extends AccessibilityService {
         }
         String virtualTopPackage = null;
         String hostTopActivityClass = null;
-        if (currentWindow && (activeWindowPackage == null
+        if (currentWindow && (ScriptForegroundTarget.isUnavailableWindowPackage(activeWindowPackage)
                 || getPackageName().equals(activeWindowPackage))) {
             try {
                 ComponentName top = BActivityManager.get().getTopActivity(0);

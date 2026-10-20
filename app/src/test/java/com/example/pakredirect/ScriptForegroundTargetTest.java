@@ -118,6 +118,19 @@ public class ScriptForegroundTargetTest {
                 "com.example.othergame", TARGET));
     }
 
+    @Test public void slashPlaceholderRootAcceptsOnlyForegroundBlackBoxGuest() {
+        assertTrue(ScriptForegroundTarget.isTargetForeground(
+                true, "/", "", "封神榜手游", HOST,
+                "com.jxclient.release.jxclient#1469", PROXY, TARGET, TARGET));
+        assertFalse(ScriptForegroundTarget.isTargetForeground(
+                true, "/", "", "封神榜手游", HOST,
+                "com.jxclient.release.jxclient#1469", "com.example.pakredirect.ScriptToolsActivity",
+                TARGET, TARGET));
+        assertFalse(ScriptForegroundTarget.isTargetForeground(
+                true, "/", "", "封神榜手游", HOST,
+                "com.jxclient.release.jxclient#1469", PROXY, "com.example.othergame", TARGET));
+    }
+
     @Test public void knownRootPackageTakesPriorityOverMatchingTitleAndVirtualTop() {
         assertFalse(ScriptForegroundTarget.isTargetForeground(
                 true, "com.example.otherapp", "封神榜手游", "封神榜手游",

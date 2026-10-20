@@ -68,6 +68,13 @@ final class ScriptForegroundTarget {
                                       String virtualTopPackage,
                                       String targetPackage) {
         if (!activeApplicationWindow || targetPackage == null || targetPackage.isEmpty()) return false;
+        // On some Android/BlackBox builds AccessibilityWindowInfo.getRoot()
+        // returns a placeholder node whose package is "/". In that case the
+        // root package is unavailable, but the active Android proxy and
+        // BlackBox virtual top activity still identify the guest unambiguously.
+        if (isUnavailableWindowPackage(activeWindowPackage)
+                && isProxyActivity(hostTopActivityClass)
+                && targetPackage.equals(virtualTopPackage)) return true;
         // BlackBox may expose its host app label ("RYLUX") instead of the guest
         // game's label. Accept that window only when Android's actual foreground
         // host Activity is a BlackBox proxy and BlackBox confirms this guest is
@@ -98,6 +105,11 @@ final class ScriptForegroundTarget {
         // and guest label are correct.
         return HOST_PACKAGE.equals(packageName)
                 || (packageName != null && packageName.startsWith(HOST_PACKAGE + "."));
+    }
+
+    static boolean isUnavailableWindowPackage(String packageName) {
+        return packageName == null || packageName.trim().isEmpty()
+                || "/".equals(packageName.trim());
     }
 
     private static boolean sameNonEmptyText(String left, String right) {
