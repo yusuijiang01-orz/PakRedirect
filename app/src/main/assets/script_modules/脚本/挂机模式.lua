@@ -143,6 +143,9 @@ function L0_1()
   local 返回值 = false
   local tt1 = tickCount()
   local t1 = _ENV["取上次点击时间"]()
+  -- Recover the modal before running screenshot-heavy health checks. If one of
+  -- those checks fails, the localized party window must still get a close attempt.
+  _ENV["组队_关闭页面"]()
   if _ENV["找到"]("@@登录横竖不对", tz["登录横竖不对"]) then
     keyPress("home")
     sleep(1000)
@@ -181,7 +184,6 @@ function L0_1()
   if _ENV["找到"](tz["负重满了提示"]) then
     toast("负重满了提示")
   end
-  _ENV["组队_关闭页面"]()
   _ENV["找到点击"]("@@行为设置页面关闭按钮", tz["行为设置页面关闭按钮"])
   _ENV["找到点击"]("@@不更新", tz["新版本更新按钮"], {
     735,
@@ -237,7 +239,7 @@ function L0_1()
   if _ENV["找到"](tz["商店页面"]) then
     _ENV["点击"]("@@关闭商店", 1244, 104, 1000)
   end
-  if _ENV["找到"](tz["大地图页面"]) then
+  if _ENV["大地图页面已打开"]() then
     _ENV["点击"]("@@关闭大地图", 1239, 40, 1000)
   end
   if _ENV["找到"](tz["确定输入内容"]) then
@@ -1230,25 +1232,114 @@ end
 
 _ENV["寻路_等待完成"] = L0_1
 
+-- The localized map picker dims the game behind it, invalidating the recovered
+-- color template. Recognize its stable NPC tab and search placeholder instead.
+function L0_1()
+  if _ENV["找到"](tz["大地图页面"]) then
+    _ENV["大地图页面中文"] = false
+    return true
+  end
+  local now = tonumberEx(tickCount()) or 0
+  local cachedAt = tonumberEx(_ENV["大地图页面识别缓存时间"])
+  if cachedAt ~= nil and now - cachedAt < 300 then
+    return _ENV["大地图页面识别缓存结果"] == true
+  end
+  local isOpen = false
+  local localizedMapTab = false
+  local ok, rows = pcall(tomocrtexttable, 0, 0, 420, 155)
+  if ok and type(rows) == "table" then
+    local hasNpcTab, hasSearchPlaceholder = false, false
+    for _, row in pairs(rows) do
+      if type(row) == "table" then
+        local x, y = tonumber(row.x), tonumber(row.y)
+        local text = tostring(row.words or row.text or ""):gsub("%s", ""):gsub("　", "")
+        if x ~= nil and y ~= nil and text ~= "" then
+          if x >= 20 and x <= 150 and y >= 15 and y <= 70
+              and string.find(text, "NPC", 1, true) ~= nil then
+            hasNpcTab = true
+          elseif x >= 0 and x <= 400 and y >= 70 and y <= 145
+              and string.find(text, "输入", 1, true) ~= nil
+              and string.find(text, "名", 1, true) ~= nil
+              and (string.find(text, "NPC", 1, true) ~= nil
+                  or string.find(text, "地图", 1, true) ~= nil) then
+            hasSearchPlaceholder = true
+            if string.find(text, "输入地图名", 1, true) ~= nil then
+              localizedMapTab = true
+            end
+          end
+        end
+      end
+    end
+    isOpen = hasNpcTab and hasSearchPlaceholder
+  end
+  _ENV["大地图页面识别缓存时间"] = now
+  _ENV["大地图页面识别缓存结果"] = isOpen
+  _ENV["大地图页面中文"] = localizedMapTab
+  return isOpen
+end
+_ENV["大地图页面已打开"] = L0_1
+
 function L0_1(地图名)
-  if _ENV["找到"](tz["大地图页面"]) then
+  local target = tostring(地图名 or ""):gsub("%s", ""):gsub("　", "")
+  if target == "" then return false end
+  local ok, rows = pcall(tomocrtexttable, 0, 120, 330, 650)
+  if not ok or type(rows) ~= "table" then return false end
+  local selected
+  for _, row in pairs(rows) do
+    if type(row) == "table" then
+      local text = tostring(row.words or row.text or ""):gsub("%s", ""):gsub("　", "")
+      local x, y = tonumber(row.x), tonumber(row.y)
+      local score = tonumber(row.score) or 0
+      if text == target and score >= 0.82 and x ~= nil and y ~= nil
+          and x >= 0 and x <= 330 and y >= 120 and y <= 650 then
+        selected = {x = x, y = y}
+        break
+      end
+    end
+  end
+  if selected == nil then return false end
+  _ENV["点击"](math.floor(selected.x), math.floor(selected.y), 1200)
+  sleep(700)
+  local headerOk, headerRows = pcall(tomocrtexttable, 600, 0, 1000, 90)
+  if not headerOk or type(headerRows) ~= "table" then return false end
+  for _, row in pairs(headerRows) do
+    if type(row) == "table" then
+      local text = tostring(row.words or row.text or ""):gsub("%s", ""):gsub("　", "")
+      if text == target and (tonumber(row.score) or 0) >= 0.82 then return true end
+    end
+  end
+  return false
+end
+
+_ENV["大地图_按OCR选择"] = L0_1
+
+function L0_1(地图名, 切换到NPC列表)
+  local selected = false
+  if _ENV["大地图页面已打开"]() then
     _ENV["点击"]("@@大地图选择", 253, 38, 1000)
   end
-  if _ENV["找到"](tz["大地图页面"]) then
+  if _ENV["大地图页面已打开"]() then
     _ENV["点击"]("@@大地图选择", 253, 38, 1000)
   end
-  if _ENV["找到"](tz["大地图页面"]) then
+  if _ENV["大地图页面已打开"]() then
     _ENV["点击"]("@@大地图选择", 361, 95, 1500)
   end
-  if _ENV["找到"](tz["大地图页面"]) then
+  if _ENV["大地图页面已打开"]() then
     _ENV["点击"]("@@大地图输入框", 283, 96, 1500)
     imeLib.lock()
     imeLib.setText(地图名)
     imeLib.unlock()
     sleep(1000)
-    _ENV["点击"]("@@XONG", 98, 197, 2000)
+    if _ENV["大地图页面中文"] then
+      _ENV["点击"](361, 95, 1000)
+      sleep(700)
+      selected = _ENV["大地图_按OCR选择"](地图名)
+      if not selected then return false end
+    else
+      _ENV["点击"]("@@XONG", 98, 197, 2000)
+    end
   end
-  if _ENV["找到"](tz["大地图页面"]) then
+  if not _ENV["大地图页面中文"] and _ENV["大地图页面已打开"]() then
     if 地图名 == "phong thần" or 地图名 == "sùng thành"
         or 地图名 == "荒漠3" or 地图名 == "崇城野外" then
       _ENV["点击"]("@@选择地图2", 80, 195, 1500)
@@ -1256,12 +1347,14 @@ function L0_1(地图名)
       _ENV["点击"]("@@选择地图1", 66, 155, 1500)
     end
   end
-  if _ENV["找到"](tz["大地图页面"]) then
+  if 切换到NPC列表 and _ENV["大地图页面已打开"]() then
     _ENV["点击"]("@@npc选择", 82, 38, 1500)
   end
-  if _ENV["找到"](tz["大地图页面"]) then
+  if 切换到NPC列表 and _ENV["大地图页面已打开"]() then
     _ENV["点击"]("@@npc选择", 82, 38, 1500)
   end
+  if _ENV["大地图页面中文"] then return selected end
+  return _ENV["大地图页面已打开"]()
 end
 
 _ENV["大地图_输入大地图"] = L0_1
@@ -1301,8 +1394,12 @@ function L0_1()
       elseif _ENV["找到"](tz["自动挂机按钮_未开启"]) then
         _ENV["点击"]("@@打开大地图", 1159, 110, 1000)
       end
-    elseif _ENV["找到"](tz["大地图页面"]) then
-      _ENV["大地图_输入大地图"](_ENV["卖货地图"])
+    elseif _ENV["大地图页面已打开"]() then
+      if not _ENV["大地图_输入大地图"](_ENV["卖货地图"], true) then
+        _ENV["当前任务2"] = "卖货地图选择失败"
+        toast("卖货地图未确认，本次停止卖货")
+        return false
+      end
       _ENV["点击"]("@@前往卖货npc", 38, 160, 1000)
       if not _ENV["寻路_等待完成"]() then
         _ENV["当前任务2"] = "去卖货寻路失败"
@@ -1372,9 +1469,13 @@ function L0_1()
       elseif _ENV["找到"](tz["自动挂机按钮_未开启"]) then
         _ENV["点击"]("@@寻路 关闭自动挂机", 1159, 110, 1000)
       end
-    elseif _ENV["找到"](tz["大地图页面"]) then
-      _ENV["大地图_输入大地图"](_ENV["挂机点地图"])
-      if _ENV["找到"](tz["大地图页面"]) then
+    elseif _ENV["大地图页面已打开"]() then
+      if not _ENV["大地图_输入大地图"](_ENV["挂机点地图"], false) then
+        _ENV["当前任务2"] = "挂机地图选择失败"
+        toast("挂机地图未能确认，稍后重试")
+        return false
+      end
+      if _ENV["大地图页面已打开"]() then
         _ENV["点击"]("@@输入x", 664, 655, 1000)
         for i = 1, 10 do
           keyPress("del")
@@ -1386,7 +1487,7 @@ function L0_1()
         sleep(1000)
         _ENV["点击"]("@@xong", 116, 227, 1000)
       end
-      if _ENV["找到"](tz["大地图页面"]) then
+      if _ENV["大地图页面已打开"]() then
         _ENV["点击"]("@@输入y", 774, 657, 1000)
         for i = 1, 10 do
           keyPress("del")
@@ -1399,7 +1500,7 @@ function L0_1()
         _ENV["点击"]("@@xong", 116, 227, 1000)
       end
       imeLib.unlock()
-      if _ENV["找到"](tz["大地图页面"]) then
+      if _ENV["大地图页面已打开"]() then
         _ENV["点击"]("@@去目的地", 857, 651, 1000)
         toast("等待寻路完成")
         if _ENV["寻路_等待完成"]() then
@@ -1449,24 +1550,42 @@ function L0_1()
 end
 _ENV["登录_汉化选区确认"] = L0_1
 
--- Localized login screens keep the recovered account layout but replace the
--- image-template pixels. Require the page's right-side account actions, the
--- localized login button, and a non-empty saved account before submitting.
+-- Read the localized login page as one set of positioned OCR rows. A broad
+-- region avoids losing labels when ML Kit splits or reorders individual lines.
 function L0_1()
-  local forgotOk, forgot = pcall(tomocrtext, 1100, 90, 1240, 145)
-  if not forgotOk or string.find(tostring(forgot or ""), "忘记密码", 1, true) == nil then
+  local rowsOk, rows = pcall(tomocrtexttable, 400, 70, 1270, 590)
+  if not rowsOk or type(rows) ~= "table" then
     return false
   end
-  local registerOk, register = pcall(tomocrtext, 1100, 220, 1240, 275)
-  if not registerOk or string.find(tostring(register or ""), "注册账号", 1, true) == nil then
-    return false
+  local forgotFound, registerFound, accountFound, loginFound = false, false, false, false
+  local function normalized(value)
+    local text = tostring(value or ""):gsub("%s", ""):gsub("　", "")
+    for _, punctuation in ipairs({"，", "。", "！", "？", "；", "：", "、", "…", "（", "）", "【", "】", "《", "》", "“", "”", "‘", "’", "·"}) do
+      text = text:gsub(punctuation, "")
+    end
+    return text:gsub("[%p]", "")
   end
-  local accountOk, account = pcall(tomocrtext, 460, 270, 830, 325)
-  if not accountOk or string.match(tostring(account or ""), "%S") == nil then
-    return false
+  for _, row in pairs(rows) do
+    if type(row) == "table" then
+      local x, y = tonumber(row.x), tonumber(row.y)
+      local text = normalized(row.words or row.text)
+      if x ~= nil and y ~= nil and text ~= "" then
+        if x >= 1040 and x <= 1270 and y >= 70 and y <= 195
+            and string.find(text, "忘记密码", 1, true) ~= nil then
+          forgotFound = true
+        elseif x >= 1040 and x <= 1270 and y >= 190 and y <= 305
+            and string.find(text, "注册账号", 1, true) ~= nil then
+          registerFound = true
+        elseif x >= 430 and x <= 900 and y >= 250 and y <= 360 then
+          accountFound = true
+        elseif x >= 450 and x <= 900 and y >= 450 and y <= 590
+            and string.find(text, "登录", 1, true) ~= nil then
+          loginFound = true
+        end
+      end
+    end
   end
-  local loginOk, login = pcall(tomocrtext, 490, 490, 810, 565)
-  if not loginOk or string.find(tostring(login or ""), "登录", 1, true) == nil then
+  if not (forgotFound and registerFound and accountFound and loginFound) then
     return false
   end
   _ENV["点击"]("@@汉化账号密码登录", 660, 525, 2000)

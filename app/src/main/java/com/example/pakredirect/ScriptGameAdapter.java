@@ -15,6 +15,7 @@ import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.accessibility.AccessibilityWindowInfo;
 import android.os.Bundle;
+import android.util.Log;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -25,6 +26,8 @@ import top.niunaijun.blackbox.fake.frameworks.BActivityManager;
 
 /** Display-level screenshot and touch adapter. The user must enable its accessibility service. */
 public final class ScriptGameAdapter extends AccessibilityService {
+    private static final String TAG = "ScriptGameAdapter";
+    private static final long RECONNECT_WAIT_MS = 10_000L;
     static final String TARGET_GAME_PACKAGE = "com.tepaylink.tamgioiphantranhmobile";
     private static volatile ScriptGameAdapter instance;
     private volatile ForegroundEvent foregroundEvent = ForegroundEvent.EMPTY;
@@ -51,11 +54,18 @@ public final class ScriptGameAdapter extends AccessibilityService {
         return current;
     }
 
+    /** Wait briefly for Android to rebind the accessibility service after a transient disconnect. */
+    public static ScriptGameAdapter requireConnected(ScriptExecutionControl control) {
+        return ScriptAdapterConnectionGate.await(() -> instance, control, RECONNECT_WAIT_MS,
+                "RYLUX 游戏输入服务连接中断，等待 Android 重连超时");
+    }
+
     @Override protected void onServiceConnected() {
         super.onServiceConnected();
         foregroundEvent = ForegroundEvent.EMPTY;
-        targetGameLabel = loadTargetGameLabel();
         instance = this;
+        targetGameLabel = loadTargetGameLabel();
+        Log.i(TAG, "accessibility service connected; instance=" + System.identityHashCode(this));
     }
 
     @Override public void onAccessibilityEvent(AccessibilityEvent event) {
@@ -68,6 +78,19 @@ public final class ScriptGameAdapter extends AccessibilityService {
                 event.getWindowId());
     }
     @Override public void onInterrupt() { }
+
+    @Override public boolean onUnbind(android.content.Intent intent) {
+        if (instance == this) instance = null;
+        Log.w(TAG, "accessibility service unbound; instance=" + System.identityHashCode(this));
+        return super.onUnbind(intent);
+    }
+
+    @Override public void onRebind(android.content.Intent intent) {
+        super.onRebind(intent);
+        foregroundEvent = ForegroundEvent.EMPTY;
+        instance = this;
+        Log.i(TAG, "accessibility service rebound; instance=" + System.identityHashCode(this));
+    }
 
     public static String foregroundPackage() {
         ScriptGameAdapter current = instance;
@@ -247,6 +270,7 @@ public final class ScriptGameAdapter extends AccessibilityService {
 
     @Override public void onDestroy() {
         if (instance == this) instance = null;
+        Log.w(TAG, "accessibility service destroyed; instance=" + System.identityHashCode(this));
         super.onDestroy();
     }
 
@@ -333,20 +357,29 @@ public final class ScriptGameAdapter extends AccessibilityService {
     private boolean dispatch(Path path, long durationMs, long timeoutMs) throws Exception {
         requireTargetGameForeground();
         if (Build.VERSION.SDK_INT < 24) throw new UnsupportedOperationException("触控需要 Android 7 或更新版本");
+        if (!ScriptControlOverlayService.setGameInputPassthrough(true, 1_000L)) {
+            throw new IllegalStateException("无法暂时让 RYLUX 悬浮窗为游戏触控让路");
+        }
         CountDownLatch done = new CountDownLatch(1);
         AtomicBoolean completed = new AtomicBoolean(false);
-        GestureDescription gesture = new GestureDescription.Builder()
-                .addStroke(new GestureDescription.StrokeDescription(path, 0, durationMs)).build();
-        boolean accepted = dispatchGesture(gesture, new GestureResultCallback() {
-            @Override public void onCompleted(GestureDescription description) {
-                completed.set(true);
-                done.countDown();
-            }
+        try {
+            GestureDescription gesture = new GestureDescription.Builder()
+                    .addStroke(new GestureDescription.StrokeDescription(path, 0, durationMs)).build();
+            boolean accepted = dispatchGesture(gesture, new GestureResultCallback() {
+                @Override public void onCompleted(GestureDescription description) {
+                    completed.set(true);
+                    done.countDown();
+                }
 
-            @Override public void onCancelled(GestureDescription description) {
-                done.countDown();
+                @Override public void onCancelled(GestureDescription description) {
+                    done.countDown();
+                }
+            }, null);
+            return accepted && done.await(timeoutMs, TimeUnit.MILLISECONDS) && completed.get();
+        } finally {
+            if (!ScriptControlOverlayService.setGameInputPassthrough(false, 1_000L)) {
+                Log.e(TAG, "could not restore RYLUX overlay touch controls after a game gesture");
             }
-        }, null);
-        return accepted && done.await(timeoutMs, TimeUnit.MILLISECONDS) && completed.get();
+        }
     }
 }

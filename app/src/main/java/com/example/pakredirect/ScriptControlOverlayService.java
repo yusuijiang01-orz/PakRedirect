@@ -25,6 +25,9 @@ import android.widget.FrameLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+
 /** RYLUX-styled floating controls for the explicitly started Lua runtime. */
 public final class ScriptControlOverlayService extends Service {
     public static final String ACTION_PREVIEW = "com.example.pakredirect.script.PREVIEW_OVERLAY";
@@ -42,6 +45,7 @@ public final class ScriptControlOverlayService extends Service {
     private static final int PANEL_WIDTH_DP = 320;
     private static final int HANDLE_WIDTH_DP = 64;
     private static final int HANDLE_HEIGHT_DP = 72;
+    private static volatile ScriptControlOverlayService activeInstance;
 
     private WindowManager windowManager;
     private View overlay;
@@ -73,6 +77,7 @@ public final class ScriptControlOverlayService extends Service {
 
     @Override public void onCreate() {
         super.onCreate();
+        activeInstance = this;
         IntentFilter filter = new IntentFilter(ScriptRuntimeService.ACTION_STATUS);
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(runtimeStatus, filter, RECEIVER_NOT_EXPORTED);
         else registerReceiver(runtimeStatus, filter);
@@ -231,6 +236,42 @@ public final class ScriptControlOverlayService extends Service {
         catch (RuntimeException ignored) { }
     }
 
+    /** Temporarily let accessibility gestures pass through the visible controller to the game. */
+    static boolean setGameInputPassthrough(boolean enabled, long timeoutMs) {
+        ScriptControlOverlayService service = activeInstance;
+        if (service == null || service.overlay == null || service.params == null) return true;
+        if (Looper.myLooper() == Looper.getMainLooper()) return service.applyGameInputPassthrough(enabled);
+        CountDownLatch updated = new CountDownLatch(1);
+        boolean[] success = new boolean[1];
+        service.mainHandler.post(() -> {
+            try { success[0] = service.applyGameInputPassthrough(enabled); }
+            finally { updated.countDown(); }
+        });
+        try {
+            return updated.await(Math.max(1L, timeoutMs), TimeUnit.MILLISECONDS) && success[0];
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
+    private boolean applyGameInputPassthrough(boolean enabled) {
+        if (overlay == null || params == null || windowManager == null) return true;
+        int flags = enabled
+                ? params.flags | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                : params.flags & ~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+        if (flags == params.flags) return true;
+        int previousFlags = params.flags;
+        params.flags = flags;
+        try {
+            windowManager.updateViewLayout(overlay, params);
+            return true;
+        } catch (RuntimeException failure) {
+            params.flags = previousFlags;
+            return false;
+        }
+    }
+
     private boolean isRuntimeActive() {
         return ScriptExecutionControl.State.RUNNING.name().equals(runtimeState)
                 || ScriptExecutionControl.State.PAUSED.name().equals(runtimeState)
@@ -361,6 +402,7 @@ public final class ScriptControlOverlayService extends Service {
     }
 
     @Override public void onDestroy() {
+        if (activeInstance == this) activeInstance = null;
         mainHandler.removeCallbacks(collapseWhenIdle);
         try { unregisterReceiver(runtimeStatus); } catch (RuntimeException ignored) { }
         if (overlay != null && windowManager != null) {

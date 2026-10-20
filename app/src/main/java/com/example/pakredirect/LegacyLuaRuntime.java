@@ -147,7 +147,7 @@ final class LegacyLuaRuntime {
                     int x = mapper.toScreenX(args.arg(1).todouble());
                     int y = mapper.toScreenY(args.arg(2).todouble());
                     requireDisplayPoint(x, y, screen);
-                    boolean ok = ScriptGameAdapter.requireConnected().tap(x, y,
+                    boolean ok = ScriptGameAdapter.requireConnected(control).tap(x, y,
                             args.narg() >= 3 ? args.arg(3).optlong(80) : 80, 5000);
                     if (!ok) throw new LuaError("系统未接受点击手势");
                     return LuaValue.TRUE;
@@ -166,7 +166,7 @@ final class LegacyLuaRuntime {
                     int y2 = mapper.toScreenY(args.arg(4).todouble());
                     requireDisplayPoint(x1, y1, screen);
                     requireDisplayPoint(x2, y2, screen);
-                    boolean ok = ScriptGameAdapter.requireConnected().swipe(x1, y1, x2, y2,
+                    boolean ok = ScriptGameAdapter.requireConnected(control).swipe(x1, y1, x2, y2,
                             args.arg(5).optlong(300), 8000);
                     if (!ok) throw new LuaError("系统未接受滑动手势");
                     return LuaValue.TRUE;
@@ -209,7 +209,7 @@ final class LegacyLuaRuntime {
                     int x2 = mapper.toScreenX(touchEndX), y2 = mapper.toScreenY(touchEndY);
                     requireDisplayPoint(x1, y1, screen);
                     requireDisplayPoint(x2, y2, screen);
-                    boolean ok = ScriptGameAdapter.requireConnected().swipe(
+                    boolean ok = ScriptGameAdapter.requireConnected(control).swipe(
                             x1, y1, x2, y2, touchDurationMs, 8000);
                     if (!ok) throw new LuaError("系统未接受触控手势");
                     return LuaValue.TRUE;
@@ -246,12 +246,12 @@ final class LegacyLuaRuntime {
                 control.checkpoint();
                 String key = keyValue.checkjstring().toLowerCase(Locale.ROOT);
                 if ("home".equals(key)) {
-                    try { return LuaValue.valueOf(ScriptGameAdapter.requireConnected().pressHome()); }
-                    catch (Exception error) { throw new LuaError("返回桌面失败：" + error.getMessage()); }
+                    try { return LuaValue.valueOf(ScriptGameAdapter.requireConnected(control).pressHome()); }
+                    catch (Exception error) { rethrowIfStopped(); throw new LuaError("返回桌面失败：" + error.getMessage()); }
                 }
                 if ("del".equals(key) || "delete".equals(key)) {
-                    try { return LuaValue.valueOf(ScriptGameAdapter.requireConnected().clearFocusedText()); }
-                    catch (Exception error) { throw new LuaError("清除输入内容失败：" + error.getMessage()); }
+                    try { return LuaValue.valueOf(ScriptGameAdapter.requireConnected(control).clearFocusedText()); }
+                    catch (Exception error) { rethrowIfStopped(); throw new LuaError("清除输入内容失败：" + error.getMessage()); }
                 }
                 throw new LuaError("当前输入适配器仅支持 home 按键，未执行：" + key);
             }
@@ -421,11 +421,11 @@ final class LegacyLuaRuntime {
             @Override public LuaValue call(LuaValue textValue) {
                 control.checkpoint();
                 try {
-                    boolean accepted = ScriptGameAdapter.requireConnected().setFocusedText(textValue.tojstring());
+                    boolean accepted = ScriptGameAdapter.requireConnected(control).setFocusedText(textValue.tojstring());
                     if (!accepted) throw new LuaError("当前页面没有可由无障碍服务编辑的输入框");
                     return LuaValue.TRUE;
                 } catch (LuaError error) { throw error; }
-                catch (Exception error) { throw new LuaError("输入文本失败：" + error.getMessage()); }
+                catch (Exception error) { rethrowIfStopped(); throw new LuaError("输入文本失败：" + error.getMessage()); }
             }
         });
         globals.set("imeLib", ime);
@@ -577,7 +577,7 @@ final class LegacyLuaRuntime {
                 try {
                     Bitmap screen = frame();
                     LegacyCoordinateMapper mapper = mapperFor(screen);
-                    boolean clicked = ScriptGameAdapter.requireConnected().tap(
+                    boolean clicked = ScriptGameAdapter.requireConnected(control).tap(
                             mapper.toScreenX(match.get("x").todouble()),
                             mapper.toScreenY(match.get("y").todouble()), 1000, 5000);
                     return LuaValue.valueOf(clicked);
@@ -884,7 +884,7 @@ final class LegacyLuaRuntime {
     private void refreshFrame() {
         control.checkpoint();
         try {
-            Bitmap capture = ScriptGameAdapter.requireConnected().captureDisplay(10000);
+            Bitmap capture = ScriptGameAdapter.requireConnected(control).captureDisplay(10000);
             Bitmap old = latestFrame;
             latestFrame = capture;
             coordinateMapper = mapperFor(capture.getWidth(), capture.getHeight());

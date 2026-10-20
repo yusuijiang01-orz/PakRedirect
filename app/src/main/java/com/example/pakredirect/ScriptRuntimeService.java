@@ -138,7 +138,9 @@ public final class ScriptRuntimeService extends Service {
     private void verifyStartupDisplayCapture() throws StartupDisplayCaptureException {
         android.graphics.Bitmap frame = null;
         try {
-            frame = ScriptGameAdapter.requireConnected().captureDisplay(10_000);
+            frame = ScriptGameAdapter.requireConnected(control).captureDisplay(10_000);
+        } catch (ScriptExecutionControl.StopRequestedException stopped) {
+            throw stopped;
         } catch (Exception failure) {
             throw new StartupDisplayCaptureException(failure);
         } finally {
@@ -147,7 +149,6 @@ public final class ScriptRuntimeService extends Service {
     }
 
     private void acceptFirstUseTermsIfPresent() throws Exception {
-        ScriptGameAdapter adapter = ScriptGameAdapter.requireConnected();
         long deadline = android.os.SystemClock.uptimeMillis() + 45_000L;
         boolean termsAccepted = false;
         try (ScriptOcr ocr = new ScriptOcr()) {
@@ -155,7 +156,7 @@ public final class ScriptRuntimeService extends Service {
                 control.checkpoint();
                 Bitmap frame = null;
                 try {
-                    frame = adapter.captureDisplay(5_000);
+                    frame = ScriptGameAdapter.requireConnected(control).captureDisplay(5_000);
                     ScriptOcr.Result result = ocr.recognize(frame, true, 5_000);
                     JSONArray recognized = new JSONArray(result.json);
                     List<ScriptStartupTerms.Line> lines = new ArrayList<>();
@@ -168,7 +169,7 @@ public final class ScriptRuntimeService extends Service {
                             lines, frame.getWidth(), frame.getHeight());
                     if (!termsAccepted && agree != null) {
                         control.checkpoint();
-                        if (!adapter.tap(agree.x, agree.y, 60, 3_000)) {
+                        if (!ScriptGameAdapter.requireConnected(control).tap(agree.x, agree.y, 60, 3_000)) {
                             throw new IllegalStateException("游戏首次使用条款的同意按钮未能完成触控");
                         }
                         termsAccepted = true;
