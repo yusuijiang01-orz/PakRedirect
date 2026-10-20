@@ -55,6 +55,16 @@ final class ScriptStartupTerms {
         return new Tap(agree.x, agree.y);
     }
 
+    static boolean isLocalizedLoginPage(List<Line> lines) {
+        if (lines == null) return false;
+        StringBuilder pageText = new StringBuilder();
+        for (Line line : lines) {
+            if (line != null) pageText.append(compact(line.text));
+        }
+        String text = pageText.toString();
+        return text.contains("忘记密码") && text.contains("注册账号") && text.contains("登录");
+    }
+
     private static boolean inButtonRegion(Line line, int width, int height, boolean left) {
         float x = (float) line.x / width;
         float y = (float) line.y / height;

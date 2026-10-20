@@ -9,6 +9,8 @@ import java.util.List;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public final class ScriptStartupTermsTest {
     private static final int WIDTH = 1600;
@@ -48,6 +50,17 @@ public final class ScriptStartupTermsTest {
         List<ScriptStartupTerms.Line> ambiguous = knownPage();
         ambiguous.add(line("同意", 650, 752));
         assertNull(ScriptStartupTerms.findAgreeTap(ambiguous, WIDTH, HEIGHT));
+    }
+
+    @Test public void localizedLoginAnchorsAllowStartupToContinueWhenTermsAreAbsent() {
+        List<ScriptStartupTerms.Line> login = Arrays.asList(
+                line("忘记密码?", 1450, 130),
+                line("注册账号", 1450, 260),
+                line("登录", 810, 660));
+        assertTrue(ScriptStartupTerms.isLocalizedLoginPage(login));
+        assertFalse(ScriptStartupTerms.isLocalizedLoginPage(Arrays.asList(
+                line("忘记密码?", 1450, 130), line("登录", 810, 660))));
+        assertFalse(ScriptStartupTerms.isLocalizedLoginPage(knownPage()));
     }
 
     private static List<ScriptStartupTerms.Line> knownPage() {

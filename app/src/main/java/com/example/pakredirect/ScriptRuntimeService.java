@@ -147,29 +147,48 @@ public final class ScriptRuntimeService extends Service {
     }
 
     private void acceptFirstUseTermsIfPresent() throws Exception {
-        control.checkpoint();
-        Bitmap frame = null;
+        ScriptGameAdapter adapter = ScriptGameAdapter.requireConnected();
+        long deadline = android.os.SystemClock.uptimeMillis() + 45_000L;
+        boolean termsAccepted = false;
         try (ScriptOcr ocr = new ScriptOcr()) {
-            ScriptGameAdapter adapter = ScriptGameAdapter.requireConnected();
-            frame = adapter.captureDisplay(5_000);
-            ScriptOcr.Result result = ocr.recognize(frame, true, 5_000);
-            JSONArray recognized = new JSONArray(result.json);
-            List<ScriptStartupTerms.Line> lines = new ArrayList<>();
-            for (int i = 0; i < recognized.length(); i++) {
-                JSONObject line = recognized.getJSONObject(i);
-                lines.add(new ScriptStartupTerms.Line(line.optString("text", ""),
-                        line.optInt("x", -1), line.optInt("y", -1)));
+            while (true) {
+                control.checkpoint();
+                Bitmap frame = null;
+                try {
+                    frame = adapter.captureDisplay(5_000);
+                    ScriptOcr.Result result = ocr.recognize(frame, true, 5_000);
+                    JSONArray recognized = new JSONArray(result.json);
+                    List<ScriptStartupTerms.Line> lines = new ArrayList<>();
+                    for (int i = 0; i < recognized.length(); i++) {
+                        JSONObject line = recognized.getJSONObject(i);
+                        lines.add(new ScriptStartupTerms.Line(line.optString("text", ""),
+                                line.optInt("x", -1), line.optInt("y", -1)));
+                    }
+                    ScriptStartupTerms.Tap agree = ScriptStartupTerms.findAgreeTap(
+                            lines, frame.getWidth(), frame.getHeight());
+                    if (!termsAccepted && agree != null) {
+                        control.checkpoint();
+                        if (!adapter.tap(agree.x, agree.y, 60, 3_000)) {
+                            throw new IllegalStateException("游戏首次使用条款的同意按钮未能完成触控");
+                        }
+                        termsAccepted = true;
+                        publish("已确认游戏首次使用条款");
+                    }
+                    // The game can show its first-use terms several seconds after
+                    // the BlackBox activity becomes foreground. Keep polling until
+                    // the localized account page appears, so Lua does not start
+                    // against a loading screen or remain trapped behind the terms.
+                    if (ScriptStartupTerms.isLocalizedLoginPage(lines)) return;
+                } finally {
+                    if (frame != null && !frame.isRecycled()) frame.recycle();
+                }
+                long remaining = deadline - android.os.SystemClock.uptimeMillis();
+                if (remaining <= 0) {
+                    publish("启动页等待结束，交由 Lua 登录流程继续");
+                    return;
+                }
+                control.sleep(Math.min(1_000L, remaining));
             }
-            ScriptStartupTerms.Tap agree = ScriptStartupTerms.findAgreeTap(
-                    lines, frame.getWidth(), frame.getHeight());
-            if (agree == null) return;
-            control.checkpoint();
-            if (!adapter.tap(agree.x, agree.y, 60, 3_000)) {
-                throw new IllegalStateException("游戏首次使用条款的同意按钮未能完成触控");
-            }
-            publish("已确认游戏首次使用条款");
-        } finally {
-            if (frame != null && !frame.isRecycled()) frame.recycle();
         }
     }
 
