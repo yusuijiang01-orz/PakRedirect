@@ -42,13 +42,17 @@ public final class ScriptRuntimeService extends Service {
     private volatile ScriptExecutionControl control;
     private volatile String lastMessage = "就绪";
     private volatile String state = ScriptExecutionControl.State.IDLE.name();
+    private boolean workerRunning;
+    private String pendingRestartConfig;
+    private int latestStartId;
 
     @Override public void onCreate() {
         super.onCreate();
         createNotificationChannel();
     }
 
-    @Override public int onStartCommand(Intent intent, int flags, int startId) {
+    @Override public synchronized int onStartCommand(Intent intent, int flags, int startId) {
+        latestStartId = startId;
         String action = intent == null ? null : intent.getAction();
         startForeground(NOTIFICATION_ID, notification("准备处理脚本命令"));
         if (!ACTION_START.equals(action) && control == null) {
@@ -60,7 +64,11 @@ public final class ScriptRuntimeService extends Service {
         if (ACTION_START.equals(action)) startScript(intent.getStringExtra(EXTRA_CONFIG));
         else if (ACTION_PAUSE.equals(action)) { if (control != null) control.pause(); publish("已暂停"); }
         else if (ACTION_RESUME.equals(action)) { if (control != null) control.resume(); publish("继续运行"); }
-        else if (ACTION_STOP.equals(action)) { if (control != null) control.requestStop(); publish("正在停止"); }
+        else if (ACTION_STOP.equals(action)) {
+            pendingRestartConfig = null;
+            if (control != null) control.requestStop();
+            publish("正在停止");
+        }
         return START_NOT_STICKY;
     }
 
@@ -71,28 +79,38 @@ public final class ScriptRuntimeService extends Service {
             publish("脚本已在运行");
             return;
         }
+        // A STOPPED broadcast can reach the overlay before the previous Lua
+        // worker has run its finally block. Queue a fast restart until that
+        // worker has fully left; it must not stop the new foreground service.
+        if (workerRunning) {
+            pendingRestartConfig = json;
+            publish("等待上一轮脚本退出后重新启动");
+            return;
+        }
         if (!ScriptGameAdapter.isConnected()) {
             publish("启动失败：请先启用 RYLUX 游戏输入服务");
-            stopSelf();
+            stopSelf(latestStartId);
             return;
         }
         String[] blockers = LegacyLuaRuntime.compatibilityBlockers(this);
         if (blockers.length > 0) {
             publish("启动被兼容检查拦截：" + String.join("；", blockers));
-            stopSelf();
+            stopSelf(latestStartId);
             return;
         }
         JSONObject config;
         try { config = new JSONObject(json == null ? "{}" : json); }
-        catch (Exception invalid) { publish("启动失败：方案配置无效"); stopSelf(); return; }
+        catch (Exception invalid) { publish("启动失败：方案配置无效"); stopSelf(latestStartId); return; }
         control = new ScriptExecutionControl();
         control.start();
+        final ScriptExecutionControl runControl = control;
+        workerRunning = true;
         state = ScriptExecutionControl.State.RUNNING.name();
         lastMessage = "Lua 宿主已启动";
         startForeground(NOTIFICATION_ID, notification(lastMessage));
         publish(lastMessage);
         executor.execute(() -> {
-            LegacyLuaRuntime runtime = new LegacyLuaRuntime(this, control, config,
+            LegacyLuaRuntime runtime = new LegacyLuaRuntime(this, runControl, config,
                     this::publish, this::saveFailure);
             try {
                 awaitTargetGameForeground();
@@ -129,10 +147,22 @@ public final class ScriptRuntimeService extends Service {
                     else { control.complete(); publish("已停止"); }
                 }
             } finally {
-                stopForeground(true);
-                stopSelf();
+                finishWorker(runControl);
             }
         });
+    }
+
+    private synchronized void finishWorker(ScriptExecutionControl finished) {
+        if (control != finished) return;
+        workerRunning = false;
+        String restart = pendingRestartConfig;
+        pendingRestartConfig = null;
+        if (restart != null) {
+            startScript(restart);
+            return;
+        }
+        stopForeground(true);
+        stopSelf(latestStartId);
     }
 
     private void verifyStartupDisplayCapture() throws StartupDisplayCaptureException {

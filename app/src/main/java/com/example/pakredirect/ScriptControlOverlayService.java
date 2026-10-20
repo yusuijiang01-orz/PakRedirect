@@ -59,6 +59,7 @@ public final class ScriptControlOverlayService extends Service {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private boolean collapsed;
     private boolean snappedRight;
+    private boolean restartRequested;
     private final Runnable collapseWhenIdle = this::collapseToNearestEdge;
     private String runtimeState = ScriptExecutionControl.State.IDLE.name();
     private final BroadcastReceiver runtimeStatus = new BroadcastReceiver() {
@@ -67,6 +68,12 @@ public final class ScriptControlOverlayService extends Service {
             String state = intent.getStringExtra(ScriptRuntimeService.EXTRA_STATE);
             String message = intent.getStringExtra(ScriptRuntimeService.EXTRA_MESSAGE);
             runtimeState = state == null ? ScriptExecutionControl.State.IDLE.name() : state;
+            if (ScriptExecutionControl.State.RUNNING.name().equals(runtimeState)
+                    || ScriptExecutionControl.State.FAILED.name().equals(runtimeState)
+                    || (message != null && (message.startsWith("启动失败")
+                    || message.startsWith("启动被兼容检查拦截")))) {
+                restartRequested = false;
+            }
             statusLabel.setText((state == null ? "运行" : state) + " · " + (message == null ? "" : message));
             boolean active = isRuntimeActive();
             if (runActionLabel != null) runActionLabel.setText(active ? "停止" : "启动");
@@ -151,7 +158,7 @@ public final class ScriptControlOverlayService extends Service {
         actions.addView(actionCell("▶", "启动", BLUE, v -> {
             noteInteraction();
             if (isRuntimeActive()) sendRuntimeAction(ScriptRuntimeService.ACTION_STOP);
-            else openStartConfirmation();
+            else restartLastRun();
         }), actionCellParams(true));
         actions.addView(actionCell("Ⅱ", "暂停", SOFT, v -> {
             noteInteraction();
@@ -285,6 +292,20 @@ public final class ScriptControlOverlayService extends Service {
         startActivity(open);
     }
 
+    private void restartLastRun() {
+        if (restartRequested) return;
+        String config = ScriptLastRunConfig.load(this);
+        if (config == null) {
+            // A preview or a first use has no confirmed scheme to run.
+            openStartConfirmation();
+            return;
+        }
+        restartRequested = true;
+        if (statusLabel != null) statusLabel.setText("正在重新启动上次方案…");
+        mainHandler.postDelayed(() -> restartRequested = false, 10_000L);
+        sendRuntimeAction(ScriptRuntimeService.ACTION_START, config);
+    }
+
     private void sendRuntimeAction(String action) { sendRuntimeAction(action, null); }
 
     private void sendRuntimeAction(String action, String config) {
@@ -294,6 +315,7 @@ public final class ScriptControlOverlayService extends Service {
             if (Build.VERSION.SDK_INT >= 26) startForegroundService(command);
             else startService(command);
         } catch (RuntimeException error) {
+            restartRequested = false;
             Toast.makeText(this, "无法控制脚本服务：" + error.getMessage(), Toast.LENGTH_LONG).show();
         }
     }

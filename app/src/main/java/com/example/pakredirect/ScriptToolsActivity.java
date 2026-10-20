@@ -606,23 +606,24 @@ public final class ScriptToolsActivity extends Activity {
     }
 
     private void startRuntime() {
+        String confirmedConfig = values.toString();
         Toast.makeText(this, "正在准备汉化并启动沙箱游戏…", Toast.LENGTH_SHORT).show();
         // Use the same localization readiness gate as the sandbox launch flow
         // before starting the script host or routing this package to BlackBoxCore.
-        new Thread(this::prepareLocalizationThenStartRuntime, "RYLUX-Script-Launch").start();
+        new Thread(() -> prepareLocalizationThenStartRuntime(confirmedConfig), "RYLUX-Script-Launch").start();
     }
 
-    private void prepareLocalizationThenStartRuntime() {
+    private void prepareLocalizationThenStartRuntime(String confirmedConfig) {
         try {
             LocalizationLaunchPreparation.prepare(this, message -> runOnUiThread(
                     () -> Toast.makeText(this, message, Toast.LENGTH_SHORT).show()));
-            runOnUiThread(this::startRuntimeServicesAndLaunchGame);
+            runOnUiThread(() -> startRuntimeServicesAndLaunchGame(confirmedConfig));
         } catch (Exception error) {
             failRuntimeLaunch(error.getMessage());
         }
     }
 
-    private void startRuntimeServicesAndLaunchGame() {
+    private void startRuntimeServicesAndLaunchGame(String confirmedConfig) {
         // Start the host and overlay while this activity is still foreground. The
         // sandbox game must be launched last: finishing this activity after
         // launch returns Android to the launcher and moves BlackBox's proxy task
@@ -636,7 +637,7 @@ public final class ScriptToolsActivity extends Activity {
             }
             Intent command = new Intent(this, ScriptRuntimeService.class)
                     .setAction(ScriptRuntimeService.ACTION_START)
-                    .putExtra(ScriptRuntimeService.EXTRA_CONFIG, values.toString());
+                    .putExtra(ScriptRuntimeService.EXTRA_CONFIG, confirmedConfig);
             if (Build.VERSION.SDK_INT >= 26) startForegroundService(command);
             else startService(command);
 
@@ -645,6 +646,10 @@ public final class ScriptToolsActivity extends Activity {
                 failRuntimeLaunch("RYLUX 无法打开沙箱中的封神榜。请返回沙箱页检查应用状态。");
                 return;
             }
+            // Reuse exactly this confirmed snapshot when Start is pressed again
+            // in the floating controller after a stop. Editing a profile later
+            // must not silently alter the running scheme.
+            ScriptLastRunConfig.save(this, confirmedConfig);
             Toast.makeText(this,
                     "汉化已就绪，沙箱游戏和脚本已启动；可用 RYLUX 悬浮面板控制",
                     Toast.LENGTH_SHORT).show();
