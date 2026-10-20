@@ -417,6 +417,50 @@ public final class RecoveredLuaTaskTest {
         assertTrue("Unrelated screens must not receive the party-page close tap", clicks.isEmpty());
     }
 
+    @Test public void localizedServerClusterRequiresChineseTitleAndConfirmBeforeTap() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        AtomicReference<String> title = new AtomicReference<>("服务器集群");
+        AtomicReference<String> confirm = new AtomicReference<>("确认");
+        List<String> clicks = new ArrayList<>();
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.ZERO; }
+        });
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot().resolve(module), module);
+        }
+        globals.set("找到", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue ignored) { return LuaValue.FALSE; }
+        });
+        globals.set("tomocrtext", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                return LuaValue.valueOf(args.arg(1).toint() < 500 ? title.get() : confirm.get());
+            }
+        });
+        globals.set("点击", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                clicks.add(args.arg(1).tojstring() + "|" + args.arg(2).tojstring()
+                        + "|" + args.arg(3).tojstring());
+                return LuaValue.TRUE;
+            }
+        });
+
+        assertTrue("The Chinese server page should be recognized by its title and confirm button",
+                globals.get("登录_汉化选区确认").checkfunction().call().toboolean());
+        assertEquals("@@汉化服务器集群确认|749|664", clicks.get(0));
+
+        clicks.clear();
+        title.set("角色选择");
+        assertTrue("A non-server screen must not trigger the server confirmation",
+                !globals.get("登录_汉化选区确认").checkfunction().call().toboolean());
+        assertTrue("The helper must never tap on an unrelated screen", clicks.isEmpty());
+
+        title.set("服务器集群");
+        confirm.set("取消");
+        assertTrue("A server title without a recognized confirmation control must not be tapped",
+                !globals.get("登录_汉化选区确认").checkfunction().call().toboolean());
+        assertTrue("The helper requires both OCR signatures", clicks.isEmpty());
+    }
+
     @Test public void recoveredPartyNameUsesOnlyConfidentOcrRows() throws Exception {
         Globals globals = JsePlatform.standardGlobals();
         AtomicReference<LuaTable> rows = new AtomicReference<>(new LuaTable());

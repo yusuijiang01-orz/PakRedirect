@@ -1436,9 +1436,25 @@ end
 _ENV["执行返回挂机点"] = L0_1
 
 function L0_1()
+  local titleOk, title = pcall(tomocrtext, 45, 25, 280, 100)
+  if not titleOk or string.find(tostring(title or ""), "服务器", 1, true) == nil then
+    return false
+  end
+  local confirmOk, confirm = pcall(tomocrtext, 680, 630, 840, 705)
+  if not confirmOk or string.find(tostring(confirm or ""), "确认", 1, true) == nil then
+    return false
+  end
+  _ENV["点击"]("@@汉化服务器集群确认", 749, 664, 1000)
+  return true
+end
+_ENV["登录_汉化选区确认"] = L0_1
+
+function L0_1()
   _ENV["找到点击"]("@@选区失败页面_关闭按钮", tz["选区失败页面_关闭按钮"])
   if _ENV["找到"](tz["选区页面"]) then
     _ENV["点击"]("@@选区确定", 749, 664, 1000)
+  else
+    _ENV["登录_汉化选区确认"]()
   end
   if _ENV["找到"](tz["账号密码页面"]) then
     _ENV["点击"]("@@确定账号密码", 660, 525, 1000)
