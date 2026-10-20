@@ -61,6 +61,16 @@ final class LegacyTuringCompat {
         return confidence >= 0d && confidence >= threshold / 100d;
     }
 
+    /** ML Kit rejects source images with either dimension below 32 pixels. */
+    static int[] ocrInputDimensions(int width, int height) {
+        if (width <= 0 || height <= 0) throw new IllegalArgumentException("OCR 图片尺寸无效");
+        double scale = Math.max(1d, Math.max(32d / width, 32d / height));
+        return new int[]{
+                Math.max(32, (int) Math.ceil(width * scale)),
+                Math.max(32, (int) Math.ceil(height * scale))
+        };
+    }
+
     /** Applies TURING's recovered color-pick binary filter to ARGB pixels. */
     static int[] applyColorPickFilter(int[] argb, String specification) {
         if (specification == null || specification.trim().isEmpty()) return argb.clone();
