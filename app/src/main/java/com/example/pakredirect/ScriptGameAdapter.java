@@ -90,7 +90,6 @@ public final class ScriptGameAdapter extends AccessibilityService {
     private boolean hasTargetGameForeground() {
         ForegroundEvent event = foregroundEvent;
         boolean currentWindow = false;
-        boolean eventWindowActive = false;
         String activeWindowPackage = null;
         String activeWindowTitle = null;
         List<AccessibilityWindowInfo> windows;
@@ -105,7 +104,6 @@ public final class ScriptGameAdapter extends AccessibilityService {
                     if (window == null || !window.isActive()
                             || window.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
                     currentWindow = true;
-                    eventWindowActive = event.windowId >= 0 && window.getId() == event.windowId;
                     CharSequence title = window.getTitle();
                     activeWindowTitle = title == null ? null : title.toString();
                     // In BlackBox the Android window belongs to the host app even though
@@ -114,9 +112,11 @@ public final class ScriptGameAdapter extends AccessibilityService {
                     try {
                         root = window.getRoot();
                         CharSequence rootPackage = root == null ? null : root.getPackageName();
-                        if (rootPackage != null) activeWindowPackage = rootPackage.toString();
+                        if (rootPackage != null && rootPackage.length() > 0) {
+                            activeWindowPackage = rootPackage.toString();
+                        }
                     } catch (RuntimeException ignored) {
-                        // Keep the active-window fact; the event path below is a safe fallback.
+                        // Keep the active-window fact and title for the null-root check.
                     } finally {
                         if (root != null) root.recycle();
                     }
@@ -129,8 +129,8 @@ public final class ScriptGameAdapter extends AccessibilityService {
             }
         }
         String virtualTopPackage = null;
-        if (currentWindow && (getPackageName().equals(activeWindowPackage)
-                || getPackageName().equals(event.packageName))) {
+        if (currentWindow && (activeWindowPackage == null
+                || getPackageName().equals(activeWindowPackage))) {
             try {
                 ComponentName top = BActivityManager.get().getTopActivity(0);
                 if (top != null) virtualTopPackage = top.getPackageName();
@@ -139,8 +139,8 @@ public final class ScriptGameAdapter extends AccessibilityService {
             }
         }
         return ScriptForegroundTarget.isTargetForeground(
-                activeWindowPackage, activeWindowTitle, targetGameLabel,
-                event.packageName, event.className, eventWindowActive,
+                currentWindow, activeWindowPackage, activeWindowTitle, targetGameLabel,
+                event.packageName, event.className,
                 virtualTopPackage, TARGET_GAME_PACKAGE);
     }
 
@@ -205,9 +205,10 @@ public final class ScriptGameAdapter extends AccessibilityService {
     }
 
     private void requireTargetGameForeground() {
-        ScriptForegroundGate.requireReady(
-                this::hasTargetGameForeground,
-                "沙箱中的汉化版封神榜不在前台，已阻止截图、输入和触控");
+        if (!hasTargetGameForeground()) {
+            throw new IllegalStateException("沙箱中的汉化版封神榜不在前台，已阻止截图、输入和触控（"
+                    + describeForegroundState() + "）");
+        }
     }
 
     public boolean pressHome() {

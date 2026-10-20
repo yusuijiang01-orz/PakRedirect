@@ -45,19 +45,24 @@ final class ScriptForegroundTarget {
         return targetPackage.equals(eventPackage) || isProxyActivity(eventClass);
     }
 
-    static boolean isTargetForeground(String activeWindowPackage,
+    static boolean isTargetForeground(boolean activeApplicationWindow,
+                                      String activeWindowPackage,
                                       String activeWindowTitle,
                                       String targetWindowTitle,
                                       String eventPackage,
                                       String eventClass,
-                                      boolean eventWindowActive,
                                       String virtualTopPackage,
                                       String targetPackage) {
-        if (isActiveSandboxGameWindow(activeWindowPackage, eventPackage, eventClass,
-                activeWindowTitle, targetWindowTitle, virtualTopPackage, targetPackage)) return true;
-        // An event cannot override a live window with a known root package.
-        return activeWindowPackage == null && isTarget(eventPackage, eventClass,
-                eventWindowActive, virtualTopPackage, targetPackage);
+        if (!activeApplicationWindow || targetPackage == null || targetPackage.isEmpty()) return false;
+        if (activeWindowPackage == null) {
+            // BlackBox may expose the active game window and title without a root node.
+            // A stale proxy event alone cannot identify that window.
+            return sameNonEmptyText(activeWindowTitle, targetWindowTitle)
+                    && targetPackage.equals(virtualTopPackage);
+        }
+        // A known root package takes precedence over the title and virtual activity.
+        return isActiveSandboxGameWindow(activeWindowPackage, eventPackage, eventClass,
+                activeWindowTitle, targetWindowTitle, virtualTopPackage, targetPackage);
     }
 
     private static boolean hasText(String value) {

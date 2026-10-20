@@ -77,10 +77,45 @@ public class ScriptForegroundTargetTest {
 
     @Test public void liveWorkbenchWindowCannotBeOverriddenByStaleProxyEvent() {
         assertFalse(ScriptForegroundTarget.isTargetForeground(
-                HOST, "RYLUX 脚本工作台", "封神榜手游", HOST, PROXY,
-                true, TARGET, TARGET));
+                true, HOST, "RYLUX 脚本工作台", "封神榜手游", HOST, PROXY,
+                TARGET, TARGET));
         assertTrue(ScriptForegroundTarget.isTargetForeground(
-                HOST, "封神榜手游", "封神榜手游", HOST,
-                "com.example.pakredirect.ScriptToolsActivity", false, TARGET, TARGET));
+                true, HOST, "封神榜手游", "封神榜手游", HOST,
+                "com.example.pakredirect.ScriptToolsActivity", TARGET, TARGET));
+    }
+
+    @Test public void nullRootRequiresLiveGameTitleAndVirtualTopTarget() {
+        assertTrue(ScriptForegroundTarget.isTargetForeground(
+                true, null, "封神榜手游", "封神榜手游", HOST, PROXY,
+                TARGET, TARGET));
+        assertFalse(ScriptForegroundTarget.isTargetForeground(
+                false, null, "封神榜手游", "封神榜手游", HOST, PROXY,
+                TARGET, TARGET));
+        assertFalse(ScriptForegroundTarget.isTargetForeground(
+                true, null, "RYLUX 脚本工作台", "封神榜手游", HOST, PROXY,
+                TARGET, TARGET));
+        assertFalse(ScriptForegroundTarget.isTargetForeground(
+                true, null, null, "封神榜手游", HOST, PROXY,
+                TARGET, TARGET));
+        assertFalse(ScriptForegroundTarget.isTargetForeground(
+                true, null, "封神榜手游", "", HOST, PROXY,
+                TARGET, TARGET));
+        assertFalse(ScriptForegroundTarget.isTargetForeground(
+                true, null, "封神榜手游", "封神榜手游", HOST, PROXY,
+                "com.example.othergame", TARGET));
+    }
+
+    @Test public void knownRootPackageTakesPriorityOverMatchingTitleAndVirtualTop() {
+        assertFalse(ScriptForegroundTarget.isTargetForeground(
+                true, "com.example.otherapp", "封神榜手游", "封神榜手游",
+                HOST, PROXY, TARGET, TARGET));
+    }
+
+    @Test public void directAndHostActiveWindowsStillPass() {
+        assertTrue(ScriptForegroundTarget.isTargetForeground(
+                true, TARGET, null, null, HOST, PROXY, null, TARGET));
+        assertTrue(ScriptForegroundTarget.isTargetForeground(
+                true, HOST, "封神榜手游", "封神榜手游", HOST, PROXY,
+                TARGET, TARGET));
     }
 }

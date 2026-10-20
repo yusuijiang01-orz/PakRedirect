@@ -28,6 +28,7 @@ sourceSets {
             include '**/ScriptExecutionControl.java'
             include '**/ScriptForegroundGate.java'
             include '**/ScriptForegroundTarget.java'
+            include '**/ScriptStartupTerms.java'
             include '**/ScriptHudStatus.java'
             include '**/RecoveredLuaTaskTest.java'
             include '**/LegacyLuaConfigTest.java'
@@ -37,6 +38,7 @@ sourceSets {
             include '**/ScriptExecutionControlTest.java'
             include '**/ScriptForegroundGateTest.java'
             include '**/ScriptForegroundTargetTest.java'
+            include '**/ScriptStartupTermsTest.java'
             include '**/ScriptHudStatusTest.java'
         }
         resources {
