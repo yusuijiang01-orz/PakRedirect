@@ -28,6 +28,7 @@ import java.io.FileOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
@@ -39,6 +40,8 @@ final class LegacyLuaRuntime {
     private static final String GAME_PACKAGE = "com.tepaylink.tamgioiphantranhmobile";
     private static final String VPN_PACKAGE = "com.github.kr328.clash";
     private static final int MAX_COLOR_MATCHES = 1024;
+    private static final long FOREGROUND_RETURN_TIMEOUT_MS = 30_000L;
+    private static final long SCREENSHOT_TIMEOUT_MS = 10_000L;
     private final Context context;
     private final ScriptExecutionControl control;
     private final JSONObject config;
@@ -147,6 +150,7 @@ final class LegacyLuaRuntime {
                     int x = mapper.toScreenX(args.arg(1).todouble());
                     int y = mapper.toScreenY(args.arg(2).todouble());
                     requireDisplayPoint(x, y, screen);
+                    awaitGameForeground();
                     boolean ok = ScriptGameAdapter.requireConnected(control).tap(x, y,
                             args.narg() >= 3 ? args.arg(3).optlong(80) : 80, 5000);
                     if (!ok) throw new LuaError("系统未接受点击手势");
@@ -166,6 +170,7 @@ final class LegacyLuaRuntime {
                     int y2 = mapper.toScreenY(args.arg(4).todouble());
                     requireDisplayPoint(x1, y1, screen);
                     requireDisplayPoint(x2, y2, screen);
+                    awaitGameForeground();
                     boolean ok = ScriptGameAdapter.requireConnected(control).swipe(x1, y1, x2, y2,
                             args.arg(5).optlong(300), 8000);
                     if (!ok) throw new LuaError("系统未接受滑动手势");
@@ -209,6 +214,7 @@ final class LegacyLuaRuntime {
                     int x2 = mapper.toScreenX(touchEndX), y2 = mapper.toScreenY(touchEndY);
                     requireDisplayPoint(x1, y1, screen);
                     requireDisplayPoint(x2, y2, screen);
+                    awaitGameForeground();
                     boolean ok = ScriptGameAdapter.requireConnected(control).swipe(
                             x1, y1, x2, y2, touchDurationMs, 8000);
                     if (!ok) throw new LuaError("系统未接受触控手势");
@@ -421,6 +427,7 @@ final class LegacyLuaRuntime {
             @Override public LuaValue call(LuaValue textValue) {
                 control.checkpoint();
                 try {
+                    awaitGameForeground();
                     boolean accepted = ScriptGameAdapter.requireConnected(control).setFocusedText(textValue.tojstring());
                     if (!accepted) throw new LuaError("当前页面没有可由无障碍服务编辑的输入框");
                     return LuaValue.TRUE;
@@ -577,6 +584,7 @@ final class LegacyLuaRuntime {
                 try {
                     Bitmap screen = frame();
                     LegacyCoordinateMapper mapper = mapperFor(screen);
+                    awaitGameForeground();
                     boolean clicked = ScriptGameAdapter.requireConnected(control).tap(
                             mapper.toScreenX(match.get("x").todouble()),
                             mapper.toScreenY(match.get("y").todouble()), 1000, 5000);
@@ -884,11 +892,25 @@ final class LegacyLuaRuntime {
     private void refreshFrame() {
         control.checkpoint();
         try {
-            Bitmap capture = ScriptGameAdapter.requireConnected(control).captureDisplay(10000);
+            awaitGameForeground();
+            Bitmap capture = ScriptForegroundGate.captureWithRecovery(
+                    remainingMs -> ScriptGameAdapter.requireConnected(control)
+                            .captureDisplay(Math.min(SCREENSHOT_TIMEOUT_MS, remainingMs)),
+                    ScriptGameAdapter::isTargetGameForeground, control::checkpoint,
+                    this::releaseFrame, this::onGameForegroundLost, this::onGameForegroundResumed,
+                    FOREGROUND_RETURN_TIMEOUT_MS, "沙箱游戏连续 30 秒不在前台，截图已停止等待");
             Bitmap old = latestFrame;
             latestFrame = capture;
             coordinateMapper = mapperFor(capture.getWidth(), capture.getHeight());
             if (old != null && !old.isRecycled()) old.recycle();
+        } catch (InterruptedException interrupted) {
+            control.checkpoint();
+            Thread.currentThread().interrupt();
+            throw new LuaError("等待沙箱游戏返回前台时被中断");
+        } catch (TimeoutException timeout) {
+            rethrowIfStopped();
+            throw new LuaError("截图失败：" + timeout.getMessage() + "（"
+                    + ScriptGameAdapter.foregroundDiagnostic() + "）");
         } catch (Exception error) {
             rethrowIfStopped();
             throw new LuaError("截图失败：" + ScriptRuntimeErrors.summarize(error));
@@ -896,12 +918,44 @@ final class LegacyLuaRuntime {
     }
 
     private Bitmap frame() {
+        awaitGameForeground();
         Bitmap current = latestFrame;
         if (current == null || current.isRecycled() || !captureHeld.get()) {
             refreshFrame();
             current = latestFrame;
         }
         return current;
+    }
+
+    /**
+     * A workbench or Android dialog can briefly take focus while the Lua worker is
+     * running. Keep the script cancellable while waiting, then discard cached
+     * pixels so the next operation uses a fresh frame from the game.
+     */
+    private void awaitGameForeground() {
+        try {
+            ScriptForegroundGate.awaitRecovery(ScriptGameAdapter::isTargetGameForeground,
+                    control::checkpoint, this::onGameForegroundLost,
+                    this::onGameForegroundResumed,
+                    FOREGROUND_RETURN_TIMEOUT_MS,
+                    "沙箱游戏连续 30 秒不在前台");
+        } catch (InterruptedException interrupted) {
+            control.checkpoint();
+            Thread.currentThread().interrupt();
+            throw new LuaError("等待沙箱游戏返回前台时被中断");
+        } catch (TimeoutException timeout) {
+            throw new LuaError(timeout.getMessage() + "，脚本已停止等待（"
+                    + ScriptGameAdapter.foregroundDiagnostic() + "）");
+        }
+    }
+
+    private void onGameForegroundLost() {
+        releaseFrame();
+        listener.onStatus("游戏暂时不在前台，等待游戏返回（可暂停或停止）");
+    }
+
+    private void onGameForegroundResumed() {
+        listener.onStatus("游戏已回到前台，继续执行脚本");
     }
 
     private LegacyCoordinateMapper mapperFor(Bitmap frame) {

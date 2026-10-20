@@ -680,6 +680,86 @@ public final class RecoveredLuaTaskTest {
         assertTrue("The localized login helper must require all positioned anchors", clicks.isEmpty());
     }
 
+    @Test public void localizedCharacterSelectConfirmsOcrPositionWhenLegacyTemplateMisses() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        List<String> clicks = new ArrayList<>();
+        LuaTable rows = new LuaTable();
+        rows.set(1, ocrRow("返回", 1084, 646));
+        rows.set(2, ocrRow(" 确认 ", 1086, 568));
+        rows.set(3, ocrRow("创建角色", 189, 569));
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.ZERO; }
+        });
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot().resolve(module), module);
+        }
+        globals.set("登录_处理超时", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.FALSE; }
+        });
+        globals.set("找到点击", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue ignored) { return LuaValue.FALSE; }
+        });
+        globals.set("找到", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue ignored) { return LuaValue.FALSE; }
+        });
+        globals.set("登录_汉化选区确认", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.FALSE; }
+        });
+        globals.set("登录_汉化账号确认", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.FALSE; }
+        });
+        globals.set("tomocrtexttable", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return rows; }
+        });
+        globals.set("点击", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                clicks.add(args.arg(1).tojstring() + "|" + args.arg(2).toint()
+                        + "|" + args.arg(3).toint());
+                return LuaValue.TRUE;
+            }
+        });
+
+        globals.get("登录_判断一轮").checkfunction().call();
+        assertEquals("The translated role screen should tap the observed confirmation button",
+                Arrays.asList("@@汉化角色确认|1086|568"), clicks);
+    }
+
+    @Test public void localizedCharacterSelectRejectsUnrelatedConfirmAndIncompleteAnchors() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        AtomicReference<LuaTable> rows = new AtomicReference<>(new LuaTable());
+        List<String> clicks = new ArrayList<>();
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.ZERO; }
+        });
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot().resolve(module), module);
+        }
+        globals.set("tomocrtexttable", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return rows.get(); }
+        });
+        globals.set("点击", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                clicks.add(args.arg(1).tojstring());
+                return LuaValue.TRUE;
+            }
+        });
+        LuaFunction confirmRole = globals.get("登录_汉化角色确认").checkfunction();
+
+        LuaTable unrelated = new LuaTable();
+        unrelated.set(1, ocrRow("确认", 1086, 568));
+        rows.set(unrelated);
+        assertFalse("A confirmation button alone must never select a character",
+                confirmRole.call().toboolean());
+
+        LuaTable missingReturn = new LuaTable();
+        missingReturn.set(1, ocrRow("创建角色", 189, 569));
+        missingReturn.set(2, ocrRow("确认", 1086, 568));
+        rows.set(missingReturn);
+        assertFalse("The role page requires its lower-right return control as well",
+                confirmRole.call().toboolean());
+        assertTrue("Unrelated and incomplete pages must not receive a tap", clicks.isEmpty());
+    }
+
     @Test public void localizedLoginTimeoutClosesBusyDialogAndWaitsBeforeRetry() throws Exception {
         Globals globals = JsePlatform.standardGlobals();
         AtomicLong clock = new AtomicLong(1_000);

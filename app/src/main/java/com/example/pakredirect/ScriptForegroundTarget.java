@@ -67,11 +67,17 @@ final class ScriptForegroundTarget {
                                       String hostTopActivityClass,
                                       String virtualTopPackage,
                                       String targetPackage) {
-        if (!activeApplicationWindow || targetPackage == null || targetPackage.isEmpty()) return false;
+        if (targetPackage == null || targetPackage.isEmpty()) return false;
         // On some Android/BlackBox builds AccessibilityWindowInfo.getRoot()
         // returns a placeholder node whose package is "/". In that case the
         // root package is unavailable, but the active Android proxy and
         // BlackBox virtual top activity still identify the guest unambiguously.
+        // Do not require the accessibility window's isActive() snapshot here:
+        // BlackBox can briefly report no active application window during a
+        // focus handoff, while ActivityManager and BlackBox already agree that
+        // the guest proxy is the actual foreground activity. This is the same
+        // concrete state reported by diagnostics as activeWindow="/" with the
+        // proxy at hostTop and the target package at virtualTop.
         if (isUnavailableWindowPackage(activeWindowPackage)
                 && isProxyActivity(hostTopActivityClass)
                 && targetPackage.equals(virtualTopPackage)) return true;
@@ -82,6 +88,7 @@ final class ScriptForegroundTarget {
         if (isHostPackage(activeWindowPackage)
                 && isProxyActivity(hostTopActivityClass)
                 && targetPackage.equals(virtualTopPackage)) return true;
+        if (!activeApplicationWindow) return false;
         if (activeWindowPackage == null) {
             // BlackBox may expose the active game window and title without a root node.
             // A stale proxy event alone cannot identify that window.

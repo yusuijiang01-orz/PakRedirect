@@ -30,6 +30,7 @@ sourceSets {
             include '**/ScriptAdapterConnectionGate.java'
             include '**/ScriptForegroundGate.java'
             include '**/ScriptForegroundTarget.java'
+            include '**/TargetGameNotForegroundException.java'
             include '**/CnDownloadRouter.java'
             include '**/ScriptStartupTerms.java'
             include '**/ScriptHudStatus.java'

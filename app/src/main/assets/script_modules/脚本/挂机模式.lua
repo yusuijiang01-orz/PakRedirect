@@ -1621,6 +1621,40 @@ function L0_1()
 end
 _ENV["登录_汉化账号确认"] = L0_1
 
+-- A translated character screen is not covered by the old Vietnamese image
+-- template. Require its two other positioned controls before tapping 确认.
+function L0_1()
+  local ok, rows = pcall(tomocrtexttable, 55, 495, 1190, 705)
+  if not ok or type(rows) ~= "table" then
+    return false
+  end
+  local createX, createY, confirmX, confirmY, returnX, returnY
+  for _, row in pairs(rows) do
+    if type(row) == "table" then
+      local x, y = tonumber(row.x), tonumber(row.y)
+      local text = tostring(row.words or row.text or ""):gsub("%s", ""):gsub("　", "")
+      if x ~= nil and y ~= nil then
+        if text == "创建角色" and x >= 80 and x <= 330 and y >= 515 and y <= 625 then
+          createX, createY = x, y
+        elseif text == "确认" and x >= 950 and x <= 1160 and y >= 515 and y <= 610 then
+          confirmX, confirmY = x, y
+        elseif text == "返回" and x >= 950 and x <= 1160 and y >= 610 and y <= 700 then
+          returnX, returnY = x, y
+        end
+      end
+    end
+  end
+  if createX == nil or createY == nil or confirmX == nil or confirmY == nil
+      or returnX == nil or returnY == nil
+      or confirmY + 35 > returnY or returnY - confirmY > 120
+      or math.abs(confirmX - returnX) > 85 then
+    return false
+  end
+  _ENV["点击"]("@@汉化角色确认", math.floor(confirmX), math.floor(confirmY), 1000)
+  return true
+end
+_ENV["登录_汉化角色确认"] = L0_1
+
 -- The localized game can leave a blocking "正在登录游戏" dialog open forever.
 -- Watch it with a bounded timeout, close it using its visible 返回 button, then
 -- back off before letting the normal role-selection logic retry the login.
@@ -1711,6 +1745,8 @@ function L0_1()
   end
   if _ENV["找到"](tz["选角色页面"]) then
     _ENV["点击"]("@@确定角色", 1090, 551, 1000)
+  else
+    _ENV["登录_汉化角色确认"]()
   end
 end
 

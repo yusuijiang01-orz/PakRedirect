@@ -142,13 +142,20 @@ public final class ScriptControlOverlayService extends Service {
         statusLabel.setMaxLines(1);
         statusLabel.setEllipsize(TextUtils.TruncateAt.END);
         statusLabel.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-        statusLabel.setContentDescription("运行状态；点击查看完整诊断");
+        statusLabel.setContentDescription("运行状态；点击复制完整诊断并留在游戏");
         statusLabel.setOnClickListener(v -> {
             noteInteraction();
-            Intent open = new Intent(this, ScriptToolsActivity.class);
-            open.putExtra(ScriptToolsActivity.EXTRA_SHOW_RUNTIME_DIAGNOSTIC, true);
-            open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-            startActivity(open);
+            String detail = getSharedPreferences("script_runtime_diagnostics", MODE_PRIVATE)
+                    .getString("last_error", "尚无脚本失败诊断记录。");
+            android.content.ClipboardManager clipboard = (android.content.ClipboardManager)
+                    getSystemService(CLIPBOARD_SERVICE);
+            if (clipboard != null) {
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText(
+                        "RYLUX script diagnostic", detail));
+                Toast.makeText(this, "完整脚本诊断已复制；游戏仍保持在前台", Toast.LENGTH_LONG).show();
+            } else {
+                Toast.makeText(this, detail, Toast.LENGTH_LONG).show();
+            }
         });
         header.addView(statusLabel, new LinearLayout.LayoutParams(0, dp(20), 1));
         panel.addView(header);

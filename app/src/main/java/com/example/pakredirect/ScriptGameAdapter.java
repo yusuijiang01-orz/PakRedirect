@@ -154,8 +154,11 @@ public final class ScriptGameAdapter extends AccessibilityService {
         }
         String virtualTopPackage = null;
         String hostTopActivityClass = null;
-        if (currentWindow && (ScriptForegroundTarget.isUnavailableWindowPackage(activeWindowPackage)
-                || getPackageName().equals(activeWindowPackage))) {
+        // Diagnostics print an empty package and title as "activeWindow=/" even
+        // when no application window is marked active. Check the two live top
+        // activities in that case as well; the foreground rule requires both.
+        if (!currentWindow || ScriptForegroundTarget.isUnavailableWindowPackage(activeWindowPackage)
+                || getPackageName().equals(activeWindowPackage)) {
             try {
                 ComponentName top = BActivityManager.get().getTopActivity(0);
                 if (top != null) virtualTopPackage = top.getPackageName();
@@ -253,7 +256,7 @@ public final class ScriptGameAdapter extends AccessibilityService {
 
     private void requireTargetGameForeground() {
         if (!hasTargetGameForeground()) {
-            throw new IllegalStateException("沙箱中的汉化版封神榜不在前台，已阻止截图、输入和触控（"
+            throw new TargetGameNotForegroundException("沙箱中的汉化版封神榜不在前台，已阻止截图、输入和触控（"
                     + describeForegroundState() + "）");
         }
     }

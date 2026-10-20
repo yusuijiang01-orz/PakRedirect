@@ -122,6 +122,16 @@ public class ScriptForegroundTargetTest {
         assertTrue(ScriptForegroundTarget.isTargetForeground(
                 true, "/", "", "封神榜手游", HOST,
                 "com.jxclient.release.jxclient#1469", PROXY, TARGET, TARGET));
+        // BlackBox can transiently mark every accessibility app window inactive
+        // while the host proxy and guest virtual activity are already foreground.
+        assertTrue(ScriptForegroundTarget.isTargetForeground(
+                false, "/", "", "封神榜手游", HOST,
+                "com.jxclient.release.jxclient#1469", PROXY, TARGET, TARGET));
+        // No active application window leaves the adapter's package unset;
+        // diagnostics render that empty package/title pair as "activeWindow=/".
+        assertTrue(ScriptForegroundTarget.isTargetForeground(
+                false, null, null, "封神榜手游", HOST,
+                "com.jxclient.release.jxclient#1469", PROXY, TARGET, TARGET));
         assertFalse(ScriptForegroundTarget.isTargetForeground(
                 true, "/", "", "封神榜手游", HOST,
                 "com.jxclient.release.jxclient#1469", "com.example.pakredirect.ScriptToolsActivity",
