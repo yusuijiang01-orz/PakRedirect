@@ -25,6 +25,8 @@ import android.widget.FrameLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import top.niunaijun.blackbox.BlackBoxCore;
+
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -301,9 +303,34 @@ public final class ScriptControlOverlayService extends Service {
             return;
         }
         restartRequested = true;
-        if (statusLabel != null) statusLabel.setText("正在重新启动上次方案…");
+        if (statusLabel != null) statusLabel.setText("正在切回沙箱游戏并启动上次方案…");
         mainHandler.postDelayed(() -> restartRequested = false, 10_000L);
-        sendRuntimeAction(ScriptRuntimeService.ACTION_START, config);
+        // The workbench may still own Android's foreground task even though the
+        // guest game remains BlackBox's virtual top activity. Bring the same
+        // sandboxed game proxy to the foreground before the runtime gate checks
+        // the active window; never open ScriptToolsActivity for a restart.
+        Thread launch = new Thread(() -> {
+            try {
+                if (!BlackBoxCore.get().launchApk(ScriptGameAdapter.TARGET_GAME_PACKAGE, 0)) {
+                    throw new IllegalStateException("无法前置沙箱中的封神榜");
+                }
+                mainHandler.post(() -> {
+                    if (restartRequested) {
+                        sendRuntimeAction(ScriptRuntimeService.ACTION_START, config);
+                    }
+                });
+            } catch (RuntimeException error) {
+                mainHandler.post(() -> {
+                    restartRequested = false;
+                    String message = error.getMessage() == null
+                            ? "无法前置沙箱中的封神榜" : error.getMessage();
+                    if (statusLabel != null) statusLabel.setText("重启失败 · " + message);
+                    Toast.makeText(this, "无法启动沙箱游戏：" + message, Toast.LENGTH_LONG).show();
+                });
+            }
+        }, "RYLUX-Overlay-Restart");
+        launch.setDaemon(true);
+        launch.start();
     }
 
     private void sendRuntimeAction(String action) { sendRuntimeAction(action, null); }
