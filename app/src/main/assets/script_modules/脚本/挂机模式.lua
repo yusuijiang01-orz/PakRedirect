@@ -112,6 +112,33 @@ end
 
 _ENV["检测挂机长时间不移动"] = L0_1
 
+-- The recovered color templates do not cover every localized rendering of the
+-- party panel. Confirm the distinctive title and nearby-player tab with OCR so
+-- the shared recovery handler can close the modal instead of leaving the game
+-- trapped behind it.
+function L0_1()
+  if _ENV["找到"](tz["组队_附近玩家页面"]) or _ENV["找到"](tz["组队_附近队伍页面"]) then
+    return true
+  end
+  local titleOk, title = pcall(tomocrtext, 330, 35, 410, 100)
+  if not titleOk or string.find(tostring(title or ""), "队伍", 1, true) == nil then
+    return false
+  end
+  local tabOk, tab = pcall(tomocrtext, 1035, 185, 1190, 260)
+  if not tabOk then return false end
+  tab = tostring(tab or "")
+  return string.find(tab, "附近玩家", 1, true) ~= nil
+      or string.find(tab, "附近队伍", 1, true) ~= nil
+end
+_ENV["组队_页面已打开"] = L0_1
+
+function L0_1()
+  if not _ENV["组队_页面已打开"]() then return false end
+  _ENV["点击"]("@@关闭队伍页面", 1203, 130, 1000)
+  return true
+end
+_ENV["组队_关闭页面"] = L0_1
+
 function L0_1()
   local 返回值 = false
   local tt1 = tickCount()
@@ -154,9 +181,7 @@ function L0_1()
   if _ENV["找到"](tz["负重满了提示"]) then
     toast("负重满了提示")
   end
-  if _ENV["找到"](tz["组队_附近玩家页面"]) or _ENV["找到"](tz["组队_附近队伍页面"]) then
-    _ENV["点击"]("@@附近玩家页面", 1193, 130, 1000)
-  end
+  _ENV["组队_关闭页面"]()
   _ENV["找到点击"]("@@行为设置页面关闭按钮", tz["行为设置页面关闭按钮"])
   _ENV["找到点击"]("@@不更新", tz["新版本更新按钮"], {
     735,
@@ -2039,9 +2064,9 @@ function L0_1()
         elseif _ENV["找到点击"]("@@有人申请", tz["有人申请组队提示按钮"]) then
         elseif _ENV["没有创建队伍"]() then
           _ENV["点击"]("@@点队伍按钮", 1114, 556, 2000)
-          if _ENV["找到"](tz["组队_附近玩家页面"]) then
+          if _ENV["组队_页面已打开"]() then
             _ENV["点击"]("@@点创建队伍按钮", 909, 638, 1500)
-            _ENV["点击"]("@@关闭队伍", 1203, 130, 1000)
+            _ENV["组队_关闭页面"]()
           end
         end
       end
@@ -2060,7 +2085,7 @@ function L0_1()
               _ENV["点击"]("@@打开队伍", 1118, 556, 2000)
             end
           end
-          if _ENV["找到"](tz["组队_附近玩家页面"]) or _ENV["找到"](tz["组队_附近队伍页面"]) then
+          if _ENV["组队_页面已打开"]() then
             local 队长名称 = _ENV["组队_识别队长名称"]()
             local 队长名称2 = ""
             local 判断结果 = _ENV["组队_判断队长名称"](队长名称, 队长名称2, _ENV["队长名称数组"])
@@ -2081,9 +2106,7 @@ function L0_1()
               toast(判断结果 == "未配置" and "未填写队长名，跳过队长校验" or "未识别到队长名，跳过解散操作")
             end
           end
-          if _ENV["找到"](tz["组队_附近玩家页面"]) or _ENV["找到"](tz["组队_附近队伍页面"]) then
-            _ENV["点击"]("@@关闭队伍页面", 1201, 126, 1500)
-          end
+          _ENV["组队_关闭页面"]()
           _ENV["上次检测队长名字"] = tickCount()
         end
         if _ENV["上次检测是否有队伍"] == nil then
@@ -2093,10 +2116,10 @@ function L0_1()
           if _ENV["在主页面"]() and _ENV["没有创建队伍"]() then
             _ENV["点击"]("@@点队伍按钮", 1114, 556, 2000)
           end
-          if _ENV["找到"](tz["组队_附近玩家页面"]) then
+          if _ENV["组队_页面已打开"]() then
             _ENV["点击"]("@@去附近队伍页面", 1141, 323, 1500)
           end
-          if _ENV["找到"](tz["组队_附近队伍页面"]) then
+          if _ENV["组队_页面已打开"]() then
             local 找到队长 = false
             local tb = _ENV["组队_识别所有队伍名字"](576, 186, 626, 525)
             for i = 1, #tb do
@@ -2144,9 +2167,7 @@ function L0_1()
             else
               _ENV["队员找不到队长组队次数"] = 0
             end
-            if _ENV["找到"](tz["组队_附近队伍页面"]) then
-              _ENV["点击"]("@@关闭队伍 应该没有组队成功", 1203, 130, 1000)
-            end
+            _ENV["组队_关闭页面"]()
           _ENV["上次检测是否有队伍"] = tickCount()
           end
         end

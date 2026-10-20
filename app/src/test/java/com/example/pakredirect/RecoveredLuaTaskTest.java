@@ -377,6 +377,46 @@ public final class RecoveredLuaTaskTest {
                 !inspectionDue.call(LuaValue.valueOf(181001), LuaValue.valueOf(181501), LuaValue.valueOf("180")).toboolean());
     }
 
+    @Test public void localizedPartyPanelIsRecognizedByOcrAndClosedByRecoveryHandler() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        AtomicReference<String> title = new AtomicReference<>("队伍");
+        AtomicReference<String> tab = new AtomicReference<>("附近玩家");
+        List<String> clicks = new ArrayList<>();
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.ZERO; }
+        });
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot().resolve(module), module);
+        }
+        globals.set("找到", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue ignored) { return LuaValue.FALSE; }
+        });
+        globals.set("tomocrtext", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                return LuaValue.valueOf(args.arg(1).toint() < 500 ? title.get() : tab.get());
+            }
+        });
+        globals.set("点击", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                clicks.add(args.arg(1).tojstring() + "|" + args.arg(2).tojstring()
+                        + "|" + args.arg(3).tojstring());
+                return LuaValue.TRUE;
+            }
+        });
+
+        assertTrue("OCR should recognize the localized party page when legacy image templates miss",
+                globals.get("组队_页面已打开").checkfunction().call().toboolean());
+        assertTrue("The general recovery helper should close the recognized party modal",
+                globals.get("组队_关闭页面").checkfunction().call().toboolean());
+        assertEquals("@@关闭队伍页面|1203|130", clicks.get(0));
+
+        clicks.clear();
+        title.set("背包");
+        assertTrue("An unrelated page must not be classified as the party modal",
+                !globals.get("组队_关闭页面").checkfunction().call().toboolean());
+        assertTrue("Unrelated screens must not receive the party-page close tap", clicks.isEmpty());
+    }
+
     @Test public void recoveredPartyNameUsesOnlyConfidentOcrRows() throws Exception {
         Globals globals = JsePlatform.standardGlobals();
         AtomicReference<LuaTable> rows = new AtomicReference<>(new LuaTable());
