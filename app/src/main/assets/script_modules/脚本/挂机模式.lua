@@ -1457,7 +1457,7 @@ function L0_1()
   if not forgotOk or string.find(tostring(forgot or ""), "忘记密码", 1, true) == nil then
     return false
   end
-  local registerOk, register = pcall(tomocrtext, 1100, 160, 1240, 225)
+  local registerOk, register = pcall(tomocrtext, 1100, 220, 1240, 275)
   if not registerOk or string.find(tostring(register or ""), "注册账号", 1, true) == nil then
     return false
   end

@@ -468,6 +468,7 @@ public final class RecoveredLuaTaskTest {
         AtomicReference<String> account = new AtomicReference<>("sbs139502");
         AtomicReference<String> login = new AtomicReference<>("登录");
         List<String> clicks = new ArrayList<>();
+        List<String> crops = new ArrayList<>();
         globals.set("tickCount", new ZeroArgFunction() {
             @Override public LuaValue call() { return LuaValue.ZERO; }
         });
@@ -478,6 +479,7 @@ public final class RecoveredLuaTaskTest {
             @Override public Varargs invoke(Varargs args) {
                 int x = args.arg(1).toint();
                 int y = args.arg(2).toint();
+                crops.add(x + "|" + y + "|" + args.arg(3).toint() + "|" + args.arg(4).toint());
                 if (x >= 1000) return LuaValue.valueOf(y < 150 ? forgot.get() : register.get());
                 if (x < 480) return LuaValue.valueOf(account.get());
                 return LuaValue.valueOf(login.get());
@@ -494,6 +496,8 @@ public final class RecoveredLuaTaskTest {
         assertTrue("The known localized login page with a saved account should submit once",
                 globals.get("登录_汉化账号确认").checkfunction().call().toboolean());
         assertEquals("@@汉化账号密码登录|660|525", clicks.get(0));
+        assertTrue("The OCR crop must include the real registered-account label position",
+                crops.contains("1100|220|1240|275"));
 
         clicks.clear();
         account.set("   ");
