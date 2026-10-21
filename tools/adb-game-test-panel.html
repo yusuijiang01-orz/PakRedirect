@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RYLUX 游戏指令测试台</title>
+  <style>
+    :root{color-scheme:dark;--bg:#101216;--card:#1c2028;--line:#303641;--muted:#a0a8b7;--blue:#486eff;--green:#43c58b;--red:#ff7777;font:15px/1.45 system-ui,"Microsoft YaHei",sans-serif}
+    *{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;background:radial-gradient(1000px 500px at 50% -200px,#28324a,var(--bg));color:#f1f3f8}
+    main{max-width:1120px;margin:0 auto;padding:24px 18px 48px}header{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:18px}
+    h1{font-size:23px;margin:0 0 4px}.sub,.hint{color:var(--muted);font-size:13px}.badge{border:1px solid var(--line);border-radius:999px;padding:7px 12px;font-size:12px;color:var(--muted);white-space:nowrap}
+    .layout{display:grid;grid-template-columns:350px 1fr;gap:16px}.stack{display:grid;gap:14px;align-content:start}.card{background:rgba(28,32,40,.96);border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:0 10px 30px #0002}.card h2{font-size:15px;margin:0 0 12px}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}.btn{border:1px solid #394253;background:#252b35;color:#fff;border-radius:11px;min-height:43px;padding:9px 11px;font:inherit;cursor:pointer;text-align:center}.btn:hover{border-color:#6b88ff;background:#2d3545}.btn.primary{background:var(--blue);border-color:var(--blue)}.btn:disabled{opacity:.5;cursor:not-allowed}
+    .target{margin-top:10px;display:flex;gap:8px}.target .btn{flex:1}.divider{height:1px;background:var(--line);margin:14px 0}.note{padding:10px 12px;border-radius:10px;background:#191d24;color:#c4cad4;font-size:12px}
+    #connection{margin-top:10px;padding:10px 12px;border-radius:10px;background:#171a20;color:var(--muted);font-size:12px}#connection.ok{color:#8ee2b9}#connection.bad{color:#ffadad}
+    #preview{display:block;width:100%;min-height:220px;max-height:520px;object-fit:contain;background:#090a0d;border:1px solid var(--line);border-radius:12px}#preview[hidden]{display:none}#empty{display:grid;place-items:center;min-height:220px;color:#777f8d;border:1px dashed var(--line);border-radius:12px}
+    .screen-wrap{position:relative}.screen-wrap img[src=""]{display:none}.toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:12px}#frameInfo{font-size:12px;color:var(--muted)}
+    .workbench{margin:0 0 16px}.tabs{display:flex;gap:8px;overflow:auto;padding:2px 0 12px}.tab{flex:0 0 auto;min-width:78px}.tab.active{background:var(--blue);border-color:var(--blue)}.wb-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(280px,.85fr);gap:14px}.field-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.field{display:grid;gap:5px;color:#dce1eb;font-size:13px}.field input,.field select,.field textarea,.profile-name{width:100%;border:1px solid #394253;background:#151920;color:#f1f3f8;border-radius:9px;padding:9px 10px;font:inherit}.field textarea{min-height:82px;resize:vertical}.field small{color:var(--muted);font-size:11px}.field.check{display:flex;align-items:center;gap:9px;min-height:42px;border:1px solid #303641;background:#191d24;border-radius:9px;padding:8px 10px}.field.check input{width:18px;height:18px;accent-color:var(--blue)}.wb-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.summary{white-space:pre-wrap;max-height:440px;overflow:auto;background:#11141a;border:1px solid var(--line);border-radius:10px;padding:12px;font-size:12px;color:#d4dae5}.status-pill{font-size:11px;padding:3px 8px;border:1px solid var(--line);border-radius:99px;color:var(--muted)}.status-pill.saved{color:#8ee2b9;border-color:#2b6c53}
+    table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;padding:8px 6px;border-bottom:1px solid #303641}th{color:var(--muted);font-weight:500}#ocrRows{max-height:260px;overflow:auto}.small{font-size:11px;color:var(--muted)}.score{font-variant-numeric:tabular-nums}
+    #log{height:200px;overflow:auto;background:#11141a;border:1px solid var(--line);border-radius:10px;padding:10px;font:12px/1.5 ui-monospace,Consolas,monospace;white-space:pre-wrap;color:#c8d0df}.log-ok{color:#88e0b0}.log-error{color:#ff9d9d}
+    @media(max-width:780px){main{padding:16px 12px 30px}.layout,.wb-grid{grid-template-columns:1fr}header{align-items:flex-start;flex-direction:column}.badge{white-space:normal}.card{padding:14px}.field-grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<main>
+  <header><div><h1>RYLUX 游戏指令测试台</h1><div class="sub">点击测试功能后，指令通过本机 ADB 发给沙箱游戏，并显示执行结果。</div></div><div class="badge">本地调试 · 不构建 APK</div></header>
+  <section class="card workbench" aria-label="脚本工作台网页复刻">
+    <div class="toolbar"><div><h2 style="margin:0 0 3px">脚本工作台</h2><div class="hint">七个配置页按 Android 工作台字段复刻。配置编辑保存到本机网页；“执行挂机路线”会单独发送已校准游戏指令。</div></div><span id="saveState" class="status-pill">未保存</span></div>
+    <div class="wb-grid"><div>
+      <div class="tabs" id="wbTabs" role="tablist"></div>
+      <div class="card" style="padding:14px;background:#171b22"><div class="toolbar"><div><h2 id="tabTitle" style="margin:0 0 3px">方案</h2><div id="tabHint" class="hint"></div></div></div>
+        <div id="profileControls" hidden><label class="field">当前方案名称<input id="profileName" class="profile-name" value="默认方案" maxlength="60" readonly></label><div class="wb-actions"><button class="btn" id="switchProfile">切换方案</button><button class="btn" id="saveAsProfile">另存为命名方案</button><button class="btn" id="saveLocal">保存到本机</button><button class="btn" id="exportJson">导出配置 JSON</button><button class="btn" id="loadJsonBtn">导入配置 JSON</button><input id="loadJson" type="file" accept="application/json,.json" hidden></div><div class="divider"></div></div>
+        <div id="fieldArea" class="field-grid"></div>
+        <div id="schemeActions" class="wb-actions" hidden><button class="btn" id="preflight">查看配置与运行前检查</button><button class="btn" id="previewOverlay">预览悬浮控制面板</button><button class="btn primary" id="prepareRun">保存方案并检查启动条件</button></div>
+        <div id="routeActions" hidden><div class="note" style="margin-top:12px">仅支持已校准地图“崇城野外”。点击后通过本机 ADB 打开大地图，明确切换到“地图”页签，再选择地图、填写当前坐标并提交游戏内前往；这会触发移动，不会运行 Lua。地图切换或抵达结果不会被假定成功。</div><div class="wb-actions"><button class="btn primary" id="runRoute">执行挂机路线</button><span id="routeState" class="hint" aria-live="polite"></span></div></div>
+      </div></div>
+      <aside><h2>本次方案检查</h2><div id="configSummary" class="summary">默认方案。修改字段后，这里会实时显示配置摘要和检查结果。</div><p class="note">“检查”与“预览”只在网页中运行。游戏指令通过本机 ADB 桥接执行：当前已校准背包、角色、技能、关闭面板，以及仅限“崇城野外”的挂机路线提交；路线提交会触发游戏内移动，不代表 Lua 启动或已抵达。其余设置仍只是网页配置。</p></aside>
+    </div>
+  </section>
+  <div class="layout">
+    <section class="stack">
+      <div class="card">
+        <h2>画面与识别指令</h2>
+        <div class="grid">
+          <button class="btn" data-command="status">检查游戏前台</button>
+          <button class="btn primary" data-command="screenshot">获取截图</button>
+          <button class="btn" data-command="ocr">扫描当前 OCR</button>
+          <button class="btn" data-command="templates">扫描登录素材</button>
+        </div>
+        <div id="connection">正在检查本机 ADB 与沙箱前台…</div>
+        <div class="divider"></div>
+        <h2>可见按钮点按测试</h2>
+        <div class="hint">点按背包、角色或技能时，会先快速判断当前游戏面板；如果已有面板打开，就先关闭再打开目标面板。</div>
+        <div class="target">
+          <button class="btn primary" data-command="tap_text" data-label="背包">点按背包</button>
+          <button class="btn" data-command="tap_text" data-label="角色">点按角色</button>
+          <button class="btn" data-command="tap_text" data-label="技能">点按技能</button>
+        </div>
+        <div class="target"><button class="btn" data-command="close_bag">关闭当前面板</button></div>
+        <p class="note">固定导航点位只在 1600×900 游戏 HUD 检测通过后使用；登录/选角等没有游戏导航栏的画面会拒绝触控。面板开关判断走快速像素检测，不跑 OCR。</p>
+      </div>
+      <div class="card"><h2>已发送的指令</h2><div id="log">等待指令…</div></div>
+    </section>
+    <section class="stack">
+      <div class="card">
+        <div class="toolbar"><h2 style="margin:0">沙箱当前画面</h2><span id="frameInfo">尚未截图</span></div>
+        <div class="screen-wrap"><div id="empty">点击“获取截图”查看游戏画面</div><img id="preview" alt="沙箱游戏截图" hidden></div>
+      </div>
+      <div class="card"><h2>OCR 结果</h2><div id="ocrRows" class="hint">尚未执行 OCR</div></div>
+      <div class="card"><h2>素材匹配结果</h2><div id="templateRows" class="hint">尚未扫描素材</div></div>
+    </section>
+  </div>
+</main>
+<script>
+const maps=['崇城野外','北海','燕山','西昆仑','昆仑山','首阳山','游魂关','苗疆','巨鹿','潼关','孟津','城塘关','荒漠','荒漠2','荒漠3','荒漠4','荒漠5','海1','海2','海3','海4','海5','火1','火2','火3','火4','火5','冰1','冰2','冰3','冰4','冰5','捆仙宫1','捆仙宫2','捆仙宫3','捆仙宫4','捆仙宫5','碧游宫1'];
+const pages=[
+ {name:'方案',hint:'选择与管理本机网页方案；方案检查不会启动 Lua。',fields:[]},
+ {name:'路线',hint:'路线执行目前只校准“崇城野外”；执行时会显式切到大地图的“地图”页签。其他地图仍可编辑和保存，但执行时会被拒绝。',fields:[['map','挂机点地图',0],['number','挂机点x','100','坐标',0,99999],['number','挂机点y','200','坐标',0,99999],['number','挂机不移动秒','60','秒',1,86400],['number','队员找不到队长组队就回家次数','2','次',1,999]]},
+ {name:'战斗',hint:'自动战斗、技能阈值和补给购买/出售阈值。',fields:[['switch','自动战斗',false],['number','战斗技能阈值','15','%',0,100],['number','装备耐久阈值','15','%',0,100],['switch','自动使用红药',false],['number','生命药触发阈值','30','%',0,100],['switch','自动使用蓝药',false],['number','法力药触发阈值','20','%',0,100],['switch','出售全部红',false],['number','红的数量高于','10','个',0,99999],['switch','出售全部蓝',false],['number','蓝的数量高于','10','个',0,99999],['switch','购买小红',false],['number','红的数量低于','10','个',0,99999],['number','购买红的数量','10','个',1,99999],['switch','购买小蓝',false],['number','蓝的数量低于','10','个',0,99999],['number','购买蓝的数量','10','个',1,99999]]},
+ {name:'背包',hint:'装备出售默认关闭；筛选值和保留条件按工作台字段保存。',fields:[['switch','保护装备不出售',true],['switch','检测修理装备',true],['number','背包保留重量','3','重量',0,99999],['number','背包保留格子','2','格',0,99999],['number','背包检测间隔秒','60','秒',1,86400],['switch','出售装备',false],['choice','出售装备品质上限',['不出售装备','仅白色','白色与绿色'],0],['switch','出售装备二次确认',true],['number','保留蓝条数量','4','条',0,99999],['choice','蓝条筛选模式',['不筛选','回蓝 ≥','魔法出招 ≥','武器出招 ≥'],1],['number','保留回蓝数值','10','点',0,99999],['number','保留魔法出招数值','15','点',0,99999],['number','保留武器出招数值','15','点',0,99999]]},
+ {name:'队伍',hint:'队长、队员和不组队三种模式；成员名称每行填写一个。',fields:[['choice','是否队长',['队长','队员','不组队'],0],['text','队长名','队长名（每行一个）'],['text','队员名','队员名（每行一个）'],['number','检测队长名字频率秒','180','秒',1,86400],['number','检测是否有队伍频率秒','180','秒',1,86400]]},
+ {name:'交易',hint:'交易开关与清单配置；此网页不会自动出售或购买。',fields:[['map','卖货地图',0],['switch','允许出售物品',false],['text','出售物品清单','出售物品名称（每行一个）'],['number','出售物品数量阈值','10','个',1,99999],['switch','允许购买物品',false],['text','购买物品清单','购买物品名称（每行一个）'],['number','购买物品数量阈值','10','个',0,99999],['number','每次购买数量','10','个',1,99999]]},
+ {name:'设置',hint:'对应 Android 工作台齿轮页的本地配置字段。网页修改只存入浏览器方案，不会更改 RYLUX、引擎、VPN 或设备状态。',fields:[['choice','引擎模式',['手动截图与无障碍','Root','无障碍服务'],0],['text','远程调试主机','远程调试主机',false],['number','远程调试端口','10192','端口',1,65535],['switch','自动保存调试日志',true],['switch','日志行号文件名',true],['number','虚拟屏幕宽度','720','像素',1,16384],['number','虚拟屏幕高度','1280','像素',1,16384],['number','虚拟屏幕DPI','320','DPI',1,2000],['text','手机编号','手机编号',false],['switch','开启vpn',false]]}
+];
+const defaultProfile={name:'默认方案',values:{}};let profile={...defaultProfile,values:{}};let profiles={'默认方案':profile};let activePage=0;
+const tabHost=document.getElementById('wbTabs'),fieldArea=document.getElementById('fieldArea');
+function val(key,def){return Object.prototype.hasOwnProperty.call(profile.values,key)?profile.values[key]:def;}
+function markEdited(){document.getElementById('saveState').textContent='正在自动保存…';document.getElementById('saveState').classList.remove('saved');saveProfile();}
+function put(key,value){profile.values[key]=value;markEdited();}
+function inputField(spec){const [type,key,arg1,arg2,arg3,arg4]=spec;const wrap=document.createElement(type==='switch'?'label':'label');wrap.className='field'+(type==='switch'?' check':'');let control;
+ if(type==='switch'){control=document.createElement('input');control.type='checkbox';control.checked=Boolean(val(key,arg1));control.addEventListener('change',()=>put(key,control.checked));wrap.append(control,document.createTextNode(key));return wrap;}
+ const title=document.createElement('span');title.textContent=type==='number'?`${key} · ${arg2}`:type==='text'?arg1:key;wrap.append(title);
+ if(type==='number'){control=document.createElement('input');control.type='number';control.min=arg3;control.max=arg4;control.step='1';control.value=val(key,arg1);control.addEventListener('input',()=>put(key,control.value===''?'':Number(control.value)));control.addEventListener('change',()=>{const n=Math.min(Number(arg4),Math.max(Number(arg3),Number(control.value)||Number(arg3)));control.value=n;put(key,n);});}
+ else if(type==='choice'||type==='map'){control=document.createElement('select');const options=type==='map'?maps:arg1;options.forEach((label,i)=>{const o=document.createElement('option');o.value=i;o.textContent=label;control.append(o);});control.value=val(key,type==='map'?0:arg2);control.addEventListener('change',()=>put(key,Number(control.value)));}
+ else if(type==='text'&&arg2===false){control=document.createElement('input');control.type='text';control.maxLength=120;control.placeholder=arg1;control.value=val(key,'');control.addEventListener('input',()=>put(key,control.value));}
+ else{control=document.createElement('textarea');control.maxLength=300;control.placeholder=arg1;control.value=val(key,'');control.addEventListener('input',()=>put(key,control.value));}
+ wrap.append(control);if(type==='text'&&arg2!==false){const small=document.createElement('small');small.textContent='每行一项，最多 300 字';wrap.append(small);}return wrap;}
+function renderPage(){const page=pages[activePage];document.getElementById('tabTitle').textContent=page.name;document.getElementById('tabHint').textContent=page.hint;document.getElementById('profileControls').hidden=activePage!==0;document.getElementById('schemeActions').hidden=activePage!==0;document.getElementById('routeActions').hidden=activePage!==1;fieldArea.replaceChildren();page.fields.forEach(spec=>fieldArea.append(inputField(spec)));[...tabHost.children].forEach((b,i)=>{b.classList.toggle('active',i===activePage);b.setAttribute('aria-selected',i===activePage?'true':'false');});document.getElementById('profileName').value=profile.name;renderSummary();}
+pages.forEach((page,i)=>{const b=document.createElement('button');b.className='btn tab';b.role='tab';b.textContent=page.name;b.addEventListener('click',()=>{activePage=i;renderPage();});tabHost.append(b);});
+function collectChecks(){const warnings=[];const v=profile.values;if(v['出售装备']&&Number(v['出售装备品质上限']||0)===0)warnings.push('已开启出售装备，但品质上限为“不出售装备”。');if(v['允许出售物品']&&!(v['出售物品清单']||'').trim())warnings.push('已开启普通物品出售，但出售清单为空。');if(v['允许购买物品']&&!(v['购买物品清单']||'').trim())warnings.push('已开启物品购买，但购买清单为空。');if(Number(v['挂机点x'])<0||Number(v['挂机点y'])<0)warnings.push('挂机坐标不能小于 0。');if(Number(v['是否队长'])===2&&((v['队长名']||'').trim()||(v['队员名']||'').trim()))warnings.push('当前选择“不组队”，队伍名称仍有填写。');return warnings;}
+function renderSummary(extra=''){const lines=[`方案：${profile.name||'未命名方案'}`,`目标游戏：封神榜手游（com.tepaylink.tamgioiphantranhmobile）`,`字段：${Object.keys(profile.values).length} 项已自定义，其余使用工作台默认值。`];const route=profile.values;lines.push(`路线：${maps[Number(route['挂机点地图']||0)]} (${route['挂机点x']??'100'}, ${route['挂机点y']??'200'})`);lines.push(`组队：${['队长','队员','不组队'][Number(route['是否队长']||0)]}`);const warnings=collectChecks();lines.push(warnings.length?`检查提示：\n• ${warnings.join('\n• ')}`:'配置检查：未发现明显冲突。');lines.push('游戏执行状态：尚未执行；网页配置不会代替 Lua 宿主。');if(extra)lines.push('',extra);document.getElementById('configSummary').textContent=lines.join('\n');}
+function saveProfile(){profile.name=document.getElementById('profileName').value.trim()||'默认方案';profiles[profile.name]=JSON.parse(JSON.stringify(profile));localStorage.setItem('rylux-web-workbench-profiles',JSON.stringify({selected:profile.name,profiles}));localStorage.setItem('rylux-web-workbench-profile',JSON.stringify(profile));document.getElementById('saveState').textContent='已保存到本机';document.getElementById('saveState').classList.add('saved');renderSummary('已保存于本机浏览器 localStorage。');}
+document.getElementById('switchProfile').addEventListener('click',()=>{const names=Object.keys(profiles);const selected=prompt(`输入要切换的方案名称：\n${names.join('\n')}`,profile.name);if(!selected)return;if(!profiles[selected]){renderSummary(`未找到方案“${selected}”。可先另存为新方案。`);return;}profile=JSON.parse(JSON.stringify(profiles[selected]));renderPage();document.getElementById('saveState').textContent='已切换方案';document.getElementById('saveState').classList.add('saved');});
+document.getElementById('saveAsProfile').addEventListener('click',()=>{const name=prompt('输入新方案名称：',`${profile.name} 副本`);if(!name||!name.trim())return;const clean=name.trim();if(profiles[clean]){renderSummary(`方案“${clean}”已存在，请使用其他名称。`);return;}profile.name=clean;document.getElementById('profileName').value=clean;saveProfile();});
+document.getElementById('saveLocal').addEventListener('click',saveProfile);
+document.getElementById('exportJson').addEventListener('click',()=>{profile.name=document.getElementById('profileName').value.trim()||'默认方案';const blob=new Blob([JSON.stringify({format:'rylux-script-workbench-v1',...profile},null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`${profile.name.replace(/[\\/:*?"<>|]/g,'_')}.json`;a.click();URL.revokeObjectURL(a.href);renderSummary('已导出 JSON 文件。');});
+document.getElementById('loadJsonBtn').addEventListener('click',()=>document.getElementById('loadJson').click());
+document.getElementById('loadJson').addEventListener('change',async e=>{const file=e.target.files?.[0];if(!file)return;try{const parsed=JSON.parse(await file.text());const values=parsed.values||parsed;profile={name:String(parsed.name||'导入方案'),values:{...values}};document.getElementById('saveState').textContent='已导入，未保存';document.getElementById('saveState').classList.remove('saved');renderPage();renderSummary(`已读取 ${file.name}；请检查后点击“保存到本机”。`);}catch(err){renderSummary(`导入失败：${err.message}`);}e.target.value='';});
+try{const bundle=JSON.parse(localStorage.getItem('rylux-web-workbench-profiles')||'null');if(bundle&&bundle.profiles&&typeof bundle.profiles==='object')profiles=bundle.profiles;else{const stored=JSON.parse(localStorage.getItem('rylux-web-workbench-profile')||'null');if(stored&&typeof stored==='object'){profile={name:String(stored.name||'默认方案'),values:stored.values&&typeof stored.values==='object'?stored.values:{}};profiles[profile.name]=profile;}}const selected=bundle?.selected;if(selected&&profiles[selected])profile=JSON.parse(JSON.stringify(profiles[selected]));else if(profiles[profile.name])profile=JSON.parse(JSON.stringify(profiles[profile.name]));document.getElementById('saveState').textContent='已加载本机方案';document.getElementById('saveState').classList.add('saved');}catch{}
+document.getElementById('preflight').addEventListener('click',()=>renderSummary('运行前检查已完成：方案字段与冲突提示已列出。网页没有启动 Lua、触控或交易指令。'));
+document.getElementById('prepareRun').addEventListener('click',()=>{saveProfile();const warnings=collectChecks();renderSummary((warnings.length?`网页侧检查发现 ${warnings.length} 项需处理：\n• ${warnings.join('\n• ')}`:'网页侧字段检查通过。')+'\n启动 Lua 仍需在 RYLUX 脚本工作台内确认。');});
+document.getElementById('previewOverlay').addEventListener('click',()=>renderSummary('悬浮窗预览：RYLUX · 启动 / 暂停 / 设置 / 退出。此处仅为网页预览，不会显示到游戏画面。'));
+renderPage();
+const logBox=document.getElementById('log'), connection=document.getElementById('connection');
+const buttons=[...document.querySelectorAll('button[data-command]')];
+function log(text,ok=true){const line=document.createElement('div');line.className=ok?'log-ok':'log-error';line.textContent=`[${new Date().toLocaleTimeString()}] ${text}`;if(logBox.textContent==='等待指令…')logBox.replaceChildren();logBox.append(line);logBox.scrollTop=logBox.scrollHeight;}
+function showFrame(data){if(!data?.image)return;const img=document.getElementById('preview');img.src=data.image;img.hidden=false;document.getElementById('empty').hidden=true;document.getElementById('frameInfo').textContent=`${data.width} × ${data.height} · ${data.evidence||''}`;}
+function showRows(rows){const box=document.getElementById('ocrRows');if(!rows?.length){box.textContent='没有识别到文字';return;}const table=document.createElement('table');table.innerHTML='<thead><tr><th>识别文字</th><th>置信度</th><th>中心坐标</th></tr></thead>';const body=document.createElement('tbody');for(const row of rows){const tr=document.createElement('tr');for(const value of [row.text,Number(row.confidence).toFixed(3),`${row.x}, ${row.y}`]){const td=document.createElement('td');td.textContent=value;tr.append(td);}body.append(tr);}table.append(body);box.replaceChildren(table);}
+let gameConnected=false,busy=false;
+async function checkStatus(){try{const r=await fetch('/api/status',{cache:'no-store'});const s=await r.json();gameConnected=Boolean(s.connected);connection.textContent=`${s.serial}: ${s.message}`;connection.className=gameConnected?'ok':'bad';buttons.forEach(b=>b.disabled=!gameConnected||busy);const routeButton=document.getElementById('runRoute');if(routeButton)routeButton.disabled=!gameConnected||busy;return gameConnected;}catch(e){gameConnected=false;connection.textContent=`本机桥接未连接：${e.message}`;connection.className='bad';buttons.forEach(b=>b.disabled=true);const routeButton=document.getElementById('runRoute');if(routeButton)routeButton.disabled=true;return false;}}
+document.getElementById('runRoute').addEventListener('click',async()=>{const button=document.getElementById('runRoute'),state=document.getElementById('routeState');if(button.disabled||busy)return;const mapName=maps[Number(val('挂机点地图',0))]||maps[0],x=Number(val('挂机点x','100')),y=Number(val('挂机点y','200'));const oldText=button.textContent;busy=true;button.disabled=true;buttons.forEach(b=>b.disabled=true);button.textContent='正在发送路线…';state.textContent=`发送中：${mapName} (${x}, ${y})`;log(`run_route: ${mapName} (${x}, ${y})`);try{const r=await fetch('/api/command',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command:'run_route',mapName,x,y})});const data=await r.json();if(!r.ok)throw new Error(data.error||data.result||'路线指令执行失败');showFrame(data);const result=data.result||'桥接已响应';state.textContent=`完成：${data.result||'桥接已响应'}${data.serverDurationMs!=null?` · ${data.serverDurationMs}ms`:''}`;log(`run_route: ${data.result||'桥接已响应'}${data.serverDurationMs!=null?` · 服务端 ${data.serverDurationMs}ms`:''}`,true);}catch(e){state.textContent=`失败：${e.message}`;log(`run_route 失败：${e.message}`,false);await checkStatus();}finally{busy=false;button.disabled=!gameConnected;button.textContent=oldText;buttons.forEach(b=>b.disabled=!gameConnected);}});
+async function run(button){if(button.disabled)return;busy=true;buttons.forEach(b=>b.disabled=true);const command=button.dataset.command;const label=button.dataset.label;log(label?`tap(calibrated:"${label}")`:`${command}`);try{const r=await fetch('/api/command',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command,label})});const data=await r.json();if(!r.ok)throw new Error(data.error||'执行失败');showFrame(data);if(data.target&&!data.image)document.getElementById('frameInfo').textContent='已发送点按；预览是上一次截图';if(data.rows)showRows(data.rows);if(data.matches){const box=document.getElementById('templateRows');box.replaceChildren();for(const m of data.matches){const row=document.createElement('div');row.className='note';row.style.marginBottom='6px';row.textContent=m.available?`${m.name} · score ${m.score} · ${m.matched?'匹配':'未匹配'} · (${m.x}, ${m.y})`:`${m.name} · 素材缺失`;box.append(row);}}log(`${data.command}: ${data.result} · 服务端 ${data.serverDurationMs}ms`,true);}catch(e){log(e.message,false);await checkStatus();}finally{busy=false;buttons.forEach(b=>b.disabled=!gameConnected);}}
+buttons.forEach(b=>b.addEventListener('click',()=>run(b)));checkStatus();
+</script>
+</body>
+</html>
