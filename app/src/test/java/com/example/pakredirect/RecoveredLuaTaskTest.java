@@ -812,6 +812,112 @@ public final class RecoveredLuaTaskTest {
                 !handleTimeout.call().toboolean());
     }
 
+    @Test public void repeatedStalledLoginDialogRetriesStayBoundedWithoutDuplicateTaps() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        AtomicLong clock = new AtomicLong(1_000);
+        AtomicInteger ocrReads = new AtomicInteger();
+        List<String> clicks = new ArrayList<>();
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.valueOf(clock.get()); }
+        });
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot().resolve(module), module);
+        }
+        LuaTable busyDialog = new LuaTable();
+        busyDialog.set(1, ocrRow("正在连接服务器", 640, 300));
+        busyDialog.set(2, ocrRow("返回", 640, 450));
+        globals.set("tomocrtexttable", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                ocrReads.incrementAndGet();
+                return busyDialog;
+            }
+        });
+        globals.set("点击", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                clicks.add(args.arg(1).tojstring() + "|" + args.arg(2).toint()
+                        + "|" + args.arg(3).toint());
+                return LuaValue.TRUE;
+            }
+        });
+        globals.set("toast", noOpFunction());
+        LuaFunction handleTimeout = globals.get("登录_处理超时").checkfunction();
+        assertTrue(handleTimeout.call().toboolean());
+
+        long[] timeoutAt = {13_000, 25_000, 39_000, 57_000, 75_000};
+        long[] retryAt = {15_000, 29_000, 47_000, 65_000, 83_000};
+        for (int i = 0; i < timeoutAt.length; i++) {
+            clock.set(timeoutAt[i]);
+            assertTrue(handleTimeout.call().toboolean());
+            assertEquals("Each stalled dialog gets one close action", i + 1, clicks.size());
+            assertEquals("Close must use the recognized return button",
+                    "@@登录超时关闭提示|640|450", clicks.get(i));
+            assertEquals("Retry delay must be 2, 4, then capped at 8 seconds",
+                    retryAt[i], globals.get("登录_重试允许时间").tolong());
+            int readsBeforeBackoff = ocrReads.get();
+            clock.set(retryAt[i] - 1);
+            assertTrue(handleTimeout.call().toboolean());
+            assertEquals("Backoff must suppress duplicate closes", i + 1, clicks.size());
+            assertEquals("Backoff must skip OCR and other login actions",
+                    readsBeforeBackoff, ocrReads.get());
+            clock.set(retryAt[i]);
+            assertTrue("OCR may retry when the bounded backoff expires",
+                    handleTimeout.call().toboolean());
+            assertTrue("A new dialog observation must occur after backoff",
+                    ocrReads.get() > readsBeforeBackoff);
+            assertEquals("Retry starts a fresh timeout instead of closing immediately",
+                    i + 1, clicks.size());
+        }
+    }
+
+    @Test public void stalledLoginWithoutReadableReturnNeverUsesGuessedCoordinate() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        AtomicLong clock = new AtomicLong(1_000);
+        AtomicReference<LuaTable> rows = new AtomicReference<>(new LuaTable());
+        AtomicBoolean unreadable = new AtomicBoolean();
+        List<String> clicks = new ArrayList<>();
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.valueOf(clock.get()); }
+        });
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot().resolve(module), module);
+        }
+        globals.set("tomocrtexttable", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                if (unreadable.get()) throw new org.luaj.vm2.LuaError("OCR unavailable");
+                return rows.get();
+            }
+        });
+        globals.set("点击", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                clicks.add(args.arg(1).tojstring());
+                return LuaValue.TRUE;
+            }
+        });
+        globals.set("toast", noOpFunction());
+        LuaFunction handleTimeout = globals.get("登录_处理超时").checkfunction();
+        assertFalse("Absent modal OCR must not trigger a return tap", handleTimeout.call().toboolean());
+        unreadable.set(true);
+        clock.set(3_000);
+        assertFalse("Unreadable modal OCR must not trigger a return tap", handleTimeout.call().toboolean());
+        assertTrue(clicks.isEmpty());
+
+        unreadable.set(false);
+        LuaTable busyWithoutReturn = new LuaTable();
+        busyWithoutReturn.set(1, ocrRow("正在登录游戏", 640, 300));
+        rows.set(busyWithoutReturn);
+        clock.set(5_000);
+        assertTrue(handleTimeout.call().toboolean());
+        clock.set(17_000);
+        assertTrue("A recognized busy modal still blocks other login actions",
+                handleTimeout.call().toboolean());
+        assertTrue("No guessed return coordinate may be tapped", clicks.isEmpty());
+
+        busyWithoutReturn.set(2, ocrRow("返回", 640, 450));
+        clock.set(19_000);
+        assertTrue(handleTimeout.call().toboolean());
+        assertEquals(Arrays.asList("@@登录超时关闭提示"), clicks);
+    }
+
     @Test public void localizedLoginMatchesObservedRapidOcrRowsFromCurrentLoginScreenshot() throws Exception {
         Globals globals = JsePlatform.standardGlobals();
         LuaTable rows = new LuaTable();

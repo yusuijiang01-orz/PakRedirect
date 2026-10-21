@@ -1655,7 +1655,7 @@ function L0_1()
 end
 _ENV["登录_汉化角色确认"] = L0_1
 
--- The localized game can leave a blocking "正在登录游戏" dialog open forever.
+-- The localized game can leave a blocking login/connection dialog open forever.
 -- Watch it with a bounded timeout, close it using its visible 返回 button, then
 -- briefly back off before the normal role-selection logic retries the login.
 _ENV["登录_弹窗检测中"] = false
@@ -1699,7 +1699,9 @@ function L0_1()
       end
     end
   end
-  if string.find(pageText, "正在登录", 1, true) == nil then
+  local loginBusy = string.find(pageText, "正在登录", 1, true) ~= nil
+      or string.find(pageText, "正在连接服务器", 1, true) ~= nil
+  if not loginBusy then
     local lastSeen = tonumber(_ENV["登录_弹窗最后看到"])
     if _ENV["登录_弹窗检测中"] and lastSeen ~= nil and now - lastSeen > 8000 then
       _ENV["登录_弹窗检测中"] = false
@@ -1712,14 +1714,17 @@ function L0_1()
   if _ENV["登录_弹窗开始时间"] == nil then
     _ENV["登录_弹窗开始时间"] = now
   end
-  -- A recognized "正在登录游戏" modal with no transition gets one bounded
-  -- retry after 10 seconds instead of trapping unattended runs for 45 seconds.
+  -- A recognized localized login/connection modal with no transition gets one
+  -- bounded retry after 10 seconds instead of trapping unattended runs.
   if now - tonumber(_ENV["登录_弹窗开始时间"]) < 10000 then
     return true
   end
-  -- The screenshot-confirmed dialog's centered 返回 button is at roughly
-  -- (640, 450) in the game's 1280x720 reference coordinates.
-  _ENV["点击"]("@@登录超时关闭提示", returnX or 640, returnY or 450, 1000)
+  -- Wait for the visible 返回 control; a missing OCR row cannot justify a
+  -- fixed-coordinate tap on an unknown screen.
+  if returnX == nil or returnY == nil then
+    return true
+  end
+  _ENV["点击"]("@@登录超时关闭提示", returnX, returnY, 1000)
   local failures = (tonumber(_ENV["登录_失败次数"]) or 0) + 1
   _ENV["登录_失败次数"] = failures
   local backoff = math.min(8000, 2000 * (2 ^ math.min(failures - 1, 2)))

@@ -80,3 +80,30 @@ Build the final APK only after all stages pass.
 - Evidence root: `work/lua-acceptance-20261021/stage2/`. Workbench-driven automatic
   game launch is exercised next as part of the full login entry path. No new
   APK or production code change was needed for this stage.
+
+## Stage 3 attempts (still in progress; not accepted)
+
+- The isolated startup/login fixture task passed 13 tests with no failures or
+  skips after adding the observed `正在连接服务器` dialog to the same bounded
+  timeout handler as `正在登录游戏`.
+- The first live run (`stage3/live-01/`) accepted the real terms screen and
+  entered server selection, then failed because full-frame RapidOCR exceeded
+  the 12-second harness read timeout. Saved-frame benchmarking led to a 2/1
+  ONNX thread configuration (three requests: 1.905, 8.269, 7.972 seconds).
+- The next live run (`stage3/live-03/`) used the current Lua source, actual
+  emulator screenshots and ADB touch. It accepted terms, selected the server,
+  reached saved-account login and character selection, then timed out in two
+  `正在登录游戏` dialogs. The Lua recognized and tapped the on-screen `返回`
+  button after each 10-second wait, but the game returned to the login page
+  instead of the world. The 3-minute harness deadline expired; stage 3 is not
+  passed. Screens, OCR rows and action transcript are under
+  `work/lua-acceptance-20261021/stage3/live-03/`.
+- A separate single ADB tap from the account page reached character selection;
+  a single ADB tap on that role's 确认 button returned to the account page after
+  12 seconds. This confirms the screen controls were reached, but does not
+  identify whether the game's login service, account/session, or client response
+  caused the return. Android logcat contained no matching game login/network
+  exception in the sampled window.
+- A test APK is being prepared at the user's request so they can compare on
+  their own session. This does not change the failed live acceptance result and
+  is not the final APK.

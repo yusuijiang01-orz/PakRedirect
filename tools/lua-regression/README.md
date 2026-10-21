@@ -16,6 +16,23 @@ After stage 1 passes, run the host gate and diagnostics phase:
 
 Stage 2 covers adapter reconnects, foreground identity and recovery, screenshot retry limits, HUD status, and error messages. It uses pure-Java host helpers; Android service routing and device behavior remain separate acceptance work.
 
+After stage 2 passes, run only the localized login phase:
+
+```powershell
+.\vendor\BlackBoxReborn\gradlew.bat -p tools/lua-regression stage3Test
+```
+
+Stage 3 selects startup terms and recovered Lua login tests. It checks server, account, and character-page recognition plus stalled-dialog timeout, bounded retry, and safe handling of missing OCR. It does not run later gameplay tests or build an APK.
+
+After that fixture gate, prepare the localized game in the sandbox and stop the
+APK's full script runtime. Run `stage3LiveTest` with `RYLUX_ADB_EXECUTABLE`,
+`RYLUX_ADB_DEVICE`, `RYLUX_OCR_PYTHON` (Python with RapidOCR), and
+`RYLUX_LIVE_EVIDENCE_DIR` configured. This invokes the current Lua login functions
+directly, with actual ADB screenshots/touches and RapidOCR, and exits upon real
+game-world recognition. It never calls the full挂机模式 loop. Missing configuration
+fails rather than skips. This proves the current Lua path with the live test
+adapter; it does not replace the final APK's Android OCR/input acceptance.
+
 Run the recovered LuaJ task tests without configuring the Android application or building an APK:
 
 ```powershell
