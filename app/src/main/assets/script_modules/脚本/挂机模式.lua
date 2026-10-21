@@ -1657,7 +1657,7 @@ _ENV["登录_汉化角色确认"] = L0_1
 
 -- The localized game can leave a blocking "正在登录游戏" dialog open forever.
 -- Watch it with a bounded timeout, close it using its visible 返回 button, then
--- back off before letting the normal role-selection logic retry the login.
+-- briefly back off before the normal role-selection logic retries the login.
 _ENV["登录_弹窗检测中"] = false
 _ENV["登录_弹窗开始时间"] = nil
 _ENV["登录_弹窗最后看到"] = nil
@@ -1712,7 +1712,9 @@ function L0_1()
   if _ENV["登录_弹窗开始时间"] == nil then
     _ENV["登录_弹窗开始时间"] = now
   end
-  if now - tonumber(_ENV["登录_弹窗开始时间"]) < 45000 then
+  -- A recognized "正在登录游戏" modal with no transition gets one bounded
+  -- retry after 10 seconds instead of trapping unattended runs for 45 seconds.
+  if now - tonumber(_ENV["登录_弹窗开始时间"]) < 10000 then
     return true
   end
   -- The screenshot-confirmed dialog's centered 返回 button is at roughly
@@ -1720,7 +1722,7 @@ function L0_1()
   _ENV["点击"]("@@登录超时关闭提示", returnX or 640, returnY or 450, 1000)
   local failures = (tonumber(_ENV["登录_失败次数"]) or 0) + 1
   _ENV["登录_失败次数"] = failures
-  local backoff = math.min(180000, 15000 * (2 ^ math.min(failures - 1, 4)))
+  local backoff = math.min(8000, 2000 * (2 ^ math.min(failures - 1, 2)))
   _ENV["登录_重试允许时间"] = now + backoff
   _ENV["登录_弹窗检测中"] = false
   _ENV["登录_弹窗开始时间"] = nil

@@ -307,6 +307,7 @@ public final class ScriptGameAdapter extends AccessibilityService {
         }
         long deadline = SystemClock.elapsedRealtime() + Math.max(1L, timeoutMs);
         int lastErrorCode = 0;
+        int internalErrorRetries = 0;
         do {
             requireTargetGameForeground();
             CountDownLatch done = new CountDownLatch(1);
@@ -346,11 +347,23 @@ public final class ScriptGameAdapter extends AccessibilityService {
             if (result[0] != null) return result[0];
             if (failure[0] != null) throw new IllegalStateException("无法获取游戏画面", failure[0]);
             lastErrorCode = errorCode[0];
-            if (lastErrorCode != ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT) {
+            long retryDelay = 250L;
+            if (lastErrorCode == ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT) {
+                internalErrorRetries = 0;
+            } else if (lastErrorCode == ERROR_TAKE_SCREENSHOT_INTERNAL_ERROR) {
+                // BlackBox/emulator transitions can briefly make Android's screenshot backend
+                // return INTERNAL_ERROR even though the guest window is still foreground.
+                // Retry a few times with bounded backoff, then surface the original failure.
+                retryDelay = ScriptScreenshotRetry.internalErrorDelayMs(++internalErrorRetries);
+                if (retryDelay < 0) {
+                    throw new IllegalStateException("系统截图失败：" + screenshotErrorDescription(lastErrorCode)
+                            + "（错误码 " + lastErrorCode + "，重试 3 次仍失败）");
+                }
+            } else {
                 throw new IllegalStateException("系统截图失败：" + screenshotErrorDescription(lastErrorCode)
                         + "（错误码 " + lastErrorCode + "）");
             }
-            long delay = Math.min(250L, deadline - SystemClock.elapsedRealtime());
+            long delay = Math.min(retryDelay, deadline - SystemClock.elapsedRealtime());
             if (delay > 0) SystemClock.sleep(delay);
         } while (SystemClock.elapsedRealtime() < deadline);
         throw new IllegalStateException("系统截图请求过于频繁，等待重试超时（错误码 " + lastErrorCode + "）");

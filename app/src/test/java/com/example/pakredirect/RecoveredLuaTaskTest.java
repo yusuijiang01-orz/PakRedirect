@@ -792,17 +792,22 @@ public final class RecoveredLuaTaskTest {
                 handleTimeout.call().toboolean());
         assertTrue("The dialog must get a real timeout before the script backs out", clicks.isEmpty());
 
-        clock.set(46_001);
-        assertTrue("After 45 seconds the script must close the stuck login dialog",
+        clock.set(10_999);
+        assertTrue("The busy dialog must stay open until the 10-second timeout",
+                handleTimeout.call().toboolean());
+        assertTrue("The script must not back out before ten seconds of no progress", clicks.isEmpty());
+
+        clock.set(13_000); // The watchdog checks its OCR region at two-second intervals.
+        assertTrue("After ten seconds without progress the script must close the stuck login dialog",
                 handleTimeout.call().toboolean());
         assertEquals(Arrays.asList("@@登录超时关闭提示|640|450"), clicks);
 
-        clock.set(50_000);
+        clock.set(14_000);
         assertTrue("The script must wait through the retry backoff", handleTimeout.call().toboolean());
         assertEquals("No duplicate login tap is allowed during backoff", 1, clicks.size());
 
         rows.set(new LuaTable());
-        clock.set(62_000);
+        clock.set(24_000);
         assertTrue("When the busy dialog is gone, normal login detection may resume",
                 !handleTimeout.call().toboolean());
     }
