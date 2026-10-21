@@ -8,6 +8,14 @@ Run first-phase loading, control, and compatibility checks before later gameplay
 
 This task executes the recovered entry, monitor, game worker, and HUD worker through the Lua instruction gate. It checks pause, resume, and global stop, including stop while paused. It does not run gameplay-stage tests or build an APK.
 
+After stage 1 passes, run the host gate and diagnostics phase:
+
+```powershell
+.\vendor\BlackBoxReborn\gradlew.bat -p tools/lua-regression stage2Test
+```
+
+Stage 2 covers adapter reconnects, foreground identity and recovery, screenshot retry limits, HUD status, and error messages. It uses pure-Java host helpers; Android service routing and device behavior remain separate acceptance work.
+
 Run the recovered LuaJ task tests without configuring the Android application or building an APK:
 
 ```powershell

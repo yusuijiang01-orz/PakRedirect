@@ -35,6 +35,7 @@ sourceSets {
             include '**/CnDownloadRouter.java'
             include '**/ScriptStartupTerms.java'
             include '**/ScriptHudStatus.java'
+            include '**/ScriptRuntimeErrors.java'
             include '**/RecoveredLuaTaskTest.java'
             include '**/LegacyLuaConfigTest.java'
             include '**/LegacyLuaCompatTest.java'
@@ -49,6 +50,7 @@ sourceSets {
             include '**/CnDownloadRouterTest.java'
             include '**/ScriptStartupTermsTest.java'
             include '**/ScriptHudStatusTest.java'
+            include '**/ScriptRuntimeErrorsTest.java'
         }
         resources {
             setSrcDirs([new File(repositoryRoot, 'app/src/test/resources')])
@@ -82,6 +84,21 @@ tasks.register('stage1Test', Test) {
         includeTestsMatching 'com.example.pakredirect.LegacyLuaCompatTest'
         includeTestsMatching 'com.example.pakredirect.LegacyTuringCompatTest'
         includeTestsMatching 'com.example.pakredirect.LuaSourceCompatTest'
+    }
+}
+
+tasks.register('stage2Test', Test) {
+    description = 'Runs only Lua host connection, foreground, screenshot retry, HUD, and diagnostic regressions.'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    filter {
+        includeTestsMatching 'com.example.pakredirect.ScriptAdapterConnectionGateTest'
+        includeTestsMatching 'com.example.pakredirect.ScriptForegroundGateTest'
+        includeTestsMatching 'com.example.pakredirect.ScriptForegroundTargetTest'
+        includeTestsMatching 'com.example.pakredirect.ScriptScreenshotRetryTest'
+        includeTestsMatching 'com.example.pakredirect.ScriptHudStatusTest'
+        includeTestsMatching 'com.example.pakredirect.ScriptRuntimeErrorsTest'
     }
 }
 

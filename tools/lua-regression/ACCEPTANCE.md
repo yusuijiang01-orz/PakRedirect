@@ -18,8 +18,8 @@ Build the final APK only after all stages pass.
 | Stage | Required evidence | State |
 | --- | --- | --- |
 | 1. Lua loading and execution control | Real recovered entry and worker execute using the production Lua instruction gate and execution control. Progress freezes on pause, resumes, and all runners end promptly on stop, including a paused run. Existing busy-loop, worker cancellation and host-sleep regressions also pass. | Passed (JVM; device service routing remains stage 2) |
-| 2. Android sandbox and host | Launch the localized game through the sandbox. Prove foreground recognition and actual Android host screenshot success, foreground rejection outside the game, and UI pause/stop command delivery. ADB screenshots alone cannot prove the app's capture API. | In progress |
-| 3. Localized login | Actual Lua handles known terms/login/server/character pages, closes a recognized stalled login dialog after 10 seconds, retries, and reaches the game world. Stop before other gameplay tasks. Record screens, decisions and post-action states. | Not started |
+| 2. Android sandbox and host | Launch the localized game through the sandbox. Prove foreground recognition and actual Android host screenshot success, foreground rejection outside the game, and UI pause/stop command delivery. ADB screenshots alone cannot prove the app's capture API. | Passed (current device/APK; see evidence below) |
+| 3. Localized login | Actual Lua handles known terms/login/server/character pages, closes a recognized stalled login dialog after 10 seconds, retries, and reaches the game world. Stop before other gameplay tasks. Record screens, decisions and post-action states. | In progress |
 | 4. OCR/image/coordinate adapters | Current localized game samples pass actual-device OCR and image matching; detected coordinates correspond to the visible controls and input reaches them. Preserve negative/ambiguous/low-confidence checks. | Not started |
 | 5. Route and pathfinding | Lua selects the configured map, submits coordinates and reaches the destination. Failed pathfinding returns on its bounded timeout. | Not started |
 | 6. Activity and party recovery | Lua closes the actual activity and party panels. Creating a party confirms the resulting state and does not repeat indefinitely. Verify leader/member and unreadable-name behavior. | Not started |
@@ -52,3 +52,31 @@ Build the final APK only after all stages pass.
   included. Stage 1 is an isolated Gradle task, not a dependency on the full suite.
 - Host APIs remain controlled callbacks in this phase. Android service commands,
   accessibility capture and real game actions are not covered by this result.
+
+## Stage 2 result (2026-10-21)
+
+- Command: `.\vendor\BlackBoxReborn\gradlew.bat -p tools/lua-regression stage2Test --no-daemon`.
+- JUnit: 37 tests, 0 failures, 0 errors, 0 skipped; reports saved under
+  `work/lua-acceptance-20261021/stage2/junit/`.
+- The live sandbox page had localization enabled (`01-sandbox.png`). Its launch
+  button opened the localized terms page (`03-launch-observe.png`), with Android
+  top `com.example.pakredirect/...ProxyActivity$P0` and focused guest window
+  `com.tepaylink.tamgioiphantranhmobile/com.jxclient.release.jxclient`.
+- Started the existing APK's real runtime service over root ADB, then paused it
+  before accepting terms. The host thread trace (`04-paused-host-threads.txt`)
+  is inside the startup OCR call, after the startup display-capture check.
+  Logcat records ML Kit bitmap processing and `OCR process succeeded via
+  visionkit pipeline` at 14:19:19.616. This establishes actual host capture
+  returned a bitmap; it is not inferred solely from an ADB screenshot.
+- Overlay Pause was clicked on-device (`06-ui-pause-screen.png`: PAUSED), and
+  its Stop button terminated the paused runtime service; saved services dump
+  `06-ui-stop-services.txt` contains no runtime ServiceRecord. Terms remained
+  on screen throughout; login was not exercised in this stage.
+- Negative check: with the launcher active but the virtual game still alive,
+  the runtime rejected capture/input. `07-outside-game-diagnostic.xml` records
+  `activeWindow=com.android.launcher3/Launcher3` and the background virtual top.
+  The FAILED overlay in `07-outside-game.png` is the expected negative result,
+  not an active-game foreground failure. The overlay was then closed.
+- Evidence root: `work/lua-acceptance-20261021/stage2/`. Workbench-driven automatic
+  game launch is exercised next as part of the full login entry path. No new
+  APK or production code change was needed for this stage.
