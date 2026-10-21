@@ -1,5 +1,13 @@
 # Recovered Lua regression tests
 
+Run first-phase loading, control, and compatibility checks before later gameplay regressions:
+
+```powershell
+.\vendor\BlackBoxReborn\gradlew.bat -p tools/lua-regression stage1Test
+```
+
+This task executes the recovered entry, monitor, game worker, and HUD worker through the Lua instruction gate. It checks pause, resume, and global stop, including stop while paused. It does not run gameplay-stage tests or build an APK.
+
 Run the recovered LuaJ task tests without configuring the Android application or building an APK:
 
 ```powershell

@@ -1,6 +1,8 @@
 package com.example.pakredirect;
 
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.fail;
 
 import java.io.FileInputStream;
@@ -12,12 +14,14 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.Test;
 import org.luaj.vm2.Globals;
+import org.luaj.vm2.LuaFunction;
 import org.luaj.vm2.LuaError;
 import org.luaj.vm2.LuaTable;
 import org.luaj.vm2.LuaValue;
@@ -33,6 +37,151 @@ public final class RecoveredLuaStartupTest {
     private static final String REACHED_MONITOR = "TEST_REACHED_MONITOR_LOOP";
     private static final String REACHED_WORKER_SLEEP = "TEST_REACHED_WORKER_SLEEP";
     private static final long WORKER_SLEEP_PROBE_LIMIT = 1024;
+
+    @Test public void recoveredEntryAndGameWorkerPauseResumeAndStop() throws Exception {
+        exerciseRecoveredLifecycle(false);
+    }
+
+    @Test public void globalStopWakesPausedRecoveredEntryAndGameWorker() throws Exception {
+        exerciseRecoveredLifecycle(true);
+    }
+
+    private static void exerciseRecoveredLifecycle(boolean stopWhilePaused) throws Exception {
+        Path assets = scriptAssets();
+        Globals globals = JsePlatform.standardGlobals();
+        AtomicBoolean monitorStarted = new AtomicBoolean();
+        AtomicReference<LuaFunction> capturedWorker = new AtomicReference<>();
+        installHostStubs(globals, monitorStarted, new AtomicBoolean(), capturedWorker,
+                new AtomicLong(), new AtomicLong());
+        installRequire(globals, assets, new ArrayList<>(), monitorStarted);
+        ScriptExecutionControl control = new ScriptExecutionControl();
+        LuaInstructionGate gate = new LuaInstructionGate(globals, control);
+        AtomicLong mainProgress = new AtomicLong();
+        AtomicLong workerProgress = new AtomicLong();
+        AtomicLong hudProgress = new AtomicLong();
+        AtomicReference<Thread> gameWorker = new AtomicReference<>();
+        AtomicReference<Thread> hudWorker = new AtomicReference<>();
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        AtomicReference<Thread> entry = new AtomicReference<>();
+
+        globals.set("sleep", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue millis) {
+                Thread current = Thread.currentThread();
+                if (current == entry.get() && monitorStarted.get()) mainProgress.incrementAndGet();
+                if (current == gameWorker.get()) workerProgress.incrementAndGet();
+                gate.sleep(1);
+                return LuaValue.NONE;
+            }
+        });
+        globals.set("showHUD", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                control.checkpoint();
+                hudProgress.incrementAndGet();
+                return LuaValue.NONE;
+            }
+        });
+        globals.set("beginThread", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue function) {
+                Thread worker = recoveredRunner("recovered-hud", control, gate,
+                        function.checkfunction(), failure);
+                hudWorker.set(worker);
+                worker.start();
+                return LuaValue.ONE;
+            }
+        });
+        LuaTable threadApi = new LuaTable();
+        threadApi.set("newThread", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                monitorStarted.set(true);
+                Thread worker = recoveredRunner("recovered-game-worker", control, gate,
+                        args.arg1().checkfunction(), failure);
+                gameWorker.set(worker);
+                worker.start();
+                LuaTable handle = new LuaTable();
+                handle.set("stopThread", new ZeroArgFunction() {
+                    @Override public LuaValue call() {
+                        control.cancelWorker(worker);
+                        return LuaValue.TRUE;
+                    }
+                });
+                return handle;
+            }
+        });
+        globals.set("Thread", threadApi);
+        LuaFunction recoveredEntry = compileLua(globals, assets, "脚本/封神榜.lua");
+        control.start();
+        Thread runner = recoveredRunner("recovered-entry", control, gate, recoveredEntry, failure);
+        entry.set(runner);
+        runner.start();
+        try {
+            awaitProgress(mainProgress, 2, "recovered monitor", failure);
+            assertTrue("monitor was never entered; entry " + runner.getState()
+                    + ", HUD callbacks " + hudProgress.get() + ", worker launched "
+                    + (gameWorker.get() != null), monitorStarted.get());
+            awaitProgress(workerProgress, 2, "recovered game worker", failure);
+            awaitProgress(hudProgress, 1, "recovered HUD worker", failure);
+            assertTrue("The recovered monitor must launch the game worker", gameWorker.get() != null);
+            assertTrue("pause must accept an active recovered entry", control.pause());
+            Thread.sleep(100);
+            long pausedMain = mainProgress.get();
+            long pausedWorker = workerProgress.get();
+            long pausedHud = hudProgress.get();
+            Thread.sleep(150);
+            assertEquals("monitor progress must freeze", pausedMain, mainProgress.get());
+            assertEquals("game worker progress must freeze", pausedWorker, workerProgress.get());
+            assertEquals("HUD progress must freeze", pausedHud, hudProgress.get());
+            if (!stopWhilePaused) {
+                assertTrue("resume must accept a paused recovered entry", control.resume());
+                awaitProgress(mainProgress, pausedMain + 2, "resumed monitor", failure);
+                awaitProgress(workerProgress, pausedWorker + 2, "resumed game worker", failure);
+                awaitProgress(hudProgress, pausedHud + 1, "resumed HUD worker", failure);
+            }
+            assertTrue("global stop must accept the recovered runtime", control.requestStop());
+            runner.join(2_000);
+            gameWorker.get().join(2_000);
+            hudWorker.get().join(2_000);
+            assertFalse("recovered monitor must terminate", runner.isAlive());
+            assertFalse("recovered game worker must terminate", gameWorker.get().isAlive());
+            assertFalse("recovered HUD worker must terminate", hudWorker.get().isAlive());
+            assertEquals(ScriptExecutionControl.State.STOPPED, control.getState());
+            assertTrue("recovered Lua must stop without a host failure: " + failure.get(), failure.get() == null);
+        } finally {
+            control.requestStop();
+            runner.join(2_000);
+            if (gameWorker.get() != null) gameWorker.get().join(2_000);
+            if (hudWorker.get() != null) hudWorker.get().join(2_000);
+        }
+    }
+
+    private static Thread recoveredRunner(String name, ScriptExecutionControl control,
+                                          LuaInstructionGate gate, LuaFunction function,
+                                          AtomicReference<Throwable> failure) {
+        Thread runner = new Thread(() -> {
+            try {
+                control.attachCurrentThread();
+                gate.invoke(function, LuaValue.NONE);
+                if (!control.isStopRequested()) failure.compareAndSet(null,
+                        new AssertionError(name + " returned before stop"));
+            } catch (ScriptExecutionControl.StopRequestedException expected) {
+                // Global stop or a cancelled Lua worker.
+            } catch (Throwable error) {
+                failure.compareAndSet(null, error);
+                control.fail(error);
+            } finally {
+                control.detachCurrentThread();
+            }
+        }, name);
+        runner.setDaemon(true);
+        return runner;
+    }
+
+    private static void awaitProgress(AtomicLong progress, long minimum, String activity,
+                                      AtomicReference<Throwable> failure) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+        while (progress.get() < minimum && failure.get() == null && System.nanoTime() < deadline) Thread.sleep(5);
+        assertTrue(activity + " did not progress; observed " + progress.get()
+                + ", runtime failure: " + failure.get(), progress.get() >= minimum);
+    }
 
     @Test public void recoveredEntryPointLoadsDependenciesAndReachesMainMonitor() throws Exception {
         Path assets = scriptAssets();
@@ -275,6 +424,10 @@ public final class RecoveredLuaStartupTest {
     }
 
     private static LuaValue loadLua(Globals globals, Path assets, String relativePath) throws IOException {
+        return compileLua(globals, assets, relativePath).invoke().arg1();
+    }
+
+    private static LuaFunction compileLua(Globals globals, Path assets, String relativePath) throws IOException {
         Path file = assets.resolve(relativePath);
         StringBuilder source = new StringBuilder();
         try (InputStreamReader reader = new InputStreamReader(new FileInputStream(file.toFile()),
@@ -284,7 +437,7 @@ public final class RecoveredLuaStartupTest {
             while ((read = reader.read(buffer)) != -1) source.append(buffer, 0, read);
         }
         return globals.load(LuaSourceCompat.normalizeUnicodeIdentifiers(source.toString()), relativePath, globals)
-                .invoke().arg1();
+                .checkfunction();
     }
 
     private static Path scriptAssets() throws IOException {
