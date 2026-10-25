@@ -1,4 +1,4 @@
-name: Sign localized 610 game APK
+name: Build RYLUX-compatible localized 610 APK
 
 on:
   push:
@@ -7,6 +7,7 @@ on:
     paths:
       - apk/610-localized-candidate/RYLUX-610-localized-arm64-UNSIGNED.apk
       - .github/workflows/sign-610-candidate.yml
+      - tools/patch_610_signature_guard.py
 
 permissions:
   contents: read
@@ -56,7 +57,7 @@ jobs:
             --output "$RUNNER_TEMP/apktool_3.0.3.jar"
           echo 'dbf930b076c6b9be08d57c449cacefc3bdd6b71ebd59b3066fc0e1f5b14f9423  '"$RUNNER_TEMP/apktool_3.0.3.jar" | sha256sum --check --status
 
-      - name: Validate, align, sign, and verify the APK
+      - name: Patch signer guard in all ABIs, sign, and verify the APK
         shell: bash
         env:
           RYLUX_KEYSTORE_B64: ${{ secrets.RYLUX_KEYSTORE_B64 }}
@@ -146,10 +147,12 @@ jobs:
           PY
           java -jar "$RUNNER_TEMP/apktool_3.0.3.jar" build "$RUNNER_TEMP/game-decoded" --output "$RUNNER_TEMP/game-unsigned.apk"
 
+          REBUILT="$RUNNER_TEMP/game-signature-guard-fixed-unsigned.apk"
+          python3 tools/patch_610_signature_guard.py "$RUNNER_TEMP/game-unsigned.apk" "$REBUILT"
+
           KEYSTORE="$RUNNER_TEMP/rylux-release.jks"
-          REBUILT="$RUNNER_TEMP/game-unsigned.apk"
           ALIGNED="$RUNNER_TEMP/RYLUX-610-aligned.apk"
-          SIGNED='RYLUX-610-localized-arm64-signed.apk'
+          SIGNED='RYLUX-610-signature-guard-fixed.apk'
           trap 'rm -f "$KEYSTORE" "$ALIGNED"' EXIT
           printf '%s' "$RYLUX_KEYSTORE_B64" | base64 --decode > "$KEYSTORE"
           chmod 600 "$KEYSTORE"
@@ -193,123 +196,7 @@ jobs:
       - name: Upload signed APK as an Actions artifact
         uses: actions/upload-artifact@v4
         with:
-          name: RYLUX-610-localized-arm64-signed
-          path: RYLUX-610-localized-arm64-signed.apk
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Build, sign, and validate diagnostic ABI variants
-        shell: bash
-        env:
-          RYLUX_KEYSTORE_B64: ${{ secrets.RYLUX_KEYSTORE_B64 }}
-          RYLUX_KEYSTORE_PASSWORD: ${{ secrets.RYLUX_KEYSTORE_PASSWORD }}
-          RYLUX_KEY_ALIAS: ${{ secrets.RYLUX_KEY_ALIAS }}
-          RYLUX_KEY_PASSWORD: ${{ secrets.RYLUX_KEY_PASSWORD }}
-        run: |
-          set -euo pipefail
-          TOOLS="$ANDROID_HOME/build-tools/36.0.0"
-          STOCK='apk/610-localized-candidate/libcocos2dcpp-stock-arm64.so'
-          test -s "$STOCK"
-
-          python3 - "$RUNNER_TEMP/game-unsigned.apk" "$STOCK" "$RUNNER_TEMP/stock-arm64-unsigned.apk" "$RUNNER_TEMP/x86-only-unsigned.apk" <<'PY'
-          import sys
-          import zipfile
-
-          source, stock_path, arm64_out, x86_out = sys.argv[1:]
-          target = 'lib/arm64-v8a/libcocos2dcpp.so'
-          with open(stock_path, 'rb') as handle:
-              stock = handle.read()
-          if not stock:
-              raise SystemExit('The official stock ARM64 library is empty.')
-
-          with zipfile.ZipFile(source) as apk:
-              entries = [(info, apk.read(info.filename)) for info in apk.infolist()]
-          if target not in {info.filename for info, _ in entries}:
-              raise SystemExit(f'Localized APK is missing {target}.')
-          if not any(info.filename.startswith(('lib/x86/', 'lib/x86_64/')) for info, _ in entries):
-              print('No x86 libraries are present; skipping the optional x86-only diagnostic.')
-              entries_have_x86 = False
-          else:
-              entries_have_x86 = True
-
-          def write_variant(path, replace_stock=False, x86_only=False):
-              with zipfile.ZipFile(path, 'w') as output:
-                  for info, data in entries:
-                      if x86_only and info.filename.startswith(('lib/arm64-v8a/', 'lib/armeabi-v7a/')):
-                          continue
-                      if replace_stock and info.filename == target:
-                          data = stock
-                      output.writestr(info, data)
-              with zipfile.ZipFile(path) as check:
-                  names = set(check.namelist())
-                  if replace_stock and check.read(target) != stock:
-                      raise SystemExit('Stock ARM64 library replacement did not persist.')
-                  if x86_only:
-                      if any(name.startswith(('lib/arm64-v8a/', 'lib/armeabi-v7a/')) for name in names):
-                          raise SystemExit('The x86-only APK still contains an ARM ABI library.')
-                      if not any(name.startswith(('lib/x86/', 'lib/x86_64/')) for name in names):
-                          raise SystemExit('The APK has no x86 or x86_64 libraries for the x86-only diagnostic.')
-
-          write_variant(arm64_out, replace_stock=True)
-          if entries_have_x86:
-              write_variant(x86_out, x86_only=True)
-          PY
-
-          KEYSTORE="$RUNNER_TEMP/rylux-release.jks"
-          printf '%s' "$RYLUX_KEYSTORE_B64" | base64 --decode > "$KEYSTORE"
-          chmod 600 "$KEYSTORE"
-          sign_and_validate() {
-            local input="$1" output="$2"
-            local aligned="$RUNNER_TEMP/${output%.apk}-aligned.apk"
-            "$TOOLS/zipalign" -f -p 4 "$input" "$aligned"
-            "$TOOLS/apksigner" sign \
-              --ks "$KEYSTORE" --ks-key-alias "$RYLUX_KEY_ALIAS" \
-              --ks-pass env:RYLUX_KEYSTORE_PASSWORD --key-pass env:RYLUX_KEY_PASSWORD \
-              --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
-              --out "$output" "$aligned"
-            local certs
-            certs="$("$TOOLS/apksigner" verify --verbose --print-certs "$output")"
-            grep -Eq '^Signer #1 certificate SHA-256 digest: 015c81c0cbc09d5dc1b825a673ef7676af4c51526870f2107d321c726c4d7aa7$' <<<"$certs" || {
-              echo "Signed certificate validation failed for $output." >&2
-              exit 1
-            }
-            python3 - "$TOOLS/aapt" "$output" <<'PY'
-          import re
-          import subprocess
-          import sys
-
-          badging = subprocess.run([sys.argv[1], 'dump', 'badging', sys.argv[2]], check=True,
-                                   capture_output=True, text=True).stdout
-          package = re.search(r"^package: name='([^']+)' versionCode='([^']+)' versionName='([^']*)'", badging, re.M)
-          if not package or package.groups() != ('com.tepaylink.tamgioiphantranhmobile', '610', '1.0.610'):
-              raise SystemExit('Diagnostic APK package or version changed unexpectedly.')
-          app_label = re.search(r"^application-label:'([^']*)'$", badging, re.M)
-          launch_labels = re.findall(r"^launchable-activity:.* label='([^']*)'", badging, re.M)
-          expected = '\u5c01\u795e\u699c\u624b\u6e38'
-          if not app_label or app_label.group(1) != expected or not launch_labels or any(x != expected for x in launch_labels):
-              raise SystemExit('Diagnostic APK application or launcher label is not the expected Chinese name.')
-          print('Verified diagnostic APK package version and Chinese labels.')
-          PY
-            sha256sum "$output"
-          }
-          sign_and_validate "$RUNNER_TEMP/stock-arm64-unsigned.apk" 'RYLUX-610-diagnostic-stock-arm64.apk'
-          if [[ -f "$RUNNER_TEMP/x86-only-unsigned.apk" ]]; then
-            sign_and_validate "$RUNNER_TEMP/x86-only-unsigned.apk" 'RYLUX-610-diagnostic-x86-only.apk'
-          fi
-
-      - name: Upload diagnostic stock ARM64 APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: RYLUX-610-diagnostic-stock-arm64
-          path: RYLUX-610-diagnostic-stock-arm64.apk
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Upload diagnostic x86-only APK
-        if: ${{ hashFiles('RYLUX-610-diagnostic-x86-only.apk') != '' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: RYLUX-610-diagnostic-x86-only
-          path: RYLUX-610-diagnostic-x86-only.apk
+          name: RYLUX-610-signature-guard-fixed
+          path: RYLUX-610-signature-guard-fixed.apk
           if-no-files-found: error
           retention-days: 14
