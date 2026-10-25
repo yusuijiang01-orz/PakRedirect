@@ -1,0 +1,144 @@
+name: Sync beta localization PAKs to Gitee
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/sync-pak-test-gitee.yml'
+      - 'pak-test/linkspak.txt'
+      - 'pak-test/manifest.json'
+      - 'pak-test/settings.pak.rpe'
+      - 'pak-test/ui.pak.rpe'
+      - 'pak-test/updatefs.pak.rpe'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-pak-test-gitee
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out protected beta package
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Validate package metadata and Gitee credential
+        shell: bash
+        env:
+          GITEE_RELEASE_TOKEN: ${{ secrets.GITEE_RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$GITEE_RELEASE_TOKEN" || {
+            echo 'Missing GITEE_RELEASE_TOKEN repository secret.' >&2
+            exit 1
+          }
+          python3 - <<'PY'
+          import base64
+          import hashlib
+          import json
+          from pathlib import Path
+
+          root = Path('pak-test')
+          outer = json.loads((root / 'manifest.json').read_text(encoding='utf-8'))
+          payload = json.loads(base64.b64decode(outer['payload_b64'], validate=True))
+          expected = {item['encrypted_name']: item for item in payload['files']}
+          if set(expected) != {'settings.pak.rpe', 'ui.pak.rpe', 'updatefs.pak.rpe'}:
+              raise SystemExit('Beta manifest file set is invalid.')
+          for name, item in expected.items():
+              path = root / name
+              digest = hashlib.sha256(path.read_bytes()).hexdigest()
+              if path.stat().st_size != item['encrypted_size'] or digest != item['encrypted_sha256']:
+                  raise SystemExit(f'{name} does not match beta manifest metadata.')
+          link = root / 'linkspak.txt'
+          metadata = payload['linkspak']
+          if link.stat().st_size != metadata['size']:
+              raise SystemExit('linkspak.txt size does not match beta manifest metadata.')
+          if hashlib.sha256(link.read_bytes()).hexdigest() != metadata['sha256']:
+              raise SystemExit('linkspak.txt SHA-256 does not match beta manifest metadata.')
+          print('Verified all beta package sizes and SHA-256 values.')
+          PY
+
+      - name: Sync linkspak manifest to Gitee raw branch
+        shell: bash
+        env:
+          GITEE_RELEASE_TOKEN: ${{ secrets.GITEE_RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          GITEE_DIR="$RUNNER_TEMP/rlyux-gitee"
+          ASKPASS="$RUNNER_TEMP/gitee-askpass.sh"
+          cat > "$ASKPASS" <<'ASKPASS_EOF'
+          #!/usr/bin/env bash
+          case "${1:-}" in
+            *Username*) printf '%s\n' 'oauth2' ;;
+            *Password*) printf '%s\n' "$GITEE_RELEASE_TOKEN" ;;
+            *) exit 1 ;;
+          esac
+          ASKPASS_EOF
+          chmod 700 "$ASKPASS"
+          git clone --depth 1 --single-branch --branch master https://gitee.com/perish-with-honor/rlyux.git "$GITEE_DIR"
+          mkdir -p "$GITEE_DIR/pak-test"
+          cp pak-test/linkspak.txt pak-test/manifest.json "$GITEE_DIR/pak-test/"
+          git -C "$GITEE_DIR" add pak-test/linkspak.txt pak-test/manifest.json
+          if ! git -C "$GITEE_DIR" diff --cached --quiet; then
+            git -C "$GITEE_DIR" config user.name 'GitHub Actions'
+            git -C "$GITEE_DIR" config user.email 'github-actions[bot]@users.noreply.github.com'
+            git -C "$GITEE_DIR" commit -m 'Sync protected 610 beta localization manifest'
+            GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 git -C "$GITEE_DIR" push origin HEAD:master
+          fi
+          curl --fail --location --silent --show-error \
+            'https://gitee.com/perish-with-honor/rlyux/raw/master/pak-test/linkspak.txt' \
+            --output "$RUNNER_TEMP/gitee-linkspak.txt"
+          cmp pak-test/linkspak.txt "$RUNNER_TEMP/gitee-linkspak.txt"
+          echo 'Gitee raw linkspak manifest matches the beta package.'
+
+      - name: Replace beta PAK release assets on Gitee
+        shell: bash
+        env:
+          GITEE_RELEASE_TOKEN: ${{ secrets.GITEE_RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          API='https://gitee.com/api/v5/repos/perish-with-honor/rlyux'
+          RELEASE_JSON="$RUNNER_TEMP/gitee-release.json"
+          STATUS="$(curl --silent --show-error --output "$RELEASE_JSON" --write-out '%{http_code}' \
+            "$API/releases/tags/pak-test")"
+          [[ "$STATUS" == '200' ]] || { echo "Gitee pak-test release lookup failed (HTTP $STATUS)." >&2; exit 1; }
+          RELEASE_ID="$(jq -er '.id' "$RELEASE_JSON")"
+          ASSETS_JSON="$RUNNER_TEMP/gitee-assets.json"
+          STATUS="$(curl --silent --show-error --output "$ASSETS_JSON" --write-out '%{http_code}' \
+            "$API/releases/$RELEASE_ID/attach_files?per_page=100")"
+          [[ "$STATUS" == '200' ]] || { echo "Gitee asset lookup failed (HTTP $STATUS)." >&2; exit 1; }
+          AUTH_CONFIG="$RUNNER_TEMP/gitee-auth-curl.conf"
+          trap 'rm -f "$AUTH_CONFIG"' EXIT
+          for NAME in settings.pak.rpe ui.pak.rpe updatefs.pak.rpe; do
+            while IFS= read -r ASSET_ID; do
+              [[ -n "$ASSET_ID" ]] || continue
+              (umask 077; printf 'url = "%s/releases/%s/attach_files/%s?access_token=%s"\n' \
+                "$API" "$RELEASE_ID" "$ASSET_ID" "$GITEE_RELEASE_TOKEN" > "$AUTH_CONFIG")
+              STATUS="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+                --request DELETE --config "$AUTH_CONFIG")"
+              [[ "$STATUS" == '204' ]] || { echo "Could not replace Gitee $NAME (HTTP $STATUS)." >&2; exit 1; }
+            done < <(jq -r --arg name "$NAME" '.[] | select(.name == $name) | .id' "$ASSETS_JSON")
+
+            ASSET_JSON="$RUNNER_TEMP/gitee-asset.json"
+            STATUS="$(curl --silent --show-error --output "$ASSET_JSON" --write-out '%{http_code}' \
+              --request POST "$API/releases/$RELEASE_ID/attach_files" \
+              --form-string "access_token=$GITEE_RELEASE_TOKEN" \
+              --form "file=@pak-test/$NAME")"
+            [[ "$STATUS" == '201' ]] || { echo "Gitee $NAME upload failed (HTTP $STATUS)." >&2; exit 1; }
+            [[ "$(jq -er '.name' "$ASSET_JSON")" == "$NAME" ]]
+            [[ "$(jq -er '.size' "$ASSET_JSON")" == "$(stat -c '%s' "pak-test/$NAME")" ]]
+
+            curl --fail --location --silent --show-error \
+              "https://gitee.com/perish-with-honor/rlyux/releases/download/pak-test/$NAME" \
+              --output "$RUNNER_TEMP/gitee-$NAME"
+            [[ "$(stat -c '%s' "$RUNNER_TEMP/gitee-$NAME")" == "$(stat -c '%s' "pak-test/$NAME")" ]]
+            cmp "pak-test/$NAME" "$RUNNER_TEMP/gitee-$NAME"
+            echo "Gitee pak-test/$NAME verified against GitHub source."
+          done
