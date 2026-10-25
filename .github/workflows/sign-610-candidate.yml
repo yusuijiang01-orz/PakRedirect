@@ -1,0 +1,106 @@
+name: Sign localized 610 game APK
+
+on:
+  push:
+    branches:
+      - codex/sign-610-localized-candidate
+    paths:
+      - apk/610-localized-candidate/RYLUX-610-localized-arm64-UNSIGNED.apk
+      - .github/workflows/sign-610-candidate.yml
+
+permissions:
+  contents: read
+
+jobs:
+  sign:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check signing secrets
+        shell: bash
+        env:
+          RYLUX_KEYSTORE_B64: ${{ secrets.RYLUX_KEYSTORE_B64 }}
+          RYLUX_KEYSTORE_PASSWORD: ${{ secrets.RYLUX_KEYSTORE_PASSWORD }}
+          RYLUX_KEY_ALIAS: ${{ secrets.RYLUX_KEY_ALIAS }}
+          RYLUX_KEY_PASSWORD: ${{ secrets.RYLUX_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$RYLUX_KEYSTORE_B64" || -z "$RYLUX_KEYSTORE_PASSWORD" || -z "$RYLUX_KEY_ALIAS" || -z "$RYLUX_KEY_PASSWORD" ]]; then
+            echo 'All four RYLUX signing secrets are required.' >&2
+            exit 1
+          fi
+
+      - name: Check out the candidate APK from Git LFS
+        uses: actions/checkout@v5
+        with:
+          lfs: true
+          persist-credentials: false
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android build-tools 36.0.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'build-tools;36.0.0' >/dev/null
+
+      - name: Validate, align, sign, and verify the APK
+        shell: bash
+        env:
+          RYLUX_KEYSTORE_B64: ${{ secrets.RYLUX_KEYSTORE_B64 }}
+          RYLUX_KEYSTORE_PASSWORD: ${{ secrets.RYLUX_KEYSTORE_PASSWORD }}
+          RYLUX_KEY_ALIAS: ${{ secrets.RYLUX_KEY_ALIAS }}
+          RYLUX_KEY_PASSWORD: ${{ secrets.RYLUX_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          SOURCE='apk/610-localized-candidate/RYLUX-610-localized-arm64-UNSIGNED.apk'
+          test -s "$SOURCE"
+          if head -c 80 "$SOURCE" | grep -aq 'version https://git-lfs.github.com/spec/v1'; then
+            echo 'The candidate APK is still an LFS pointer.' >&2
+            exit 1
+          fi
+
+          TOOLS="$ANDROID_HOME/build-tools/36.0.0"
+          BADGING="$("$TOOLS/aapt" dump badging "$SOURCE")"
+          grep -Eq "^package: name='com\.tepaylink\.tamgioiphantranhmobile' versionCode='610' versionName='1\.0\.610'" <<<"$BADGING" || {
+            echo 'Candidate APK package or version is not 1.0.610 (610).' >&2
+            exit 1
+          }
+
+          KEYSTORE="$RUNNER_TEMP/rylux-release.jks"
+          ALIGNED="$RUNNER_TEMP/RYLUX-610-aligned.apk"
+          SIGNED='RYLUX-610-localized-arm64-signed.apk'
+          trap 'rm -f "$KEYSTORE" "$ALIGNED"' EXIT
+          printf '%s' "$RYLUX_KEYSTORE_B64" | base64 --decode > "$KEYSTORE"
+          chmod 600 "$KEYSTORE"
+          "$TOOLS/zipalign" -f -p 4 "$SOURCE" "$ALIGNED"
+          "$TOOLS/zipalign" -c -p 4 "$ALIGNED"
+          "$TOOLS/apksigner" sign \
+            --ks "$KEYSTORE" \
+            --ks-key-alias "$RYLUX_KEY_ALIAS" \
+            --ks-pass env:RYLUX_KEYSTORE_PASSWORD \
+            --key-pass env:RYLUX_KEY_PASSWORD \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --v3-signing-enabled true \
+            --out "$SIGNED" \
+            "$ALIGNED"
+
+          CERTS="$("$TOOLS/apksigner" verify --verbose --print-certs "$SIGNED")"
+          grep -Eq '^Signer #1 certificate SHA-256 digest: 015c81c0cbc09d5dc1b825a673ef7676af4c51526870f2107d321c726c4d7aa7$' <<<"$CERTS" || {
+            echo 'Signed certificate does not match the RYLUX 587 certificate.' >&2
+            exit 1
+          }
+          "$TOOLS/aapt" dump badging "$SIGNED" | grep -Eq "^package: name='com\.tepaylink\.tamgioiphantranhmobile' versionCode='610' versionName='1\.0\.610'"
+          sha256sum "$SIGNED"
+
+      - name: Upload signed APK as an Actions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RYLUX-610-localized-arm64-signed
+          path: RYLUX-610-localized-arm64-signed.apk
+          if-no-files-found: error
+          retention-days: 14
