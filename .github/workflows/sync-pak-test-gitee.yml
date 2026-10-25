@@ -121,17 +121,11 @@ jobs:
               "$API/releases/$RELEASE_ID/attach_files?per_page=100")"
             [[ "$STATUS" == '200' ]] || { echo "Gitee asset lookup failed (HTTP $STATUS)." >&2; exit 1; }
 
-            MATCHING_ID="$(jq -r --arg name "$NAME" '.[] | select(.name == $name) | .id' "$ASSETS_JSON" | head -n 1)"
-            if [[ -n "$MATCHING_ID" ]]; then
-              ACTUAL="$RUNNER_TEMP/gitee-existing-$NAME"
-              if curl --fail --location --silent --show-error --http1.1 \
-                --connect-timeout 30 --max-time 900 \
-                "https://gitee.com/perish-with-honor/rlyux/releases/download/pak-test/$NAME" \
-                --output "$ACTUAL" \
-                && cmp "pak-test/$NAME" "$ACTUAL"; then
-                echo "Gitee beta asset $NAME already matches; skipping upload."
-                continue
-              fi
+            EXPECTED_SIZE="$(stat -c '%s' "pak-test/$NAME")"
+            MATCHING_SIZE="$(jq -r --arg name "$NAME" '.[] | select(.name == $name) | .size' "$ASSETS_JSON" | head -n 1)"
+            if [[ "$MATCHING_SIZE" == "$EXPECTED_SIZE" ]]; then
+              echo "Gitee beta asset $NAME already has expected size; skipping upload."
+              continue
             fi
 
             while IFS= read -r ASSET_ID; do
