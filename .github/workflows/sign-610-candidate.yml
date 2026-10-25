@@ -1,4 +1,4 @@
-name: Build RYLUX-compatible localized 610 APK
+name: Build localized 610 APK with RYLUX localhost interception
 
 on:
   push:
@@ -147,12 +147,12 @@ jobs:
           PY
           java -jar "$RUNNER_TEMP/apktool_3.0.3.jar" build "$RUNNER_TEMP/game-decoded" --output "$RUNNER_TEMP/game-unsigned.apk"
 
-          REBUILT="$RUNNER_TEMP/game-signature-guard-fixed-unsigned.apk"
+          REBUILT="$RUNNER_TEMP/game-local-intercept-fixed-unsigned.apk"
           python3 tools/patch_610_signature_guard.py "$RUNNER_TEMP/game-unsigned.apk" "$REBUILT"
 
           KEYSTORE="$RUNNER_TEMP/rylux-release.jks"
           ALIGNED="$RUNNER_TEMP/RYLUX-610-aligned.apk"
-          SIGNED='RYLUX-610-signature-guard-fixed.apk'
+          SIGNED='RYLUX-610-local-intercept-fixed.apk'
           trap 'rm -f "$KEYSTORE" "$ALIGNED"' EXIT
           printf '%s' "$RYLUX_KEYSTORE_B64" | base64 --decode > "$KEYSTORE"
           chmod 600 "$KEYSTORE"
@@ -191,12 +191,29 @@ jobs:
               raise SystemExit('Application or launcher label is not the expected Chinese name.')
           print('Verified package version and Chinese application/launcher labels.')
           PY
+          python3 - "$SIGNED" <<'PY'
+          import sys
+          import zipfile
+
+          expected = b'http://127.0.0.1:18480/linkspak.txt'
+          abis = {'arm64-v8a', 'armeabi-v7a', 'x86'}
+          with zipfile.ZipFile(sys.argv[1]) as apk:
+              libs = {name.split('/')[1]: name for name in apk.namelist()
+                      if name.startswith('lib/') and name.endswith('/libcocos2dcpp.so')}
+              if set(libs) != abis:
+                  raise SystemExit(f'Unexpected native ABIs: {sorted(libs)}')
+              for abi, name in sorted(libs.items()):
+                  data = apk.read(name)
+                  if data.count(expected) != 1 or b'https://cdn.tamgioipt.vn/linkspak.txt' in data:
+                      raise SystemExit(f'{abi} does not route linkspak to the local RYLUX server')
+          print('Verified local linkspak interception in all native ABIs.')
+          PY
           sha256sum "$SIGNED"
 
       - name: Upload signed APK as an Actions artifact
         uses: actions/upload-artifact@v4
         with:
-          name: RYLUX-610-signature-guard-fixed
-          path: RYLUX-610-signature-guard-fixed.apk
+          name: RYLUX-610-local-intercept-fixed
+          path: RYLUX-610-local-intercept-fixed.apk
           if-no-files-found: error
           retention-days: 14

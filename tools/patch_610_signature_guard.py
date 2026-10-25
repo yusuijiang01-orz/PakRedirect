@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Port the known RYLUX signature-check bypass from the working 587 build to 610.
+"""Port the required RYLUX localization hooks from the working 587 build to 610.
 
 The 610 native initSystemInfo() function rejects the RYLUX signing certificate
 and calls exit() from JNI_OnLoad. The shipped 587 RYLUX APK has an immediate
 return at the same function entry. This script applies the architecture-native
 return instruction to each 610 libcocos2dcpp.so in the rebuilt, unsigned APK.
+It also redirects the linkspak request from the vendor CDN to the RYLUX
+localhost PAK server, matching the working 587 localization build.
 """
 
 from __future__ import annotations
@@ -20,6 +22,8 @@ from pathlib import Path
 
 SYMBOL = b"_Z14initSystemInfoP7_JNIEnv"
 EXPECTED_ABIS = {"arm64-v8a", "armeabi-v7a", "x86"}
+OFFICIAL_MANIFEST_URL = b"https://cdn.tamgioipt.vn/linkspak.txt"
+LOCAL_MANIFEST_URL = b"http://127.0.0.1:18480/linkspak.txt"
 PATCHES = {
     183: ("arm64-v8a", bytes.fromhex("f50f1df8"), bytes.fromhex("c0035fd6")),
     40: ("armeabi-v7a", bytes.fromhex("f0b5"), bytes.fromhex("7047")),
@@ -113,19 +117,41 @@ def patch_library(path: str, original: bytes) -> tuple[bytes, str]:
     if remaining < len(expected):
         raise ValueError(f"initSystemInfo entry is truncated in {path}")
     actual = original[file_offset : file_offset + len(expected)]
-    if original[file_offset : file_offset + len(replacement)] == replacement:
-        return original, f"{abi}: already patched at {symbol_value:#x}"
-    if actual != expected:
+    already_patched = original[file_offset : file_offset + len(replacement)] == replacement
+    if not already_patched and actual != expected:
         raise ValueError(
             f"Unexpected {abi} initSystemInfo prologue at {symbol_value:#x}: "
             f"expected {expected.hex()}, found {actual.hex()}"
         )
     patched = bytearray(original)
-    patched[file_offset : file_offset + len(replacement)] = replacement
-    # Confirm the entry now decodes to an immediate return instruction.
+    if not already_patched:
+        patched[file_offset : file_offset + len(replacement)] = replacement
     if patched[file_offset : file_offset + len(replacement)] != replacement:
         raise AssertionError(f"Return patch read-back failed for {path}")
-    return bytes(patched), f"{abi}: patched {symbol_value:#x} (file {file_offset:#x})"
+
+    url_offset = original.find(OFFICIAL_MANIFEST_URL)
+    if url_offset < 0:
+        if original.count(LOCAL_MANIFEST_URL) != 1:
+            raise ValueError(f"Expected one official or already-local linkspak URL in {path}")
+        url_note = f"{abi}: manifest URL already points to localhost"
+    else:
+        if original.find(OFFICIAL_MANIFEST_URL, url_offset + 1) >= 0:
+            raise ValueError(f"Multiple official linkspak URLs found in {path}")
+        if len(LOCAL_MANIFEST_URL) > len(OFFICIAL_MANIFEST_URL):
+            raise ValueError("Local manifest URL does not fit the original string allocation")
+        replacement_url = LOCAL_MANIFEST_URL + b"\0" * (len(OFFICIAL_MANIFEST_URL) - len(LOCAL_MANIFEST_URL))
+        end = url_offset + len(OFFICIAL_MANIFEST_URL)
+        if original[end : end + 1] != b"\0":
+            raise ValueError(f"Official linkspak URL is not null-terminated in {path}")
+        patched[url_offset : url_offset + len(replacement_url)] = replacement_url
+        if bytes(patched[url_offset : url_offset + len(OFFICIAL_MANIFEST_URL)]) != replacement_url:
+            raise AssertionError(f"Local manifest URL read-back failed for {path}")
+        url_note = f"{abi}: linkspak redirected to 127.0.0.1:18480"
+
+    guard_note = (f"{abi}: signature guard already bypassed at {symbol_value:#x}"
+                  if already_patched else
+                  f"{abi}: signature guard bypassed at {symbol_value:#x} (file {file_offset:#x})")
+    return bytes(patched), f"{guard_note}; {url_note}"
 
 
 def patch_apk(source: Path, output: Path) -> None:
@@ -159,9 +185,9 @@ def patch_apk(source: Path, output: Path) -> None:
                     result.writestr(info, replacements.get(info.filename, apk.read(info.filename)))
             with zipfile.ZipFile(tmp_name, "r") as check:
                 for entry in replacements:
-                    _, note = patch_library(entry, check.read(entry))
-                    if "already patched" not in note:
-                        raise ValueError(f"Signature guard return was not verified in {entry}")
+                    verified, note = patch_library(entry, check.read(entry))
+                    if verified != check.read(entry):
+                        raise ValueError(f"Signature guard or localhost redirect did not verify in {entry}: {note}")
             os.replace(tmp_name, output)
         except BaseException:
             try:
@@ -179,7 +205,7 @@ def main() -> int:
     if not args.input_apk.is_file():
         parser.error(f"input APK not found: {args.input_apk}")
     patch_apk(args.input_apk, args.output_apk)
-    print(f"Patched signer guard in all native ABIs: {args.output_apk}")
+    print(f"Patched signer guard and localhost manifest redirect in all ABIs: {args.output_apk}")
     return 0
 
 
