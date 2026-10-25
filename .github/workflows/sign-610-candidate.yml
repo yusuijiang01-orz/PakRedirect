@@ -47,6 +47,15 @@ jobs:
           set -euo pipefail
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'build-tools;36.0.0' >/dev/null
 
+      - name: Download verified Apktool 3.0.3
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --silent --show-error \
+            'https://github.com/iBotPeaches/Apktool/releases/download/v3.0.3/apktool_3.0.3.jar' \
+            --output "$RUNNER_TEMP/apktool_3.0.3.jar"
+          echo 'dbf930b076c6b9be08d57c449cacefc3bdd6b71ebd59b3066fc0e1f5b14f9423  '"$RUNNER_TEMP/apktool_3.0.3.jar" | sha256sum --check --status
+
       - name: Validate, align, sign, and verify the APK
         shell: bash
         env:
@@ -70,13 +79,81 @@ jobs:
             exit 1
           }
 
+          java -jar "$RUNNER_TEMP/apktool_3.0.3.jar" decode --no-src --output "$RUNNER_TEMP/game-decoded" "$SOURCE"
+          DECODED="$RUNNER_TEMP/game-decoded" python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          root_dir = Path(os.environ['DECODED'])
+          manifest_path = root_dir / 'AndroidManifest.xml'
+          android = '{http://schemas.android.com/apk/res/android}'
+          ET.register_namespace('android', 'http://schemas.android.com/apk/res/android')
+          tree = ET.parse(manifest_path)
+          manifest = tree.getroot()
+          application = manifest.find('application')
+          if application is None:
+              raise SystemExit('Decoded APK has no application element.')
+
+          labels = [application]
+          for component in list(application.findall('activity')) + list(application.findall('activity-alias')):
+              for intent in component.findall('intent-filter'):
+                  actions = {item.get(android + 'name') for item in intent.findall('action')}
+                  categories = {item.get(android + 'name') for item in intent.findall('category')}
+                  if 'android.intent.action.MAIN' in actions and categories.intersection({
+                      'android.intent.category.LAUNCHER', 'android.intent.category.LEANBACK_LAUNCHER'
+                  }):
+                      labels.append(component)
+                      break
+          if len(labels) == 1:
+              raise SystemExit('No launcher activity or alias was found.')
+
+          string_names = set()
+          manifest_changed = False
+          for element in labels:
+              value = element.get(android + 'label')
+              if value is None:
+                  continue
+              if value.startswith('@string/'):
+                  string_names.add(value.removeprefix('@string/'))
+              elif value.startswith('@') or value.startswith('?'):
+                  raise SystemExit(f'Unsupported label reference: {value}')
+              else:
+                  element.set(android + 'label', '\u5c01\u795e\u699c\u624b\u6e38')
+                  manifest_changed = True
+          if application.get(android + 'label') is None:
+              application.set(android + 'label', '\u5c01\u795e\u699c\u624b\u6e38')
+              manifest_changed = True
+
+          found = set()
+          for path in sorted((root_dir / 'res').glob('values*/*.xml')):
+              resource_tree = ET.parse(path)
+              resources = resource_tree.getroot()
+              changed = False
+              for item in resources.findall('string'):
+                  name = item.get('name')
+                  if name in string_names:
+                      item[:] = []
+                      item.text = '\u5c01\u795e\u699c\u624b\u6e38'
+                      found.add(name)
+                      changed = True
+              if changed:
+                  resource_tree.write(path, encoding='utf-8', xml_declaration=True)
+          if found != string_names:
+              raise SystemExit('A referenced app or launcher label string is missing from decoded resources.')
+          if manifest_changed:
+              tree.write(manifest_path, encoding='utf-8', xml_declaration=True)
+          PY
+          java -jar "$RUNNER_TEMP/apktool_3.0.3.jar" build "$RUNNER_TEMP/game-decoded" --output "$RUNNER_TEMP/game-unsigned.apk"
+
           KEYSTORE="$RUNNER_TEMP/rylux-release.jks"
+          REBUILT="$RUNNER_TEMP/game-unsigned.apk"
           ALIGNED="$RUNNER_TEMP/RYLUX-610-aligned.apk"
           SIGNED='RYLUX-610-localized-arm64-signed.apk'
           trap 'rm -f "$KEYSTORE" "$ALIGNED"' EXIT
           printf '%s' "$RYLUX_KEYSTORE_B64" | base64 --decode > "$KEYSTORE"
           chmod 600 "$KEYSTORE"
-          "$TOOLS/zipalign" -f -p 4 "$SOURCE" "$ALIGNED"
+          "$TOOLS/zipalign" -f -p 4 "$REBUILT" "$ALIGNED"
           "$TOOLS/zipalign" -c -p 4 "$ALIGNED"
           "$TOOLS/apksigner" sign \
             --ks "$KEYSTORE" \
@@ -94,7 +171,23 @@ jobs:
             echo 'Signed certificate does not match the RYLUX 587 certificate.' >&2
             exit 1
           }
-          "$TOOLS/aapt" dump badging "$SIGNED" | grep -Eq "^package: name='com\.tepaylink\.tamgioiphantranhmobile' versionCode='610' versionName='1\.0\.610'"
+          python3 - "$TOOLS/aapt" "$SIGNED" <<'PY'
+          import re
+          import subprocess
+          import sys
+
+          badging = subprocess.run([sys.argv[1], 'dump', 'badging', sys.argv[2]], check=True,
+                                   capture_output=True, text=True).stdout
+          package = re.search(r"^package: name='([^']+)' versionCode='([^']+)' versionName='([^']*)'", badging, re.M)
+          if not package or package.groups() != ('com.tepaylink.tamgioiphantranhmobile', '610', '1.0.610'):
+              raise SystemExit('Signed APK package or version changed unexpectedly.')
+          app_label = re.search(r"^application-label:'([^']*)'$", badging, re.M)
+          launch_labels = re.findall(r"^launchable-activity:.* label='([^']*)'", badging, re.M)
+          expected = '\u5c01\u795e\u699c\u624b\u6e38'
+          if not app_label or app_label.group(1) != expected or not launch_labels or any(x != expected for x in launch_labels):
+              raise SystemExit('Application or launcher label is not the expected Chinese name.')
+          print('Verified package version and Chinese application/launcher labels.')
+          PY
           sha256sum "$SIGNED"
 
       - name: Upload signed APK as an Actions artifact
