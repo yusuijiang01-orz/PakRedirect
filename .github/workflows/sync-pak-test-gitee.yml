@@ -23,7 +23,7 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 70
     steps:
       - name: Check out protected beta package
         uses: actions/checkout@v5
@@ -139,7 +139,7 @@ jobs:
 
             ASSET_JSON="$RUNNER_TEMP/gitee-asset.json"
             STATUS="$(curl --silent --show-error --http1.1 --header 'Expect:' \
-              --connect-timeout 30 --max-time 900 \
+              --connect-timeout 30 --max-time 3600 \
               --output "$ASSET_JSON" --write-out '%{http_code}' \
               --request POST "$API/releases/$RELEASE_ID/attach_files" \
               --form-string "access_token=$GITEE_RELEASE_TOKEN" \
@@ -149,7 +149,7 @@ jobs:
             [[ "$(jq -er '.size' "$ASSET_JSON")" == "$(stat -c '%s' "pak-test/$NAME")" ]]
 
             curl --fail --location --silent --show-error \
-              --http1.1 --connect-timeout 30 --max-time 900 \
+              --http1.1 --connect-timeout 30 --max-time 3600 \
               "https://gitee.com/perish-with-honor/rlyux/releases/download/pak-test/$NAME" \
               --output "$RUNNER_TEMP/gitee-$NAME"
             [[ "$(stat -c '%s' "$RUNNER_TEMP/gitee-$NAME")" == "$(stat -c '%s' "pak-test/$NAME")" ]]
