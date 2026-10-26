@@ -1,0 +1,102 @@
+name: Sync production localization PAKs to Gitee
+
+on:
+  push:
+    branches:
+      - codex/sign-610-localized-candidate
+    paths:
+      - .github/workflows/sync-pak-gitee-production.yml
+
+permissions:
+  contents: read
+
+jobs:
+  sync-production-paks:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out production PAK source
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Validate production manifest and encrypted files
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64
+          import hashlib
+          import json
+          from pathlib import Path
+
+          root = Path('pak')
+          outer = json.loads((root / 'manifest.json').read_text(encoding='utf-8'))
+          if outer.get('schema') != 1 or outer.get('module') != 'sg_localization':
+              raise SystemExit('Production manifest schema/module is invalid')
+          payload = json.loads(base64.b64decode(outer['payload_b64'], validate=True))
+          files = {item.get('name'): item for item in payload.get('files', [])}
+          required = {'settings.pak', 'ui.pak', 'updatefs.pak'}
+          if set(files) != required:
+              raise SystemExit(f'Unexpected production manifest file set: {sorted(files)}')
+          link = payload.get('linkspak')
+          link_bytes = (root / 'linkspak.txt').read_bytes()
+          if (len(link_bytes) != int(link.get('size', -1))
+                  or hashlib.sha256(link_bytes).hexdigest() != link.get('sha256')):
+              raise SystemExit('Production linkspak.txt does not match its manifest')
+          for plain_name, item in sorted(files.items()):
+              name = item.get('encrypted_name')
+              if name != plain_name + '.rpe':
+                  raise SystemExit(f'Unexpected encrypted filename for {plain_name}: {name}')
+              data = (root / name).read_bytes()
+              digest = hashlib.sha256(data).hexdigest()
+              if len(data) != int(item.get('encrypted_size', -1)) or digest != item.get('encrypted_sha256'):
+                  raise SystemExit(f'{name} does not match the current production manifest')
+              print(f'Verified {name}: {len(data)} bytes, SHA-256 {digest}')
+          print(f'Production manifest version: {payload.get("version", "")}')
+          PY
+
+      - name: Replace Gitee pak-latest release assets and verify downloads
+        env:
+          GITEE_RELEASE_TOKEN: ${{ secrets.GITEE_RELEASE_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$GITEE_RELEASE_TOKEN" || { echo 'Missing GITEE_RELEASE_TOKEN repository secret' >&2; exit 1; }
+          API='https://gitee.com/api/v5/repos/perish-with-honor/rlyux'
+          TAG='pak-latest'
+          RELEASE_JSON="$RUNNER_TEMP/pak-latest-release.json"
+          STATUS="$(curl --silent --show-error --output "$RELEASE_JSON" --write-out '%{http_code}' "$API/releases/tags/$TAG")"
+          [[ "$STATUS" == '200' ]] || { echo "Gitee release lookup failed (HTTP $STATUS)" >&2; exit 1; }
+          RELEASE_ID="$(jq -er '.id' "$RELEASE_JSON")"
+          ASSETS_JSON="$RUNNER_TEMP/pak-latest-assets.json"
+          STATUS="$(curl --silent --show-error --output "$ASSETS_JSON" --write-out '%{http_code}' "$API/releases/$RELEASE_ID/attach_files?per_page=100")"
+          [[ "$STATUS" == '200' ]] || { echo "Gitee asset lookup failed (HTTP $STATUS)" >&2; exit 1; }
+          AUTH_CONFIG="$RUNNER_TEMP/gitee-pak-auth-curl.conf"
+          trap 'rm -f "$AUTH_CONFIG"' EXIT
+
+          for NAME in settings.pak.rpe ui.pak.rpe updatefs.pak.rpe; do
+            while IFS= read -r ASSET_ID; do
+              [[ -n "$ASSET_ID" ]] || continue
+              (umask 077; printf 'url = "%s?access_token=%s"\n' "$API/releases/$RELEASE_ID/attach_files/$ASSET_ID" "$GITEE_RELEASE_TOKEN" > "$AUTH_CONFIG")
+              STATUS="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --request DELETE --config "$AUTH_CONFIG")"
+              [[ "$STATUS" == '204' ]] || { echo "Could not replace Gitee asset $NAME (HTTP $STATUS)" >&2; exit 1; }
+            done < <(jq -r --arg name "$NAME" '.[] | select(.name == $name) | .id' "$ASSETS_JSON")
+
+            ASSET_JSON="$RUNNER_TEMP/gitee-pak-asset.json"
+            STATUS="$(curl --silent --show-error --output "$ASSET_JSON" --write-out '%{http_code}' \
+              --request POST "$API/releases/$RELEASE_ID/attach_files" \
+              --form-string "access_token=$GITEE_RELEASE_TOKEN" \
+              --form "file=@pak/$NAME")"
+            [[ "$STATUS" == '201' ]] || { echo "Gitee upload failed for $NAME (HTTP $STATUS)" >&2; exit 1; }
+            [[ "$(jq -er '.name' "$ASSET_JSON")" == "$NAME" ]]
+            [[ "$(jq -er '.size' "$ASSET_JSON")" == "$(stat -c '%s' "pak/$NAME")" ]]
+            echo "Uploaded $NAME ($(stat -c '%s' "pak/$NAME") bytes)."
+          done
+
+          for NAME in settings.pak.rpe ui.pak.rpe updatefs.pak.rpe; do
+            EXPECTED="$(python3 -c 'import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "pak/$NAME")"
+            ACTUAL="$(curl --fail --location --silent --show-error "https://gitee.com/perish-with-honor/rlyux/releases/download/$TAG/$NAME" | sha256sum | cut -d ' ' -f 1)"
+            [[ "$ACTUAL" == "$EXPECTED" ]] || { echo "Gitee read-back hash mismatch for $NAME: $ACTUAL != $EXPECTED" >&2; exit 1; }
+            echo "Verified Gitee $NAME SHA-256=$ACTUAL"
+          done
