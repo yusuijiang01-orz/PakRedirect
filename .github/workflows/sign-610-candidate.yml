@@ -6,7 +6,7 @@ on:
     branches:
       - codex/sign-610-localized-candidate
     paths:
-      - apk/610-localized-candidate/RYLUX-610-localized-arm64-UNSIGNED.apk
+      - apk/610-localized-candidate/RYLUX-610-localized-arm64-encoding-fix-UNSIGNED.apk
       - .github/workflows/sign-610-candidate.yml
       - tools/patch_610_signature_guard.py
 
@@ -67,7 +67,7 @@ jobs:
           RYLUX_KEY_PASSWORD: ${{ secrets.RYLUX_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          SOURCE='apk/610-localized-candidate/RYLUX-610-localized-arm64-UNSIGNED.apk'
+          SOURCE='apk/610-localized-candidate/RYLUX-610-localized-arm64-encoding-fix-UNSIGNED.apk'
           test -s "$SOURCE"
           if head -c 80 "$SOURCE" | grep -aq 'version https://git-lfs.github.com/spec/v1'; then
             echo 'The candidate APK is still an LFS pointer.' >&2
@@ -86,7 +86,7 @@ jobs:
           import sys
           import zipfile
 
-          expected_arm64 = '3b84b0c013513701b59677debe63a8ccb90c7dd09c9793192deffbbdd1c6d114'
+          expected_arm64 = 'a39322de9700f62323154da14a62dd6bced2c6a8ee75fe3e710e93ad072c30fb'
           with zipfile.ZipFile(sys.argv[1]) as apk:
               strings = apk.read('assets/settings/StringConstant.txt').decode('utf-8', errors='strict')
               rows = [line.split('\t', 1) for line in strings.splitlines()[1:] if '\t' in line]
