@@ -1,6 +1,7 @@
 name: Build localized 610 APK with RYLUX localhost interception
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - codex/sign-610-localized-candidate
@@ -79,6 +80,24 @@ jobs:
             echo 'Candidate APK package or version is not 1.0.610 (610).' >&2
             exit 1
           }
+
+          python3 - "$SOURCE" <<'PY'
+          import hashlib
+          import sys
+          import zipfile
+
+          expected_arm64 = '3b84b0c013513701b59677debe63a8ccb90c7dd09c9793192deffbbdd1c6d114'
+          with zipfile.ZipFile(sys.argv[1]) as apk:
+              strings = apk.read('assets/settings/StringConstant.txt').decode('utf-8', errors='strict')
+              rows = [line.split('\t', 1) for line in strings.splitlines()[1:] if '\t' in line]
+              if len(rows) != 417 or not any(any('\u4e00' <= char <= '\u9fff' for char in row[1]) for row in rows):
+                  raise SystemExit('Candidate Chinese StringConstant resource failed validation.')
+              arm64 = apk.read('lib/arm64-v8a/libcocos2dcpp.so')
+              digest = hashlib.sha256(arm64).hexdigest()
+              if digest != expected_arm64:
+                  raise SystemExit(f'Candidate arm64 encoding/native localization patch mismatch: {digest}')
+          print('Verified 417 UTF-8 Chinese strings and the reviewed arm64 encoding patch.')
+          PY
 
           java -jar "$RUNNER_TEMP/apktool_3.0.3.jar" decode --no-src --output "$RUNNER_TEMP/game-decoded" "$SOURCE"
           DECODED="$RUNNER_TEMP/game-decoded" python3 - <<'PY'
