@@ -13,6 +13,7 @@ permissions:
 jobs:
   sync-production-paks:
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
       - name: Check out production PAK source
         uses: actions/checkout@v5
@@ -76,22 +77,49 @@ jobs:
           trap 'rm -f "$AUTH_CONFIG"' EXIT
 
           for NAME in settings.pak.rpe ui.pak.rpe updatefs.pak.rpe; do
-            while IFS= read -r ASSET_ID; do
-              [[ -n "$ASSET_ID" ]] || continue
-              (umask 077; printf 'url = "%s?access_token=%s"\n' "$API/releases/$RELEASE_ID/attach_files/$ASSET_ID" "$GITEE_RELEASE_TOKEN" > "$AUTH_CONFIG")
-              STATUS="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --request DELETE --config "$AUTH_CONFIG")"
-              [[ "$STATUS" == '204' ]] || { echo "Could not replace Gitee asset $NAME (HTTP $STATUS)" >&2; exit 1; }
-            done < <(jq -r --arg name "$NAME" '.[] | select(.name == $name) | .id' "$ASSETS_JSON")
-
+            EXPECTED_SIZE="$(stat -c '%s' "pak/$NAME")"
             ASSET_JSON="$RUNNER_TEMP/gitee-pak-asset.json"
-            STATUS="$(curl --silent --show-error --output "$ASSET_JSON" --write-out '%{http_code}' \
-              --request POST "$API/releases/$RELEASE_ID/attach_files" \
-              --form-string "access_token=$GITEE_RELEASE_TOKEN" \
-              --form "file=@pak/$NAME")"
-            [[ "$STATUS" == '201' ]] || { echo "Gitee upload failed for $NAME (HTTP $STATUS)" >&2; exit 1; }
-            [[ "$(jq -er '.name' "$ASSET_JSON")" == "$NAME" ]]
-            [[ "$(jq -er '.size' "$ASSET_JSON")" == "$(stat -c '%s' "pak/$NAME")" ]]
-            echo "Uploaded $NAME ($(stat -c '%s' "pak/$NAME") bytes)."
+            for ATTEMPT in 1 2 3; do
+              STATUS="$(curl --silent --show-error --connect-timeout 30 --max-time 120 \
+                --output "$ASSETS_JSON" --write-out '%{http_code}' \
+                "$API/releases/$RELEASE_ID/attach_files?per_page=100")"
+              [[ "$STATUS" == '200' ]] || { echo "Gitee asset lookup failed before $NAME attempt $ATTEMPT (HTTP $STATUS)" >&2; sleep 10; continue; }
+
+              EXISTING_ID="$(jq -r --arg name "$NAME" --argjson size "$EXPECTED_SIZE" \
+                '.[] | select(.name == $name and .size == $size) | .id' "$ASSETS_JSON" | head -n 1)"
+              if [[ -n "$EXISTING_ID" ]]; then
+                echo "$NAME already has the expected size on Gitee; verifying its download before deciding whether to upload."
+                EXPECTED="$(python3 -c 'import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "pak/$NAME")"
+                ACTUAL="$(curl --fail --location --silent --show-error --connect-timeout 30 --max-time 300 \
+                  "https://gitee.com/perish-with-honor/rlyux/releases/download/$TAG/$NAME" | sha256sum | cut -d ' ' -f 1 || true)"
+                if [[ "$ACTUAL" == "$EXPECTED" ]]; then
+                  echo "Verified existing Gitee $NAME SHA-256=$ACTUAL"
+                  break
+                fi
+                echo "Existing Gitee $NAME does not match expected SHA; replacing it."
+              fi
+
+              while IFS= read -r OLD_ID; do
+                [[ -n "$OLD_ID" ]] || continue
+                (umask 077; printf 'url = "%s?access_token=%s"\n' "$API/releases/$RELEASE_ID/attach_files/$OLD_ID" "$GITEE_RELEASE_TOKEN" > "$AUTH_CONFIG")
+                STATUS="$(curl --silent --show-error --connect-timeout 30 --max-time 120 --output /dev/null --write-out '%{http_code}' --request DELETE --config "$AUTH_CONFIG")"
+                [[ "$STATUS" == '204' ]] || { echo "Could not replace Gitee asset $NAME (HTTP $STATUS)" >&2; exit 1; }
+              done < <(jq -r --arg name "$NAME" '.[] | select(.name == $name) | .id' "$ASSETS_JSON")
+
+              echo "Uploading $NAME attempt $ATTEMPT/3 ($EXPECTED_SIZE bytes)."
+              STATUS="$(curl --silent --show-error --connect-timeout 30 --max-time 1200 \
+                --output "$ASSET_JSON" --write-out '%{http_code}' \
+                --request POST "$API/releases/$RELEASE_ID/attach_files" \
+                --form-string "access_token=$GITEE_RELEASE_TOKEN" \
+                --form "file=@pak/$NAME")" || STATUS='000'
+              if [[ "$STATUS" == '201' ]] && [[ "$(jq -r '.name // empty' "$ASSET_JSON")" == "$NAME" ]] \
+                  && [[ "$(jq -r '.size // -1' "$ASSET_JSON")" == "$EXPECTED_SIZE" ]]; then
+                echo "Uploaded $NAME ($(stat -c '%s' "pak/$NAME") bytes)."
+                break
+              fi
+              echo "Gitee upload attempt $ATTEMPT for $NAME did not complete successfully (HTTP $STATUS)." >&2
+              [[ "$ATTEMPT" == '3' ]] || sleep 15
+            done
           done
 
           for NAME in settings.pak.rpe ui.pak.rpe updatefs.pak.rpe; do
