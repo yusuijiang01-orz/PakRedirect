@@ -1,8 +1,8 @@
-﻿latest_version ios 330-333 android 575-587 force_dl 1000
+latest_version ios 342-342 android 610-610 force_dl 1000
 download_url, https://tamgioipt.vn/tai-game-gia-lap,276,173694726
-https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/pak-test/updatefs.pak.rpe,data/,updatefs.pak,38217860,0,2026102617
-https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/pak-test/settings.pak.rpe,data/,settings.pak,2240093,0,2026102615
-https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/pak-test/ui.pak.rpe,data/,ui.pak,476456,0,2026102616
+https://cdn-tgpt.tepaylink.vn/production/updatefs.pak?ver=411,data/,updatefs.pak,37966524,0,2026102602
+https://cdn-tgpt.tepaylink.vn/production/settings.pak?ver=2,data/,settings.pak,2240093,0,2026102600
+https://cdn-tgpt.tepaylink.vn/production/ui.pak?ver=2,data/,ui.pak,476456,0,2026102601
 https://cdn-tgpt.tepaylink.vn/production/resource.pak?ver=1,data/,resource.pak,50178358,0,1
 https://cdn-tgpt.tepaylink.vn/production/spr.pak?ver=1,data/,spr.pak,1426869634,0,1
 https://cdn-tgpt.tepaylink.vn/production/script.pak?ver=1,data/,script.pak,5978344,0,1
@@ -10,3 +10,5 @@ https://cdn-tgpt.tepaylink.vn/production/fs2008.pak?ver=1,data/,fs2008.pak,11257
 https://cdn-tgpt.tepaylink.vn/production/maps.pak?ver=1,data/,maps.pak,72912899,0,1
 https://cdn-tgpt.tepaylink.vn/production/update.pak?ver=1,data/,update.pak,18674365,0,1
 https://cdn-tgpt.tepaylink.vn/production/blaze.pak?ver=1,data/,blaze.pak,124242410,0,1
+https://cdn-tgpt.tepaylink.vn/production/update1.pak?ver=1,data/,update1.pak,542502540,0,1
+https://cdn-tgpt.tepaylink.vn/production/serverlist.pak?ver=1,data/,serverlist.pak,5492742,0,1
