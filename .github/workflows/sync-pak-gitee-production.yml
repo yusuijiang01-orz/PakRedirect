@@ -1,6 +1,7 @@
 name: Sync production localization PAKs to Gitee
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - codex/sign-610-localized-candidate
