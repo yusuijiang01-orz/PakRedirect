@@ -1,0 +1,181 @@
+name: Sync protected localization packages to Gitee
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/sync-pak-gitee.yml'
+      - 'pak/linkspak.txt'
+      - 'pak/manifest.json'
+      - 'pak/settings.pak.rpe'
+      - 'pak/ui.pak.rpe'
+      - 'pak/updatefs.pak.rpe'
+      - 'pak-test/linkspak.txt'
+      - 'pak-test/manifest.json'
+      - 'pak-test/settings.pak.rpe'
+      - 'pak-test/ui.pak.rpe'
+      - 'pak-test/updatefs.pak.rpe'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-protected-paks-to-gitee
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out protected packages
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Validate both package sets and Gitee credential
+        shell: bash
+        env:
+          GITEE_RELEASE_TOKEN: ${{ secrets.GITEE_RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$GITEE_RELEASE_TOKEN" || {
+            echo 'Missing GITEE_RELEASE_TOKEN repository secret.' >&2
+            exit 1
+          }
+          python3 - <<'PY'
+          import base64
+          import hashlib
+          import json
+          from pathlib import Path
+
+          for channel in ('pak', 'pak-test'):
+              root = Path(channel)
+              outer = json.loads((root / 'manifest.json').read_text(encoding='utf-8'))
+              payload = json.loads(base64.b64decode(outer['payload_b64'], validate=True))
+              expected = {item['encrypted_name']: item for item in payload['files']}
+              required = {'settings.pak.rpe', 'ui.pak.rpe', 'updatefs.pak.rpe'}
+              if set(expected) != required:
+                  raise SystemExit(f'{channel}: invalid manifest file set.')
+              for name, item in expected.items():
+                  path = root / name
+                  if path.stat().st_size != item['encrypted_size']:
+                      raise SystemExit(f'{channel}/{name}: size mismatch.')
+                  if hashlib.sha256(path.read_bytes()).hexdigest() != item['encrypted_sha256']:
+                      raise SystemExit(f'{channel}/{name}: SHA-256 mismatch.')
+              link = root / 'linkspak.txt'
+              metadata = payload['linkspak']
+              if link.stat().st_size != metadata['size']:
+                  raise SystemExit(f'{channel}/linkspak.txt: size mismatch.')
+              if hashlib.sha256(link.read_bytes()).hexdigest() != metadata['sha256']:
+                  raise SystemExit(f'{channel}/linkspak.txt: SHA-256 mismatch.')
+          print('Verified both protected package sets.')
+          PY
+
+      - name: Sync manifests to Gitee master branch
+        shell: bash
+        env:
+          GITEE_RELEASE_TOKEN: ${{ secrets.GITEE_RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          API='https://gitee.com/api/v5'
+          AUTH_CONFIG="$RUNNER_TEMP/gitee-user-curl.conf"
+          USER_JSON="$RUNNER_TEMP/gitee-user.json"
+          (umask 077; printf 'url = "%s/user?access_token=%s"\n' "$API" "$GITEE_RELEASE_TOKEN" > "$AUTH_CONFIG")
+          curl --fail --silent --show-error --config "$AUTH_CONFIG" --output "$USER_JSON"
+          GITEE_USERNAME="$(jq -er '.login' "$USER_JSON")"
+          GITEE_DIR="$RUNNER_TEMP/rlyux-gitee"
+          ASKPASS="$RUNNER_TEMP/gitee-askpass.sh"
+          cat > "$ASKPASS" <<'ASKPASS_EOF'
+          #!/usr/bin/env bash
+          case "${1:-}" in
+            *Username*) printf '%s\n' "$GITEE_USERNAME" ;;
+            *Password*) printf '%s\n' "$GITEE_RELEASE_TOKEN" ;;
+            *) exit 1 ;;
+          esac
+          ASKPASS_EOF
+          chmod 700 "$ASKPASS"
+          git clone --depth 1 --single-branch --branch master https://gitee.com/perish-with-honor/rlyux.git "$GITEE_DIR"
+          for CHANNEL in pak pak-test; do
+            mkdir -p "$GITEE_DIR/$CHANNEL"
+            cp "$CHANNEL/linkspak.txt" "$CHANNEL/manifest.json" "$GITEE_DIR/$CHANNEL/"
+            git -C "$GITEE_DIR" add "$CHANNEL/linkspak.txt" "$CHANNEL/manifest.json"
+          done
+          if ! git -C "$GITEE_DIR" diff --cached --quiet; then
+            git -C "$GITEE_DIR" config user.name 'GitHub Actions'
+            git -C "$GITEE_DIR" config user.email 'github-actions[bot]@users.noreply.github.com'
+            git -C "$GITEE_DIR" commit -m 'Sync protected 587 localization manifests'
+            GITEE_RELEASE_TOKEN="$GITEE_RELEASE_TOKEN" GITEE_USERNAME="$GITEE_USERNAME" GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 git -C "$GITEE_DIR" push origin HEAD:master
+          fi
+          for CHANNEL in pak pak-test; do
+            curl --fail --location --silent --show-error \
+              "https://gitee.com/perish-with-honor/rlyux/raw/master/$CHANNEL/linkspak.txt" \
+              --output "$RUNNER_TEMP/gitee-$CHANNEL-linkspak.txt"
+            cmp "$CHANNEL/linkspak.txt" "$RUNNER_TEMP/gitee-$CHANNEL-linkspak.txt"
+          done
+          rm -f "$AUTH_CONFIG"
+          echo 'Both Gitee raw manifests match the GitHub package.'
+
+      - name: Replace and verify both Gitee Release packages
+        shell: bash
+        env:
+          GITEE_RELEASE_TOKEN: ${{ secrets.GITEE_RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          API='https://gitee.com/api/v5/repos/perish-with-honor/rlyux'
+          for CHANNEL in pak pak-test; do
+            if [[ "$CHANNEL" == 'pak' ]]; then TAG='pak-latest'; else TAG='pak-test'; fi
+            RELEASE_JSON="$RUNNER_TEMP/gitee-$TAG-release.json"
+            STATUS="$(curl --silent --show-error --output "$RELEASE_JSON" --write-out '%{http_code}' \
+              "$API/releases/tags/$TAG")"
+            [[ "$STATUS" == '200' ]] || { echo "Gitee $TAG release lookup failed (HTTP $STATUS)." >&2; exit 1; }
+            RELEASE_ID="$(jq -er '.id' "$RELEASE_JSON")"
+            for NAME in settings.pak.rpe ui.pak.rpe updatefs.pak.rpe linkspak.txt; do
+              LOCAL="$CHANNEL/$NAME"
+              EXPECTED_SIZE="$(stat -c '%s' "$LOCAL")"
+              ASSETS_JSON="$RUNNER_TEMP/gitee-$TAG-assets.json"
+              STATUS="$(curl --silent --show-error --connect-timeout 30 --max-time 60 \
+                --output "$ASSETS_JSON" --write-out '%{http_code}' \
+                "$API/releases/$RELEASE_ID/attach_files?per_page=100")"
+              [[ "$STATUS" == '200' ]] || { echo "Gitee $TAG asset lookup failed (HTTP $STATUS)." >&2; exit 1; }
+              MATCHED=0
+              while IFS=$'\t' read -r ASSET_ID ASSET_SIZE ASSET_URL; do
+                [[ -n "$ASSET_ID" ]] || continue
+                if [[ "$ASSET_SIZE" == "$EXPECTED_SIZE" ]]; then
+                  REMOTE="$RUNNER_TEMP/gitee-$TAG-$NAME-check"
+                  if curl --fail --location --silent --show-error --http1.1 \
+                    --connect-timeout 30 --max-time 3600 "$ASSET_URL" --output "$REMOTE" \
+                    && cmp -s "$LOCAL" "$REMOTE"; then
+                    MATCHED=1
+                    break
+                  fi
+                fi
+                AUTH_CONFIG="$RUNNER_TEMP/gitee-delete-curl.conf"
+                (umask 077; printf 'url = "%s/releases/%s/attach_files/%s?access_token=%s"\n' \
+                  "$API" "$RELEASE_ID" "$ASSET_ID" "$GITEE_RELEASE_TOKEN" > "$AUTH_CONFIG")
+                STATUS="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+                  --request DELETE --config "$AUTH_CONFIG")"
+                rm -f "$AUTH_CONFIG"
+                [[ "$STATUS" == '204' ]] || { echo "Could not replace Gitee $TAG/$NAME (HTTP $STATUS)." >&2; exit 1; }
+              done < <(jq -r --arg name "$NAME" '.[] | select(.name == $name) | [.id,.size,.browser_download_url] | @tsv' "$ASSETS_JSON")
+              if [[ "$MATCHED" -eq 1 ]]; then
+                echo "Gitee $TAG/$NAME already matches."
+                continue
+              fi
+              ASSET_JSON="$RUNNER_TEMP/gitee-$TAG-$NAME.json"
+              STATUS="$(curl --silent --show-error --http1.1 --header 'Expect:' \
+                --connect-timeout 30 --max-time 3600 --output "$ASSET_JSON" --write-out '%{http_code}' \
+                --request POST "$API/releases/$RELEASE_ID/attach_files" \
+                --form-string "access_token=$GITEE_RELEASE_TOKEN" --form "file=@$LOCAL")"
+              [[ "$STATUS" == '201' ]] || { echo "Gitee $TAG/$NAME upload failed (HTTP $STATUS)." >&2; exit 1; }
+              [[ "$(jq -er '.name' "$ASSET_JSON")" == "$NAME" ]]
+              [[ "$(jq -er '.size' "$ASSET_JSON")" == "$EXPECTED_SIZE" ]]
+              ASSET_URL="https://gitee.com/perish-with-honor/rlyux/releases/download/$TAG/$NAME"
+              curl --fail --location --silent --show-error --http1.1 \
+                --connect-timeout 30 --max-time 3600 "$ASSET_URL" --output "$RUNNER_TEMP/gitee-$TAG-$NAME-verify"
+              cmp "$LOCAL" "$RUNNER_TEMP/gitee-$TAG-$NAME-verify"
+              echo "Gitee $TAG/$NAME verified."
+            done
+          done
