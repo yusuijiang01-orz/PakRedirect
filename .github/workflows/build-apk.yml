@@ -6,16 +6,25 @@ on:
       version_name:
         description: 'Version name, for example 2.4.26-test'
         required: true
-        default: '2.4.26-test'
+        default: '2.4.55-test'
       version_code:
         description: 'Monotonically increasing Android versionCode'
         required: true
-        default: '47'
+        default: '76'
       publish_release:
         description: 'Publish GitHub and Gitee releases after building (leave off for a test build)'
         required: true
         type: boolean
         default: false
+  push:
+    branches:
+      - codex/sign-610-localized-candidate
+    paths:
+      - .github/workflows/build-apk.yml
+      - app/src/main/java/com/example/pakredirect/RyluxAdaptiveLayoutFix.java
+      - app/src/main/java/com/example/pakredirect/RyluxHomeNavigationPolish.java
+      - app/src/main/java/com/example/pakredirect/RyluxResponsiveTuner.java
+      - app/src/main/java/com/example/pakredirect/RyluxViewport.java
 
 jobs:
   build-apk:
@@ -24,6 +33,8 @@ jobs:
       contents: write
 
     env:
+      RYLUX_VERSION_NAME: ${{ inputs.version_name || '2.4.55-test' }}
+      RYLUX_VERSION_CODE: ${{ inputs.version_code || '76' }}
       RYLUX_KEYSTORE_B64: ${{ secrets.RYLUX_KEYSTORE_B64 }}
       RYLUX_KEYSTORE_PASSWORD: ${{ secrets.RYLUX_KEYSTORE_PASSWORD }}
       RYLUX_KEY_ALIAS: ${{ secrets.RYLUX_KEY_ALIAS }}
@@ -95,8 +106,8 @@ jobs:
         run: |
           set -euo pipefail
           gradle assembleRelease --stacktrace \
-            -PryluxVersionName='${{ inputs.version_name }}' \
-            -PryluxVersionCode='${{ inputs.version_code }}'
+            -PryluxVersionName="$RYLUX_VERSION_NAME" \
+            -PryluxVersionCode="$RYLUX_VERSION_CODE"
 
       - name: Verify APK signature
         shell: bash
@@ -105,14 +116,14 @@ jobs:
           APK="$(find app/build/outputs/apk/release -name '*.apk' | head -n 1)"
           APKSIGNER="$ANDROID_HOME/build-tools/36.1.0/apksigner"
           "$APKSIGNER" verify --verbose --print-certs "$APK"
-          cp "$APK" "RYLUX-v${{ inputs.version_name }}.apk"
+          cp "$APK" "RYLUX-v${RYLUX_VERSION_NAME}.apk"
 
       - name: Upload non-release test APK artifact
         if: ${{ !inputs.publish_release }}
         uses: actions/upload-artifact@v4
         with:
-          name: RYLUX-v${{ inputs.version_name }}-test-${{ github.sha }}
-          path: RYLUX-v${{ inputs.version_name }}.apk
+          name: RYLUX-v${{ env.RYLUX_VERSION_NAME }}-test-${{ github.sha }}
+          path: RYLUX-v${{ env.RYLUX_VERSION_NAME }}.apk
           if-no-files-found: error
           retention-days: 14
 
@@ -120,19 +131,19 @@ jobs:
         if: inputs.publish_release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ inputs.version_name }}
-          name: RYLUX v${{ inputs.version_name }}
+          tag_name: v${{ env.RYLUX_VERSION_NAME }}
+          name: RYLUX v${{ env.RYLUX_VERSION_NAME }}
           generate_release_notes: true
           overwrite_files: true
           files: |
-            RYLUX-v${{ inputs.version_name }}.apk
+            RYLUX-v${{ env.RYLUX_VERSION_NAME }}.apk
 
       - name: Sync signed APK to Gitee Release
         if: inputs.publish_release
         env:
           GITEE_RELEASE_TOKEN: ${{ secrets.GITEE_RELEASE_TOKEN }}
-          VERSION_NAME: ${{ inputs.version_name }}
-          VERSION_CODE: ${{ inputs.version_code }}
+          VERSION_NAME: ${{ env.RYLUX_VERSION_NAME }}
+          VERSION_CODE: ${{ env.RYLUX_VERSION_CODE }}
           SOURCE_COMMIT: ${{ github.sha }}
         shell: bash
         run: |
