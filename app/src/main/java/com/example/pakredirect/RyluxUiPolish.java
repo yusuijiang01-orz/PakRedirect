@@ -6,6 +6,7 @@ import android.graphics.Outline;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
+import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -274,8 +275,9 @@ public final class RyluxUiPolish {
 
         ImageView poster = new ImageView(activity);
         poster.setImageResource(R.drawable.fengshenbang_hero);
-        poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        poster.setScaleType(ImageView.ScaleType.FIT_CENTER);
         poster.setAdjustViewBounds(false);
+        poster.setBackgroundColor(Color.rgb(10, 17, 28));
         hero.addView(poster, new FrameLayout.LayoutParams(-1, -1));
 
         View shade = new View(activity);
@@ -421,11 +423,15 @@ public final class RyluxUiPolish {
         username.setTextSize(17);
         username.setTextColor(TEXT);
         username.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        username.setSingleLine(true);
+        username.setEllipsize(TextUtils.TruncateAt.END);
         userText.addView(username, new LinearLayout.LayoutParams(-1, -2));
 
         String stateText = value(state);
         state.setTextSize(14);
         state.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        state.setSingleLine(true);
+        state.setEllipsize(TextUtils.TruncateAt.END);
         state.setTextColor(stateText.contains("Admin") ? ADMIN_GREEN
                 : stateText.contains("体验") ? YELLOW
                 : stateText.contains("VIP") ? Color.rgb(255, 102, 112)

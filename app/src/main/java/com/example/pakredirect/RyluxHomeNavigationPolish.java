@@ -41,6 +41,7 @@ public final class RyluxHomeNavigationPolish {
     private static final String ACCOUNT_REGION_TAG = "rylux_account_region_v3";
     private static final String IDENTITY_ROW_TAG = "rylux_account_identity_row_v1";
     private static final String ACCOUNT_BUTTON_TAG = "rylux_account_button_v1";
+    private static final int ACCOUNT_BUTTON_BELOW_BREAKPOINT_DP = 420;
 
     private static final WeakHashMap<Activity, ViewTreeObserver.OnGlobalLayoutListener> LISTENERS =
             new WeakHashMap<>();
@@ -92,7 +93,7 @@ public final class RyluxHomeNavigationPolish {
         STYLED.add(root);
         root.setTag(ROOT_TAG);
         rebuild(activity, root, avatar, hero);
-        LAST_NARROW_MODE.put(root, RyluxViewport.widthDp(activity) < 320);
+        LAST_NARROW_MODE.put(root, RyluxViewport.widthDp(activity) <= ACCOUNT_BUTTON_BELOW_BREAKPOINT_DP);
     }
 
     private static void rebuild(
@@ -115,7 +116,7 @@ public final class RyluxHomeNavigationPolish {
         for (View child : preserved) root.removeView(child);
 
         int widthDp = RyluxViewport.widthDp(activity);
-        boolean narrow = widthDp < 320;
+        boolean narrow = widthDp <= ACCOUNT_BUTTON_BELOW_BREAKPOINT_DP;
 
         root.setPadding(
                 dp(activity, widthDp <= 360 ? 10 : 16),
@@ -176,6 +177,8 @@ public final class RyluxHomeNavigationPolish {
         // row so it does not compete with the avatar and button for space.
         TextView accountHint = label(activity, "会员状态 · 兑换码 · 退出登录", widthDp <= 360 ? 12 : 13, MUTED, false);
         accountHint.setIncludeFontPadding(true);
+        accountHint.setMaxLines(2);
+        accountHint.setHorizontallyScrolling(false);
         LinearLayout.LayoutParams hintLp = new LinearLayout.LayoutParams(-1, -2);
         hintLp.topMargin = dp(activity, 6);
         accountRegion.addView(accountHint, hintLp);
@@ -254,7 +257,7 @@ public final class RyluxHomeNavigationPolish {
     private static void adaptAccountRow(Activity activity, LinearLayout root) {
         Boolean wasNarrow = LAST_NARROW_MODE.get(root);
         if (wasNarrow == null) return;
-        boolean narrow = RyluxViewport.widthDp(activity) < 320;
+        boolean narrow = RyluxViewport.widthDp(activity) <= ACCOUNT_BUTTON_BELOW_BREAKPOINT_DP;
         if (wasNarrow == narrow) return;
 
         View regionRaw = findTagged(root, ACCOUNT_REGION_TAG);
@@ -298,11 +301,15 @@ public final class RyluxHomeNavigationPolish {
         int widthDp = RyluxViewport.widthDp(activity);
         int heightDp = RyluxViewport.heightDp(activity);
         boolean landscape = widthDp > heightDp;
-        // Android has already converted physical pixels to dp. Keep the card
-        // readable and let MainActivity's ScrollView handle short viewports.
+        // Match the 1529x2048 poster's natural portrait ratio. A fixed 340dp
+        // card was wider than the artwork at phone widths, so CENTER_CROP
+        // removed the character's head and other important content.
+        int sidePaddingDp = widthDp <= 360 ? 10 : 16;
+        int posterWidthDp = Math.max(1, widthDp - (sidePaddingDp * 2) - 2);
+        int posterHeightDp = Math.round(posterWidthDp * (2048f / 1529f));
         int heroHeightDp = landscape
                 ? Math.max(220, Math.min(300, Math.round(heightDp * 0.50f)))
-                : widthDp < 320 ? 300 : 340;
+                : Math.max(340, Math.min(680, posterHeightDp));
         return dp(activity, heroHeightDp);
     }
 
