@@ -30,6 +30,8 @@ android {
             // Pixel-fixture Lua integration tests use java.awt/ImageIO and run
             // in tools/lua-regression, not Android's local unit-test runtime.
             java.exclude '**/RecoveredLuaTaskTest.java'
+            java.exclude '**/RecoveredLuaLiveLoginTest.java'
+            java.exclude '**/LiveLuaDeviceHost.java'
         }
     }
 

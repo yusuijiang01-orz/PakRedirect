@@ -21,6 +21,7 @@ on:
       - codex/sign-610-localized-candidate
     paths:
       - .github/workflows/build-apk.yml
+      - app/build.gradle
       - app/src/main/java/com/example/pakredirect/RyluxAdaptiveLayoutFix.java
       - app/src/main/java/com/example/pakredirect/RyluxHomeNavigationPolish.java
       - app/src/main/java/com/example/pakredirect/RyluxResponsiveTuner.java
