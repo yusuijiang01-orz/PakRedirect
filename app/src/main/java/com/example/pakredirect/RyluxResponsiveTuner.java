@@ -1,7 +1,6 @@
 package com.example.pakredirect;
 
 import android.app.Activity;
-import android.content.res.Configuration;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -57,9 +56,8 @@ public final class RyluxResponsiveTuner {
     }
 
     private static void tune(Activity activity) {
-        Configuration configuration = activity.getResources().getConfiguration();
-        int widthDp = configuration.screenWidthDp;
-        int heightDp = configuration.screenHeightDp;
+        int widthDp = RyluxViewport.widthDp(activity);
+        int heightDp = RyluxViewport.heightDp(activity);
         boolean compact = widthDp <= 380 || heightDp <= 680;
         boolean wide = widthDp >= 600;
         tuneRecursive(activity, activity.getWindow().getDecorView(), widthDp, heightDp, compact, wide);

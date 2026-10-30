@@ -1,7 +1,6 @@
 package com.example.pakredirect;
 
 import android.app.Activity;
-import android.content.res.Configuration;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -51,9 +50,8 @@ public final class RyluxAdaptiveLayoutFix {
     }
 
     private static void tune(Activity activity) {
-        Configuration c = activity.getResources().getConfiguration();
-        int widthDp = c.screenWidthDp;
-        int heightDp = c.screenHeightDp;
+        int widthDp = RyluxViewport.widthDp(activity);
+        int heightDp = RyluxViewport.heightDp(activity);
         boolean landscape = widthDp > heightDp;
         String key = widthDp + "x" + heightDp + ":" + landscape;
 
@@ -159,14 +157,14 @@ public final class RyluxAdaptiveLayoutFix {
     }
 
     static boolean shouldScrollGamePanel(Activity activity) {
-        Configuration c = activity.getResources().getConfiguration();
-        return c.screenWidthDp <= 380 || c.screenHeightDp <= 760 || c.screenWidthDp > c.screenHeightDp;
+        int widthDp = RyluxViewport.widthDp(activity);
+        int heightDp = RyluxViewport.heightDp(activity);
+        return widthDp <= 380 || heightDp <= 760 || widthDp > heightDp;
     }
 
     static float gameDetailScale(Activity activity) {
-        Configuration c = activity.getResources().getConfiguration();
-        float width = c.screenWidthDp / 380f;
-        float height = c.screenHeightDp / 760f;
+        float width = RyluxViewport.widthDp(activity) / 380f;
+        float height = RyluxViewport.heightDp(activity) / 760f;
         return Math.max(0.72f, Math.min(1f, Math.min(width, height)));
     }
 
@@ -193,8 +191,9 @@ public final class RyluxAdaptiveLayoutFix {
     }
 
     static FrameLayout.LayoutParams gamePanelScrollParams(Activity activity) {
-        Configuration c = activity.getResources().getConfiguration();
-        return scrollParams(activity, c.screenWidthDp, c.screenWidthDp > c.screenHeightDp);
+        int widthDp = RyluxViewport.widthDp(activity);
+        int heightDp = RyluxViewport.heightDp(activity);
+        return scrollParams(activity, widthDp, widthDp > heightDp);
     }
 
     private static FrameLayout findHeroShell(LinearLayout root) {

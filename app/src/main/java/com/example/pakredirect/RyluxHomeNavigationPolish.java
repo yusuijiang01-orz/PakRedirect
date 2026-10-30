@@ -2,7 +2,6 @@ package com.example.pakredirect;
 
 import android.app.Activity;
 import android.content.Intent;
-import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -40,11 +39,14 @@ public final class RyluxHomeNavigationPolish {
 
     private static final String ROOT_TAG = "rylux_home_navigation_v3";
     private static final String ACCOUNT_REGION_TAG = "rylux_account_region_v3";
+    private static final String IDENTITY_ROW_TAG = "rylux_account_identity_row_v1";
+    private static final String ACCOUNT_BUTTON_TAG = "rylux_account_button_v1";
 
     private static final WeakHashMap<Activity, ViewTreeObserver.OnGlobalLayoutListener> LISTENERS =
             new WeakHashMap<>();
     private static final Set<View> STYLED =
             Collections.newSetFromMap(new WeakHashMap<>());
+    private static final WeakHashMap<View, Boolean> LAST_NARROW_MODE = new WeakHashMap<>();
 
     private RyluxHomeNavigationPolish() {}
 
@@ -79,7 +81,10 @@ public final class RyluxHomeNavigationPolish {
         if (hero == null || hero.getChildCount() < 3) return;
         if (!(hero.getParent() instanceof LinearLayout)) return;
         LinearLayout root = (LinearLayout) hero.getParent();
-        if (ROOT_TAG.equals(root.getTag()) || STYLED.contains(root)) return;
+        if (ROOT_TAG.equals(root.getTag()) || STYLED.contains(root)) {
+            adaptAccountRow(activity, root);
+            return;
+        }
 
         FrameLayout avatar = findHomeAvatar(root, hero);
         if (avatar == null) return;
@@ -87,6 +92,7 @@ public final class RyluxHomeNavigationPolish {
         STYLED.add(root);
         root.setTag(ROOT_TAG);
         rebuild(activity, root, avatar, hero);
+        LAST_NARROW_MODE.put(root, RyluxViewport.widthDp(activity) < 320);
     }
 
     private static void rebuild(
@@ -108,9 +114,8 @@ public final class RyluxHomeNavigationPolish {
         }
         for (View child : preserved) root.removeView(child);
 
-        Configuration c = activity.getResources().getConfiguration();
-        int widthDp = c.screenWidthDp;
-        boolean narrow = widthDp < 280;
+        int widthDp = RyluxViewport.widthDp(activity);
+        boolean narrow = widthDp < 320;
 
         root.setPadding(
                 dp(activity, widthDp <= 360 ? 10 : 16),
@@ -140,6 +145,7 @@ public final class RyluxHomeNavigationPolish {
         accountRegion.setOnClickListener(v -> avatar.performClick());
 
         LinearLayout identityRow = new LinearLayout(activity);
+        identityRow.setTag(IDENTITY_ROW_TAG);
         identityRow.setOrientation(LinearLayout.HORIZONTAL);
         identityRow.setGravity(Gravity.CENTER_VERTICAL);
         identityRow.setBaselineAligned(false);
@@ -159,14 +165,10 @@ public final class RyluxHomeNavigationPolish {
         accountText.addView(accountTitle, new LinearLayout.LayoutParams(-1, -2));
         identityRow.addView(accountText, new LinearLayout.LayoutParams(0, -2, 1f));
 
-        if (!narrow) {
-            Button accountButton = smallButton(activity, "查看");
-            accountButton.setOnClickListener(v -> avatar.performClick());
-            LinearLayout.LayoutParams accountButtonLp =
-                    new LinearLayout.LayoutParams(dp(activity, (widthDp >= 600 ? 78 : 68)), dp(activity, 42));
-            accountButtonLp.leftMargin = dp(activity, 10);
-            identityRow.addView(accountButton, accountButtonLp);
-        }
+        Button accountButton = smallButton(activity, narrow ? "查看账号" : "查看");
+        accountButton.setTag(ACCOUNT_BUTTON_TAG);
+        accountButton.setOnClickListener(v -> avatar.performClick());
+        if (!narrow) identityRow.addView(accountButton, accountButtonParams(activity, widthDp));
 
         accountRegion.addView(identityRow, new LinearLayout.LayoutParams(-1, -2));
 
@@ -179,11 +181,7 @@ public final class RyluxHomeNavigationPolish {
         accountRegion.addView(accountHint, hintLp);
 
         if (narrow) {
-            Button accountButton = smallButton(activity, "查看账号");
-            accountButton.setOnClickListener(v -> avatar.performClick());
-            LinearLayout.LayoutParams buttonLp = new LinearLayout.LayoutParams(-1, dp(activity, 40));
-            buttonLp.topMargin = dp(activity, 8);
-            accountRegion.addView(accountButton, buttonLp);
+            accountRegion.addView(accountButton, accountButtonBelowParams(activity));
         }
 
         LinearLayout.LayoutParams accountLp = new LinearLayout.LayoutParams(-1, -2);
@@ -253,15 +251,58 @@ public final class RyluxHomeNavigationPolish {
         for (View child : preserved) root.addView(child);
     }
 
+    private static void adaptAccountRow(Activity activity, LinearLayout root) {
+        Boolean wasNarrow = LAST_NARROW_MODE.get(root);
+        if (wasNarrow == null) return;
+        boolean narrow = RyluxViewport.widthDp(activity) < 320;
+        if (wasNarrow == narrow) return;
+
+        View regionRaw = findTagged(root, ACCOUNT_REGION_TAG);
+        View rowRaw = findTagged(root, IDENTITY_ROW_TAG);
+        View buttonRaw = findTagged(root, ACCOUNT_BUTTON_TAG);
+        if (!(regionRaw instanceof LinearLayout)
+                || !(rowRaw instanceof LinearLayout)
+                || !(buttonRaw instanceof Button)) return;
+
+        LinearLayout region = (LinearLayout) regionRaw;
+        LinearLayout row = (LinearLayout) rowRaw;
+        Button button = (Button) buttonRaw;
+        if (button.getParent() instanceof ViewGroup) {
+            ((ViewGroup) button.getParent()).removeView(button);
+        }
+
+        if (narrow) {
+            button.setText("查看账号");
+            region.addView(button, accountButtonBelowParams(activity));
+        } else {
+            button.setText("查看");
+            row.addView(button, accountButtonParams(activity, RyluxViewport.widthDp(activity)));
+        }
+        LAST_NARROW_MODE.put(root, narrow);
+    }
+
+    private static LinearLayout.LayoutParams accountButtonParams(Activity activity, int widthDp) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                dp(activity, widthDp >= 600 ? 78 : 68), dp(activity, 42));
+        params.leftMargin = dp(activity, 10);
+        return params;
+    }
+
+    private static LinearLayout.LayoutParams accountButtonBelowParams(Activity activity) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(activity, 40));
+        params.topMargin = dp(activity, 8);
+        return params;
+    }
+
     static int homeHeroHeight(Activity activity) {
-        Configuration c = activity.getResources().getConfiguration();
-        int heightDp = c.screenHeightDp;
-        boolean landscape = c.screenWidthDp > heightDp;
+        int widthDp = RyluxViewport.widthDp(activity);
+        int heightDp = RyluxViewport.heightDp(activity);
+        boolean landscape = widthDp > heightDp;
         // Android has already converted physical pixels to dp. Keep the card
         // readable and let MainActivity's ScrollView handle short viewports.
         int heroHeightDp = landscape
                 ? Math.max(220, Math.min(300, Math.round(heightDp * 0.50f)))
-                : c.screenWidthDp < 320 ? 300 : 340;
+                : widthDp < 320 ? 300 : 340;
         return dp(activity, heroHeightDp);
     }
 
@@ -282,6 +323,17 @@ public final class RyluxHomeNavigationPolish {
         ViewGroup group = (ViewGroup) view;
         for (int i = 0; i < group.getChildCount(); i++) {
             GlowFrameLayout found = findHero(group.getChildAt(i));
+            if (found != null) return found;
+        }
+        return null;
+    }
+
+    private static View findTagged(View view, String tag) {
+        if (tag.equals(view.getTag())) return view;
+        if (!(view instanceof ViewGroup)) return null;
+        ViewGroup group = (ViewGroup) view;
+        for (int i = 0; i < group.getChildCount(); i++) {
+            View found = findTagged(group.getChildAt(i), tag);
             if (found != null) return found;
         }
         return null;
