@@ -4,10 +4,7 @@ import android.app.Activity;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.ViewParent;
 import android.view.ViewTreeObserver;
-import android.util.Log;
-import android.graphics.Rect;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -25,7 +22,6 @@ public final class RyluxAdaptiveLayoutFix {
             new WeakHashMap<>();
     private static final WeakHashMap<View, String> LAST_HOME_KEY = new WeakHashMap<>();
     private static final WeakHashMap<View, String> LAST_PANEL_KEY = new WeakHashMap<>();
-    private static final WeakHashMap<View, Boolean> HOME_LAYOUT_DIAGNOSTICS = new WeakHashMap<>();
 
     private RyluxAdaptiveLayoutFix() {}
 
@@ -67,7 +63,11 @@ public final class RyluxAdaptiveLayoutFix {
         }
 
         TextView gameHeading = findGameDetailHeading(activity.getWindow().getDecorView());
-        LinearLayout gamePanel = gameHeading == null ? null : findPanel(gameHeading);
+        // The home tree can retain a hidden game-details label while it is
+        // rebuilt. Never wrap the homepage itself in the detail-panel scroller:
+        // that nests ScrollViews beneath the pinned header and clips the poster.
+        LinearLayout gamePanel = gameHeading == null || isInsideHomeNavigation(gameHeading)
+                ? null : findPanel(gameHeading);
         if (gamePanel != null && !key.equals(LAST_PANEL_KEY.get(gamePanel))) {
             LAST_PANEL_KEY.put(gamePanel, key);
             tuneGamePanel(activity, gamePanel, widthDp, heightDp, landscape);
@@ -95,10 +95,7 @@ public final class RyluxAdaptiveLayoutFix {
     private static void fitHomeHeroToArtwork(Activity activity, FrameLayout heroShell) {
         GlowFrameLayout hero = findFirst(heroShell, GlowFrameLayout.class);
         ImageView poster = hero == null ? null : findFirst(hero, ImageView.class);
-        if (hero == null || poster == null) {
-            Log.i("RyluxHomeFit", "missing hero shell children=" + heroShell.getChildCount());
-            return;
-        }
+        if (hero == null || poster == null) return;
 
         Runnable fit = () -> {
             int imageWidth = poster.getWidth();
@@ -106,84 +103,28 @@ public final class RyluxAdaptiveLayoutFix {
             int artworkWidth = artwork == null ? 0 : artwork.getIntrinsicWidth();
             int artworkHeight = artwork == null ? 0 : artwork.getIntrinsicHeight();
             if (imageWidth <= 0 || artworkWidth <= 0 || artworkHeight <= 0) {
-                Log.i("RyluxHomeFit", "not ready shell=" + heroShell.getWidth() + "x"
-                        + heroShell.getHeight() + " poster=" + poster.getWidth() + "x"
-                        + poster.getHeight() + " drawable=" + artworkWidth + "x" + artworkHeight);
                 return;
             }
 
             int imageHeight = Math.round(imageWidth * (artworkHeight / (float) artworkWidth));
-            ViewGroup.LayoutParams heroBefore = hero.getLayoutParams();
-            ViewGroup.LayoutParams shellBefore = heroShell.getLayoutParams();
             setMeasuredHeight(hero, imageHeight);
             setMeasuredHeight(heroShell, imageHeight + heroShell.getPaddingTop() + heroShell.getPaddingBottom());
-            Log.i("RyluxHomeFit", "fit shell=" + heroShell.getWidth() + "x"
-                    + heroShell.getHeight() + " lp=" + (shellBefore == null ? "null" : shellBefore.height)
-                    + " poster=" + poster.getWidth() + "x" + poster.getHeight()
-                    + " desired=" + imageHeight + " heroLp="
-                    + (heroBefore == null ? "null" : heroBefore.height)
-                    + " attached=" + heroShell.isAttachedToWindow());
-            logHomeViewChain("shell", heroShell);
-            logHomeViewChain("hero", hero);
-            logHomeViewChain("poster", poster);
         };
 
-        Log.i("RyluxHomeFit", "schedule shell=" + heroShell.getWidth() + "x"
-                + heroShell.getHeight() + " attached=" + heroShell.isAttachedToWindow());
         if (poster.getWidth() > 0) fit.run();
         heroShell.post(fit);
         heroShell.postDelayed(fit, 250L);
         heroShell.postDelayed(fit, 1000L);
-        if (!HOME_LAYOUT_DIAGNOSTICS.containsKey(heroShell)) {
-            HOME_LAYOUT_DIAGNOSTICS.put(heroShell, Boolean.TRUE);
-            View.OnLayoutChangeListener listener = (view, left, top, right, bottom,
-                    oldLeft, oldTop, oldRight, oldBottom) -> {
-                if (bottom - top != oldBottom - oldTop) {
-                    logHomeViewChain("layout-change", view);
-                }
-            };
-            heroShell.addOnLayoutChangeListener(listener);
-            hero.addOnLayoutChangeListener(listener);
-            poster.addOnLayoutChangeListener(listener);
-            heroShell.postDelayed(() -> {
-                logHomeViewChain("settled-shell", heroShell);
-                logHomeViewChain("settled-hero", hero);
-                logHomeViewChain("settled-poster", poster);
-            }, 2200L);
-        }
     }
 
-    private static void logHomeViewChain(String label, View start) {
-        View current = start;
-        for (int depth = 0; current != null && depth < 7; depth++) {
-            Rect visible = new Rect();
-            boolean hasVisible = current.getGlobalVisibleRect(visible);
-            int[] location = new int[2];
-            current.getLocationOnScreen(location);
-            ViewGroup.LayoutParams lp = current.getLayoutParams();
-            ViewParent parent = current.getParent();
-            String parentName = parent instanceof View
-                    ? ((View) parent).getClass().getSimpleName() + "@"
-                            + Integer.toHexString(System.identityHashCode(parent))
-                    : String.valueOf(parent);
-            Log.i("RyluxHomeFit", label + " depth=" + depth + " view="
-                    + current.getClass().getSimpleName() + "@"
-                    + Integer.toHexString(System.identityHashCode(current))
-                    + " xy=" + location[0] + "," + location[1]
-                    + " size=" + current.getWidth() + "x" + current.getHeight()
-                    + " measured=" + current.getMeasuredWidth() + "x" + current.getMeasuredHeight()
-                    + " lp=" + (lp == null ? "null" : lp.width + "x" + lp.height)
-                    + " visible=" + hasVisible + ":" + visible
-                    + " clip=" + (current instanceof ViewGroup
-                            ? ((ViewGroup) current).getClipChildren() + "/"
-                                    + ((ViewGroup) current).getClipToPadding()
-                            : "-")
-                    + " scrollY=" + (current instanceof ScrollView
-                            ? ((ScrollView) current).getScrollY() : "-")
-                    + " tag=" + current.getTag()
-                    + " parent=" + parentName);
-            current = parent instanceof View ? (View) parent : null;
+    private static boolean isInsideHomeNavigation(View view) {
+        View current = view;
+        while (current != null) {
+            if (HOME_TAG.equals(current.getTag())) return true;
+            if (!(current.getParent() instanceof View)) break;
+            current = (View) current.getParent();
         }
+        return false;
     }
 
     private static void setMeasuredHeight(View view, int height) {
