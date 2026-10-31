@@ -105,7 +105,6 @@ public final class RyluxHomeNavigationPolish {
         root.setTag(ROOT_TAG);
         rebuild(activity, root, avatar, hero);
         LAST_NARROW_MODE.put(root, RyluxViewport.widthDp(activity) <= ACCOUNT_BUTTON_BELOW_BREAKPOINT_DP);
-        restoreHomeScrollPosition(root);
     }
 
     private static void rebuild(
