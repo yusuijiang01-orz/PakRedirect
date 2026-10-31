@@ -176,7 +176,7 @@ public final class RyluxHomeNavigationPolish {
         portraitLp.rightMargin = dp(activity, 10);
         row.addView(portrait, portraitLp);
 
-        LinearLayout vip = membership(activity, originalAvatar);
+        View vip = membership(activity, originalAvatar);
         row.addView(vip, new LinearLayout.LayoutParams(0, -2, 1f));
         if (!narrow) {
             row.addView(headerIcon(activity, R.drawable.ic_rylux_bell, "通知（暂不可用）"),
