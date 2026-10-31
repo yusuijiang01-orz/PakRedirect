@@ -13,6 +13,7 @@ import android.view.ViewTreeObserver;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.Space;
 import android.widget.TextView;
 
@@ -94,6 +95,7 @@ public final class RyluxHomeNavigationPolish {
         root.setTag(ROOT_TAG);
         rebuild(activity, root, avatar, hero);
         LAST_NARROW_MODE.put(root, RyluxViewport.widthDp(activity) <= ACCOUNT_BUTTON_BELOW_BREAKPOINT_DP);
+        restoreHomeScrollPosition(root);
     }
 
     private static void rebuild(
@@ -412,5 +414,22 @@ public final class RyluxHomeNavigationPolish {
 
     private static int dp(Activity activity, float value) {
         return Math.round(value * activity.getResources().getDisplayMetrics().density);
+    }
+
+    private static void restoreHomeScrollPosition(View homeRoot) {
+        View current = homeRoot;
+        while (current.getParent() instanceof View) {
+            current = (View) current.getParent();
+            if (current instanceof ScrollView) {
+                ScrollView scroll = (ScrollView) current;
+                scroll.setFocusableInTouchMode(true);
+                scroll.setDescendantFocusability(ViewGroup.FOCUS_BEFORE_DESCENDANTS);
+                scroll.post(() -> {
+                    scroll.requestFocus();
+                    scroll.scrollTo(0, 0);
+                });
+                return;
+            }
+        }
     }
 }
