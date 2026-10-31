@@ -42,12 +42,15 @@ public final class ScriptRuntimeService extends Service {
     private volatile ScriptExecutionControl control;
     private volatile String lastMessage = "就绪";
     private volatile String state = ScriptExecutionControl.State.IDLE.name();
+    private final ScriptWebRouteBridge routeBridge = new ScriptWebRouteBridge();
+    private ScriptRuntimeLog runtimeLog;
     private boolean workerRunning;
     private String pendingRestartConfig;
     private int latestStartId;
 
     @Override public void onCreate() {
         super.onCreate();
+        runtimeLog = new ScriptRuntimeLog(new java.io.File(getFilesDir(), "logs"));
         createNotificationChannel();
     }
 
@@ -87,6 +90,11 @@ public final class ScriptRuntimeService extends Service {
             publish("等待上一轮脚本退出后重新启动");
             return;
         }
+        JSONObject config;
+        try { config = new JSONObject(json == null ? "{}" : json); }
+        catch (Exception invalid) { publish("启动失败：方案配置无效"); stopSelf(latestStartId); return; }
+        runtimeLog.configure(config.optBoolean(ScriptRuntimeLog.AUTO_SAVE, true),
+                config.optBoolean(ScriptRuntimeLog.SOURCE_CONTEXT, true));
         if (!ScriptGameAdapter.isConnected()) {
             publish("启动失败：请先启用 RYLUX 游戏输入服务");
             stopSelf(latestStartId);
@@ -98,9 +106,13 @@ public final class ScriptRuntimeService extends Service {
             stopSelf(latestStartId);
             return;
         }
-        JSONObject config;
-        try { config = new JSONObject(json == null ? "{}" : json); }
-        catch (Exception invalid) { publish("启动失败：方案配置无效"); stopSelf(latestStartId); return; }
+        try {
+            routeBridge.start();
+        } catch (java.io.IOException failure) {
+            publish("启动失败：Lua 路线桥接无法监听：" + failure.getMessage());
+            stopSelf(latestStartId);
+            return;
+        }
         control = new ScriptExecutionControl();
         control.start();
         final ScriptExecutionControl runControl = control;
@@ -111,7 +123,7 @@ public final class ScriptRuntimeService extends Service {
         publish(lastMessage);
         executor.execute(() -> {
             LegacyLuaRuntime runtime = new LegacyLuaRuntime(this, runControl, config,
-                    this::publish, this::saveFailure);
+                    this::publish, this::saveFailure, routeBridge, runtimeLog);
             try {
                 awaitTargetGameForeground();
                 verifyStartupDisplayCapture();
@@ -155,6 +167,7 @@ public final class ScriptRuntimeService extends Service {
     private synchronized void finishWorker(ScriptExecutionControl finished) {
         if (control != finished) return;
         workerRunning = false;
+        routeBridge.close();
         String restart = pendingRestartConfig;
         pendingRestartConfig = null;
         if (restart != null) {
@@ -248,15 +261,21 @@ public final class ScriptRuntimeService extends Service {
     }
 
     private void publish(String message) {
-        lastMessage = message == null ? "" : message;
+        String eventMessage = message == null ? "" : message;
+        lastMessage = eventMessage;
         ScriptExecutionControl current = control;
-        state = current == null ? ScriptExecutionControl.State.IDLE.name() : current.getState().name();
+        String eventState = current == null ? ScriptExecutionControl.State.IDLE.name() : current.getState().name();
+        state = eventState;
+        try { runtimeLog.status(eventState, eventMessage); }
+        catch (java.io.IOException | RuntimeException error) {
+            Log.w("RYLUX-Lua", "运行日志写入失败", error);
+        }
         Intent event = new Intent(ACTION_STATUS).setPackage(getPackageName())
-                .putExtra(EXTRA_STATE, state).putExtra(EXTRA_MESSAGE, lastMessage);
+                .putExtra(EXTRA_STATE, eventState).putExtra(EXTRA_MESSAGE, eventMessage);
         sendBroadcast(event);
         NotificationManager manager = getSystemService(NotificationManager.class);
-        if (manager != null && !ScriptExecutionControl.State.IDLE.name().equals(state)) {
-            try { manager.notify(NOTIFICATION_ID, notification(lastMessage)); }
+        if (manager != null && !ScriptExecutionControl.State.IDLE.name().equals(eventState)) {
+            try { manager.notify(NOTIFICATION_ID, notification(eventMessage)); }
             catch (RuntimeException ignored) { }
         }
     }
@@ -291,6 +310,11 @@ public final class ScriptRuntimeService extends Service {
     }
 
     private void saveFailure(Throwable failure) {
+        ScriptExecutionControl current = control;
+        try { runtimeLog.failure(current == null ? state : current.getState().name(), failure); }
+        catch (java.io.IOException | RuntimeException error) {
+            Log.w("RYLUX-Lua", "失败日志写入失败", error);
+        }
         java.io.StringWriter buffer = new java.io.StringWriter();
         failure.printStackTrace(new java.io.PrintWriter(buffer));
         String detail = buffer.toString();
@@ -306,6 +330,7 @@ public final class ScriptRuntimeService extends Service {
     @Override public void onDestroy() {
         ScriptExecutionControl current = control;
         if (current != null) current.requestStop();
+        routeBridge.close();
         executor.shutdownNow();
         super.onDestroy();
     }

@@ -56,18 +56,16 @@ public final class ScriptToolsActivity extends Activity {
     private static final String GAME = "com.tepaylink.tamgioiphantranhmobile";
     private static final String SCRIPT = "脚本/封神榜.lua";
     private static final String[] REQUIRED_ASSETS = {
-            SCRIPT, "脚本/挂机模式.lua", "脚本/通用数据.lua", "脚本/中控.lua",
+            SCRIPT, "脚本/挂机模式.lua", "脚本/网页路线.lua", "脚本/通用数据.lua", "脚本/中控.lua",
             "脚本/tomocr.lua", "脚本/TURING_VIP.lua", "脚本/w.lua",
-            "插件/opPlugin.lua", "插件/自定义库.lua", "脚本/空格子0.png"
+            "插件/opPlugin.lua", "插件/自定义库.lua", "脚本/空格子0.png",
+            "脚本/素材库/汉化条款同意按钮.png",
+            "脚本/素材库/汉化服务器确认按钮.png",
+            "脚本/素材库/汉化登录按钮.png", "脚本/素材库/汉化角色确认按钮.png",
+            "脚本/素材库/汉化登录返回按钮.png"
     };
-    // Recovered map order, shown using the Chinese names used by the localized client.
-    private static final String[] MAPS = {
-            "崇城野外", "北海", "燕山", "西昆仑", "昆仑山", "首阳山", "游魂关", "苗疆", "巨鹿",
-            "潼关", "孟津", "城塘关", "荒漠", "荒漠2", "荒漠3", "荒漠4", "荒漠5",
-            "海1", "海2", "海3", "海4", "海5", "火1", "火2", "火3", "火4", "火5",
-            "冰1", "冰2", "冰3", "冰4", "冰5", "捆仙宫1", "捆仙宫2", "捆仙宫3",
-            "捆仙宫4", "捆仙宫5", "碧游宫1"
-    };
+    // The same allowlisted set is used by the local Lua route bridge.
+    private static final String[] MAPS = ScriptMapCatalog.MAPS;
     private static final int BG = Color.rgb(17, 19, 24);
     private static final int CARD = Color.rgb(28, 32, 40);
     private static final int SOFT = Color.rgb(34, 39, 48);
@@ -223,7 +221,7 @@ public final class ScriptToolsActivity extends Activity {
         addNumber(route, "队员找不到队长组队就回家次数", "找不到队长后返回", "2", "次", 1, 999);
 
         root = (LinearLayout) tabPages.get(2).getChildAt(0);
-        LinearLayout supplies = section("战斗与补给", "开关和阈值仅写入本机方案；运行宿主接入前不会触发游戏操作。");
+        LinearLayout supplies = section("战斗与补给", "自动战斗与药品补给按方案交给 Lua；战斗技能和装备耐久阈值暂只保存在本机，当前 Lua 没有对应执行逻辑。");
         addSwitch(supplies, "自动战斗", "自动战斗", false);
         addNumber(supplies, "战斗技能阈值", "技能触发阈值", "15", "%", 0, 100);
         addNumber(supplies, "装备耐久阈值", "装备耐久低于此值时处理", "15", "%", 0, 100);
@@ -243,14 +241,18 @@ public final class ScriptToolsActivity extends Activity {
         addNumber(supplies, "购买蓝的数量", "每次购买蓝药", "10", "个", 1, 99999);
 
         root = (LinearLayout) tabPages.get(3).getChildAt(0);
-        LinearLayout inventory = section("背包与装备", "装备出售默认关闭；只有显式启用并设置出售品质后才进入旧脚本出售流程，设备端仍待校准。");
-        addSwitch(inventory, "保护装备不出售", "保护装备不出售（建议开启）", true);
+        LinearLayout inventory = section("背包与装备", "背包剩余负重达到阈值或可用空格达到阈值，任一条件满足就前往大夫。装备默认不出售；要清理装备需开启“出售装备”并关闭“保护装备不出售”，再勾选品质（默认白、蓝）。回红/回内或词条无法确认的装备始终保留。");
+        addSwitch(inventory, "保护装备不出售", "总保护开关；开启后不出售任何装备", true);
         addSwitch(inventory, "检测修理装备", "检测并修理装备", true);
-        addNumber(inventory, "背包保留重量", "保留背包重量", "3", "重量", 0, 99999);
-        addNumber(inventory, "背包保留格子", "保留空格", "2", "格", 0, 99999);
+        addNumber(inventory, "背包保留重量", "剩余负重达到此值时卖垃圾", "3", "重量", 0, 99999);
+        addNumber(inventory, "背包保留格子", "可用空格达到此值时卖垃圾（默认 2 格，即低于 3 格）", "2", "格", 0, 99999);
         addNumber(inventory, "背包检测间隔秒", "背包检测间隔", "60", "秒", 1, 86400);
         addSwitch(inventory, "出售装备", "允许出售装备", false);
-        addChoice(inventory, "出售装备品质上限", "装备出售保护等级", new String[]{"不出售装备", "仅白色", "白色与绿色"}, 0);
+        addSwitch(inventory, "出售装备品质_白色", "清理白色装备", true);
+        addSwitch(inventory, "出售装备品质_蓝色", "清理蓝色装备", true);
+        addSwitch(inventory, "出售装备品质_绿色", "清理绿色装备", false);
+        addSwitch(inventory, "出售装备品质_黄色", "清理黄色装备", false);
+        addSwitch(inventory, "出售装备品质_橙色", "清理橙色装备", false);
         addSwitch(inventory, "出售装备二次确认", "每次出售装备前再次确认", true);
         addNumber(inventory, "保留蓝条数量", "保留蓝条数量", "4", "条", 0, 99999);
         addChoice(inventory, "蓝条筛选模式", "蓝条筛选条件（单选）",
@@ -328,14 +330,14 @@ public final class ScriptToolsActivity extends Activity {
                 new String[]{"手动截图与无障碍", "Root", "无障碍服务"}, 0);
         advanced.addView(label("Android 11 及以上通过无障碍服务读取画面；此权限必须由你在系统设置中启用。", 12, MUTED, false));
 
-        LinearLayout options = section("高级设置", "调试与虚拟屏幕偏好仅供记录。");
+        LinearLayout options = section("高级设置", "虚拟屏幕 DPI 会提供给 Lua 的显示信息接口。运行状态与失败日志可自动保存到应用私有 files/logs，最多保留 3 个 512 KiB 文件。日志上下文包含时间、线程及可用的真实来源；远程调试只保存在本机。");
         addText(options, "远程调试主机", "远程调试主机", false);
         addNumber(options, "远程调试端口", "远程调试端口", "10192", "端口", 1, 65535);
         addSwitch(options, "自动保存调试日志", "自动保存调试日志", true);
-        addSwitch(options, "日志行号文件名", "日志包含行号和文件名", true);
+        addSwitch(options, "日志行号文件名", "日志附带时间、线程和可用文件行号", true);
         addNumber(options, "虚拟屏幕宽度", "虚拟屏幕宽度", "720", "像素", 1, 16384);
         addNumber(options, "虚拟屏幕高度", "虚拟屏幕高度", "1280", "像素", 1, 16384);
-        addNumber(options, "虚拟屏幕DPI", "虚拟屏幕 DPI", "320", "DPI", 1, 2000);
+        addNumber(options, "虚拟屏幕DPI", "虚拟屏幕 DPI", LegacyLuaConfig.defaults().get("虚拟屏幕DPI"), "DPI", 1, 2000);
         addText(options, "手机编号", "手机编号", false);
         addSwitch(options, "开启vpn", "原脚本 VPN 偏好", false);
 
@@ -480,7 +482,7 @@ public final class ScriptToolsActivity extends Activity {
         control.setOnCheckedChangeListener((button, checked) -> {
             if ("保护装备不出售".equals(key) && !checked) {
                 new AlertDialog.Builder(this).setTitle("关闭装备保护？")
-                        .setMessage("这只会记录偏好。回收脚本和未来适配器尚未验证，关闭后可能增加误售风险。")
+                        .setMessage("关闭后，脚本仍只出售已勾选品质；回红/回内及无法识别的词条会保留。请同时确认“允许出售装备”和品质勾选。")
                         .setNegativeButton("保持保护", (dialog, which) -> control.setChecked(true))
                         .setPositiveButton("仍要关闭", (dialog, which) -> put(key, false))
                         .setOnCancelListener(dialog -> control.setChecked(true)).show();
@@ -818,6 +820,28 @@ public final class ScriptToolsActivity extends Activity {
     private void loadProfile() {
         try { values = new JSONObject(preferences.getString("profile:" + profileName, "{}")); }
         catch (JSONException ignored) { values = new JSONObject(); }
+        if (!values.has("虚拟屏幕DPI")) put("虚拟屏幕DPI", LegacyLuaConfig.defaults().get("虚拟屏幕DPI"));
+        migrateGearQuality();
+    }
+
+    private void migrateGearQuality() {
+        String[] keys = {"出售装备品质_白色", "出售装备品质_蓝色", "出售装备品质_绿色",
+                "出售装备品质_黄色", "出售装备品质_橙色"};
+        for (String key : keys) if (values.has(key)) return;
+        if (!values.has("出售装备品质上限")) {
+            put(keys[0], true);
+            put(keys[1], true);
+            put(keys[2], false);
+            put(keys[3], false);
+            put(keys[4], false);
+            return;
+        }
+        int legacyLevel = Math.max(0, Math.min(2, values.optInt("出售装备品质上限", 0)));
+        put(keys[0], legacyLevel >= 1);
+        put(keys[1], false);
+        put(keys[2], legacyLevel >= 2);
+        put(keys[3], false);
+        put(keys[4], false);
     }
 
     private void put(String key, Object value) {

@@ -1,0 +1,421 @@
+diff --git a/Bcore/build.gradle b/Bcore/build.gradle
+index 1594a05..726c75b 100644
+--- a/Bcore/build.gradle
++++ b/Bcore/build.gradle
+@@ -14,9 +14,11 @@ android {
+     }
+     buildFeatures {
+         prefab true
++        buildConfig true
+     }
+     defaultConfig {
+         minSdkVersion rootProject.ext.minSdk
++        buildConfigField 'boolean', 'BLACKBOX_HOOK_DIAGNOSTICS', 'false'
+ 
+         consumerProguardFiles "consumer-rules.pro"
+         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+@@ -26,6 +28,16 @@ android {
+     }
+ 
+     buildTypes {
++        debug {
++            if (project.findProperty('blackboxHookDiagnostics') == 'true') {
++                buildConfigField 'boolean', 'BLACKBOX_HOOK_DIAGNOSTICS', 'true'
++                externalNativeBuild {
++                    ndkBuild {
++                        cppFlags '-DBLACKBOX_HOOK_DIAGNOSTICS=1'
++                    }
++                }
++            }
++        }
+         release {
+             minifyEnabled true
+             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+diff --git a/Bcore/src/main/aidl/top/niunaijun/blackbox/core/system/am/IBActivityManagerService.aidl b/Bcore/src/main/aidl/top/niunaijun/blackbox/core/system/am/IBActivityManagerService.aidl
+index ce5dcec..d36de60 100644
+--- a/Bcore/src/main/aidl/top/niunaijun/blackbox/core/system/am/IBActivityManagerService.aidl
++++ b/Bcore/src/main/aidl/top/niunaijun/blackbox/core/system/am/IBActivityManagerService.aidl
+@@ -45,7 +45,6 @@ interface IBActivityManagerService {
+     void onActivityResumed(IBinder token);
+     void onActivityDestroyed(IBinder token);
+     void onFinishActivity(IBinder token);
+-    ComponentName getTopActivity(int userId);
+ 
+     RunningAppProcessInfo getRunningAppProcesses(String callerPackage, int userId);
+     RunningServiceInfo getRunningServices(String callerPackage, int userId);
+@@ -55,6 +54,7 @@ interface IBActivityManagerService {
+ 
+     String getCallingPackage(in IBinder token, int userId);
+     ComponentName getCallingActivity(in IBinder token, int userId);
++    ComponentName getTopActivity(int userId);
+ 
+     void getIntentSender(in IBinder target, String packageName, int uid, int userId);
+     String getPackageForIntentSender(in IBinder target, int userId);
+diff --git a/Bcore/src/main/cpp/BoxCore.cpp b/Bcore/src/main/cpp/BoxCore.cpp
+index d6dbcbc..ccbad0d 100644
+--- a/Bcore/src/main/cpp/BoxCore.cpp
++++ b/Bcore/src/main/cpp/BoxCore.cpp
+@@ -15,6 +15,10 @@
+ #include <Hook/RuntimeHook.h>
+ #include "Utils/HexDump.h"
+ #include "hidden_api.h"
++#if defined(BLACKBOX_HOOK_DIAGNOSTICS) && BLACKBOX_HOOK_DIAGNOSTICS
++#include <cstring>
++#include <sys/system_properties.h>
++#endif
+ 
+ struct {
+     JavaVM *vm;
+@@ -70,14 +74,38 @@ JavaVM *BoxCore::getJavaVM() {
+     return VMEnv.vm;
+ }
+ 
++#if defined(BLACKBOX_HOOK_DIAGNOSTICS) && BLACKBOX_HOOK_DIAGNOSTICS
++static bool hookEnabled(const char *hookName, const char *skipProperty) {
++    char value[PROP_VALUE_MAX] = {};
++    const bool skipped = __system_property_get(skipProperty, value) > 0 &&
++                         std::strcmp(value, "1") == 0;
++    ALOGD("BlackBox hook diagnostics: %s %s (%s=%s)", hookName,
++          skipped ? "skipped" : "enabled", skipProperty, value[0] ? value : "unset");
++    return !skipped;
++}
++#endif
++
+ void nativeHook(JNIEnv *env) {
+     BaseHook::init(env);
++#if defined(BLACKBOX_HOOK_DIAGNOSTICS) && BLACKBOX_HOOK_DIAGNOSTICS
++    if (hookEnabled("UnixFileSystemHook", "debug.blackbox.skip_unixfs"))
++        UnixFileSystemHook::init(env);
++    if (hookEnabled("FileSystemHook", "debug.blackbox.skip_filesystem"))
++        FileSystemHook::init();
++    if (hookEnabled("VMClassLoaderHook", "debug.blackbox.skip_vmloader"))
++        VMClassLoaderHook::init(env);
++    if (hookEnabled("BinderHook", "debug.blackbox.skip_binder"))
++        BinderHook::init(env);
++    if (hookEnabled("DexFileHook", "debug.blackbox.skip_dexfile"))
++        DexFileHook::init(env);
++#else
+     UnixFileSystemHook::init(env);
+     FileSystemHook::init();
+     VMClassLoaderHook::init(env);
+ 
+     BinderHook::init(env);
+     DexFileHook::init(env);
++#endif
+ }
+ 
+ void hideXposed(JNIEnv *env, jclass clazz) {
+@@ -211,4 +239,4 @@ JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *reserved) {
+     }
+     registerMethod(env);
+     return JNI_VERSION_1_6;
+-}
+\ No newline at end of file
++}
+diff --git a/Bcore/src/main/java/top/niunaijun/blackbox/core/system/am/ActivityStack.java b/Bcore/src/main/java/top/niunaijun/blackbox/core/system/am/ActivityStack.java
+index 7ea93c8..b01fa1f 100644
+--- a/Bcore/src/main/java/top/niunaijun/blackbox/core/system/am/ActivityStack.java
++++ b/Bcore/src/main/java/top/niunaijun/blackbox/core/system/am/ActivityStack.java
+@@ -320,15 +320,21 @@ public class ActivityStack {
+         return 0;
+     }
+ 
+-    public ComponentName getTopActivityComponent() {
++    public ComponentName getTopActivity(int userId) {
+         synchronized (mTasks) {
+             synchronizeTasks();
+-            if (mTasks.isEmpty()) return null;
+-            // synchronizeTasks preserves Android's recent-task order; the last
+-            // task is the foreground BlackBox task, not just any running guest.
+             List<TaskRecord> tasks = new LinkedList<>(mTasks.values());
+-            ActivityRecord top = tasks.get(tasks.size() - 1).getTopActivityRecord();
+-            return top == null ? null : top.component;
++            for (int i = tasks.size() - 1; i >= 0; i--) {
++                TaskRecord task = tasks.get(i);
++                if (task.userId != userId) {
++                    continue;
++                }
++                ActivityRecord top = task.getTopActivityRecord();
++                if (top != null) {
++                    return top.component;
++                }
++            }
++            return null;
+         }
+     }
+ 
+diff --git a/Bcore/src/main/java/top/niunaijun/blackbox/core/system/am/BActivityManagerService.java b/Bcore/src/main/java/top/niunaijun/blackbox/core/system/am/BActivityManagerService.java
+index f5ed299..363774f 100644
+--- a/Bcore/src/main/java/top/niunaijun/blackbox/core/system/am/BActivityManagerService.java
++++ b/Bcore/src/main/java/top/niunaijun/blackbox/core/system/am/BActivityManagerService.java
+@@ -157,14 +157,6 @@ public class BActivityManagerService extends IBActivityManagerService.Stub imple
+         }
+     }
+ 
+-    @Override
+-    public ComponentName getTopActivity(int userId) {
+-        UserSpace userSpace = getOrCreateSpaceLocked(userId);
+-        synchronized (userSpace.mStack) {
+-            return userSpace.mStack.getTopActivityComponent();
+-        }
+-    }
+-
+     @Override
+     public RunningAppProcessInfo getRunningAppProcesses(String callerPackage, int userId) throws RemoteException {
+         ActivityManager manager = (ActivityManager)
+@@ -236,6 +228,14 @@ public class BActivityManagerService extends IBActivityManagerService.Stub imple
+         }
+     }
+ 
++    @Override
++    public ComponentName getTopActivity(int userId) throws RemoteException {
++        UserSpace userSpace = getOrCreateSpaceLocked(userId);
++        synchronized (userSpace.mStack) {
++            return userSpace.mStack.getTopActivity(userId);
++        }
++    }
++
+     @Override
+     public void getIntentSender(IBinder target, String packageName, int uid, int userId) {
+         UserSpace userSpace = getOrCreateSpaceLocked(userId);
+diff --git a/Bcore/src/main/java/top/niunaijun/blackbox/core/system/pm/BPackageManagerService.java b/Bcore/src/main/java/top/niunaijun/blackbox/core/system/pm/BPackageManagerService.java
+index 522405f..73a9a11 100644
+--- a/Bcore/src/main/java/top/niunaijun/blackbox/core/system/pm/BPackageManagerService.java
++++ b/Bcore/src/main/java/top/niunaijun/blackbox/core/system/pm/BPackageManagerService.java
+@@ -688,7 +688,7 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
+                 return result.installError(packageArchiveInfo.packageName,
+                         msg + "\n" + (BlackBoxCore.is64Bit() ? "The box does not support 32-bit Application" : "The box does not support 64-bit Application"));
+             }
+-            BPackage aPackage = parserApk(apkFile.getAbsolutePath());
++            PackageParser.Package aPackage = parserApk(apkFile.getAbsolutePath());
+             if (aPackage == null) {
+                 return result.installError("parser apk error.");
+             }
+@@ -726,16 +726,30 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
+         return result;
+     }
+ 
+-    private BPackage parserApk(String file) {
+-        // Public archive info plus manifest filters, directly into the virtual model.
++    private PackageParser.Package parserApk(String file) {
++        // Android 13+ uses the public PackageManager archive API as a fallback,
++        // but the platform PackageParser is still present on current Android
++        // releases and is needed here to preserve component intent filters.
+         if (top.niunaijun.blackbox.utils.compat.PackageParserFix.needsFix()) {
++            try {
++                PackageParser parser = PackageParserCompat.createParser(new File(file));
++                PackageParser.Package parsed = PackageParserCompat.parsePackage(parser, new File(file), 0);
++                if (parsed != null && parsed.activities != null && !parsed.activities.isEmpty()) {
++                    PackageParserCompat.collectCertificates(parser, parsed, 0);
++                    Slog.d(TAG, "Platform parser restored package components for " + parsed.packageName);
++                    return parsed;
++                }
++                Slog.w(TAG, "Platform parser returned no activities; using PackageManager archive fallback");
++            } catch (Throwable t) {
++                Slog.w(TAG, "Platform parser unavailable; using PackageManager archive fallback", t);
++            }
+             return parserApkCompat(file);
+         }
+         try {
+             PackageParser parser = PackageParserCompat.createParser(new File(file));
+             PackageParser.Package aPackage = PackageParserCompat.parsePackage(parser, new File(file), 0);
+             PackageParserCompat.collectCertificates(parser, aPackage, 0);
+-            return new BPackage(aPackage);
++            return aPackage;
+         } catch (Throwable t) {
+             t.printStackTrace();
+         }
+@@ -743,11 +757,56 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
+     }
+ 
+     /**
+-     * API 33+ must populate components and intent filters, not a framework shell.
++     * API 33+ replacement using pure reflection — avoids all PackageParser
++     * inner classes (Activity, Service, etc.) which are also removed in API 34+.
+      */
+-    private BPackage parserApkCompat(String file) {
+-        return top.niunaijun.blackbox.utils.compat.PackageParserFix.parsePackage(
+-                BlackBoxCore.getContext(), file);
++    private PackageParser.Package parserApkCompat(String file) {
++        try {
++            android.content.pm.PackageInfo pi =
++                top.niunaijun.blackbox.utils.compat.PackageParserFix.parseApk(
++                    BlackBoxCore.getContext(), file);
++            if (pi == null) return null;
++
++            // Instantiate PackageParser.Package via reflection (still exists as stub in API 33/34)
++            Class<?> pkgClass = Class.forName("android.content.pm.PackageParser$Package");
++            java.lang.reflect.Constructor<?> ctor = pkgClass.getDeclaredConstructor(String.class);
++            ctor.setAccessible(true);
++            PackageParser.Package pkg = (PackageParser.Package) ctor.newInstance(pi.packageName);
++
++            // applicationInfo
++            pkg.applicationInfo = pi.applicationInfo;
++            // PackageParserFix parses the archive through public PackageManager APIs,
++            // so the legacy PackageParser.Package constructor does not populate this
++            // path. The installer copies native libraries and the APK from baseCodePath.
++            pkg.baseCodePath = file;
++
++            // mSignatures — set via reflection (field may be private)
++            android.content.pm.Signature[] sigs =
++                top.niunaijun.blackbox.utils.compat.PackageParserFix.getSignatures(pi);
++            try {
++                java.lang.reflect.Field sigField = pkgClass.getDeclaredField("mSignatures");
++                sigField.setAccessible(true);
++                sigField.set(pkg, sigs);
++            } catch (Exception e) {
++                Slog.w(TAG, "mSignatures field not found: " + e.getMessage());
++            }
++
++            // requestedPermissions
++            if (pi.requestedPermissions != null) {
++                for (String perm : pi.requestedPermissions) {
++                    pkg.requestedPermissions.add(perm);
++                }
++            }
++
++            // Components via BPackageManagerService helper using PackageInfo directly
++            // We inject them via the BPackage path which accepts PackageInfo on API 33+
++            Slog.d(TAG, "parserApkCompat OK: " + pi.packageName + " sigs=" + sigs.length);
++            return pkg;
++        } catch (Throwable t) {
++            Slog.e(TAG, "parserApkCompat failed: " + t.getMessage());
++            t.printStackTrace();
++            return null;
++        }
+     }
+ 
+     static String fixProcessName(String defProcessName, String processName) {
+@@ -820,4 +879,4 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
+             mComponentResolver.addAllComponents(value.pkg);
+         }
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/Bcore/src/main/java/top/niunaijun/blackbox/fake/frameworks/BActivityManager.java b/Bcore/src/main/java/top/niunaijun/blackbox/fake/frameworks/BActivityManager.java
+index 261dd45..e5342b5 100644
+--- a/Bcore/src/main/java/top/niunaijun/blackbox/fake/frameworks/BActivityManager.java
++++ b/Bcore/src/main/java/top/niunaijun/blackbox/fake/frameworks/BActivityManager.java
+@@ -375,16 +375,6 @@ public class BActivityManager extends BlackManager<IBActivityManagerService> {
+         }
+     }
+ 
+-    public ComponentName getTopActivity(int userId) {
+-        try {
+-            IBActivityManagerService service = getService();
+-            return service == null ? null : service.getTopActivity(userId);
+-        } catch (RemoteException e) {
+-            Slog.e(TAG, "Unable to read top virtual activity", e);
+-            return null;
+-        }
+-    }
+-
+     public RunningAppProcessInfo getRunningAppProcesses(String callerPackage, int userId) throws RemoteException {
+         try {
+             return getService().getRunningAppProcesses(callerPackage, userId);
+@@ -433,6 +423,18 @@ public class BActivityManager extends BlackManager<IBActivityManagerService> {
+         return null;
+     }
+ 
++    public ComponentName getTopActivity(int userId) {
++        try {
++            IBActivityManagerService service = getService();
++            if (service != null) {
++                return service.getTopActivity(userId);
++            }
++        } catch (RemoteException e) {
++            e.printStackTrace();
++        }
++        return null;
++    }
++
+     public void getIntentSender(IBinder target, String packageName, int uid) {
+         try {
+             getService().getIntentSender(target, packageName, uid, BActivityThread.getUserId());
+diff --git a/Bcore/src/main/java/top/niunaijun/blackbox/fake/hook/HookManager.java b/Bcore/src/main/java/top/niunaijun/blackbox/fake/hook/HookManager.java
+index 3701fe5..221debd 100644
+--- a/Bcore/src/main/java/top/niunaijun/blackbox/fake/hook/HookManager.java
++++ b/Bcore/src/main/java/top/niunaijun/blackbox/fake/hook/HookManager.java
+@@ -6,6 +6,7 @@ import java.util.HashMap;
+ import java.util.Map;
+ 
+ import top.niunaijun.blackbox.BlackBoxCore;
++import top.niunaijun.blackbox.BuildConfig;
+ import top.niunaijun.blackbox.fake.delegate.AppInstrumentation;
+ 
+ import top.niunaijun.blackbox.fake.service.HCallbackProxy;
+@@ -87,6 +88,7 @@ import top.niunaijun.blackbox.fake.service.context.RestrictionsManagerStub;
+ import top.niunaijun.blackbox.fake.service.libcore.OsStub;
+ import top.niunaijun.blackbox.utils.Slog;
+ import top.niunaijun.blackbox.utils.compat.BuildCompat;
++import top.niunaijun.blackbox.utils.compat.SystemPropertiesCompat;
+ import top.niunaijun.blackbox.fake.service.ISettingsProviderProxy;
+ import top.niunaijun.blackbox.fake.service.FeatureFlagUtilsProxy;
+ import top.niunaijun.blackbox.fake.service.WorkManagerProxy;
+@@ -120,19 +122,24 @@ public class HookManager {
+             addInjector(new IWindowManagerProxy());
+             addInjector(new IUserManagerProxy());
+             addInjector(new RestrictionsManagerStub());
+-            addInjector(new IMediaSessionManagerProxy());
+-            addInjector(new IAudioServiceProxy());
++            if (mediaHookEnabled("IMediaSessionManagerProxy", "debug.blackbox.skip_msession"))
++                addInjector(new IMediaSessionManagerProxy());
++            if (mediaHookEnabled("IAudioServiceProxy", "debug.blackbox.skip_aservice"))
++                addInjector(new IAudioServiceProxy());
+             addInjector(new ISensorPrivacyManagerProxy());
+             addInjector(new ContentResolverProxy());
+             addInjector(new SystemLibraryProxy());
+             addInjector(new ReLinkerProxy());
+             addInjector(new WorkManagerProxy());
+-            addInjector(new MediaRecorderProxy());
+-            addInjector(new AudioRecordProxy());
++            if (mediaHookEnabled("MediaRecorderProxy", "debug.blackbox.skip_mrecorder"))
++                addInjector(new MediaRecorderProxy());
++            if (mediaHookEnabled("AudioRecordProxy", "debug.blackbox.skip_arecord"))
++                addInjector(new AudioRecordProxy());
+             addInjector(new IMiuiSecurityManagerProxy());
+             addInjector(new ISettingsProviderProxy());
+             addInjector(new FeatureFlagUtilsProxy());
+-            addInjector(new MediaRecorderClassProxy());
++            if (mediaHookEnabled("MediaRecorderClassProxy", "debug.blackbox.skip_mrecclass"))
++                addInjector(new MediaRecorderClassProxy());
+             addInjector(new SQLiteDatabaseProxy());
+             addInjector(new ClassLoaderProxy());
+             addInjector(new FileSystemProxy());
+@@ -142,7 +149,8 @@ public class HookManager {
+             addInjector(new GoogleAccountManagerProxy());
+             addInjector(new AuthenticationProxy());
+             addInjector(new AndroidIdProxy());
+-            addInjector(new AudioPermissionProxy());
++            if (mediaHookEnabled("AudioPermissionProxy", "debug.blackbox.skip_apermission"))
++                addInjector(new AudioPermissionProxy());
+             addInjector(new ILocationManagerProxy());
+             addInjector(new IStorageManagerProxy());
+             addInjector(new ILauncherAppsProxy());
+@@ -164,7 +172,8 @@ public class HookManager {
+         addInjector(new IXiaomiSettingsProxy());
+         addInjector(new IXiaomiMiuiServicesProxy());
+             addInjector(new IPhoneSubInfoProxy());
+-            addInjector(new IMediaRouterServiceProxy());
++            if (mediaHookEnabled("IMediaRouterServiceProxy", "debug.blackbox.skip_mrouter"))
++                addInjector(new IMediaRouterServiceProxy());
+             addInjector(new IPowerManagerProxy());
+             addInjector(new IContextHubServiceProxy());
+             
+@@ -224,6 +233,15 @@ public class HookManager {
+         injectAll();
+     }
+ 
++    private boolean mediaHookEnabled(String hookName, String skipProperty) {
++        if (!BuildConfig.BLACKBOX_HOOK_DIAGNOSTICS) return true;
++        boolean skipped = "1".equals(SystemPropertiesCompat.get("debug.blackbox.skip_media"))
++                || "1".equals(SystemPropertiesCompat.get(skipProperty));
++        Slog.d(TAG, "BlackBox hook diagnostics: " + hookName + (skipped ? " skipped" : " enabled")
++                + " (debug.blackbox.skip_media / " + skipProperty + ")");
++        return !skipped;
++    }
++
+     public void checkEnv(Class<?> clazz) {
+         IInjectHook iInjectHook = mInjectors.get(clazz);
+         if (iInjectHook != null && iInjectHook.isBadEnv()) {
