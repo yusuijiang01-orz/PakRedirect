@@ -39,6 +39,8 @@ public final class RyluxHomeNavigationPolish {
     private static final int BLUE_DARK = Color.rgb(24, 79, 188);
 
     private static final String ROOT_TAG = "rylux_home_navigation_v3";
+    private static final String PINNED_HEADER_TAG = "rylux_home_pinned_header_v1";
+    private static final String HOME_BODY_SCROLL_TAG = "rylux_home_body_scroll_v1";
     private static final String ACCOUNT_REGION_TAG = "rylux_account_region_v3";
     private static final String IDENTITY_ROW_TAG = "rylux_account_identity_row_v1";
     private static final String ACCOUNT_BUTTON_TAG = "rylux_account_button_v1";
@@ -79,11 +81,19 @@ public final class RyluxHomeNavigationPolish {
     }
 
     private static void polish(Activity activity) {
+        LinearLayout homeRoot = (LinearLayout) findTagged(
+                activity.getWindow().getDecorView(), ROOT_TAG);
+        if (homeRoot != null) {
+            adaptAccountRow(activity, homeRoot);
+            syncPinnedHeaderPosition(activity);
+            return;
+        }
+
         GlowFrameLayout hero = findHero(activity.getWindow().getDecorView());
         if (hero == null || hero.getChildCount() < 3) return;
         if (!(hero.getParent() instanceof LinearLayout)) return;
         LinearLayout root = (LinearLayout) hero.getParent();
-        if (ROOT_TAG.equals(root.getTag()) || STYLED.contains(root)) {
+        if (STYLED.contains(root)) {
             adaptAccountRow(activity, root);
             return;
         }
@@ -268,6 +278,7 @@ public final class RyluxHomeNavigationPolish {
         root.addView(sandboxHint, sandboxHintLp);
 
         for (View child : preserved) root.addView(child);
+        pinHomeAccountHeader(activity, root, title, subtitle, accountRegion);
     }
 
     private static void adaptAccountRow(Activity activity, LinearLayout root) {
@@ -276,9 +287,10 @@ public final class RyluxHomeNavigationPolish {
         boolean narrow = RyluxViewport.widthDp(activity) <= ACCOUNT_BUTTON_BELOW_BREAKPOINT_DP;
         if (wasNarrow == narrow) return;
 
-        View regionRaw = findTagged(root, ACCOUNT_REGION_TAG);
-        View rowRaw = findTagged(root, IDENTITY_ROW_TAG);
-        View buttonRaw = findTagged(root, ACCOUNT_BUTTON_TAG);
+        View decor = activity.getWindow().getDecorView();
+        View regionRaw = findTagged(decor, ACCOUNT_REGION_TAG);
+        View rowRaw = findTagged(decor, IDENTITY_ROW_TAG);
+        View buttonRaw = findTagged(decor, ACCOUNT_BUTTON_TAG);
         if (!(regionRaw instanceof LinearLayout)
                 || !(rowRaw instanceof LinearLayout)
                 || !(buttonRaw instanceof Button)) return;
@@ -430,30 +442,78 @@ public final class RyluxHomeNavigationPolish {
         return Math.round(value * activity.getResources().getDisplayMetrics().density);
     }
 
-    private static void restoreHomeScrollPosition(ViewGroup homeRoot) {
-        View current = homeRoot;
-        while (current.getParent() instanceof View) {
-            current = (View) current.getParent();
-            if (current instanceof ScrollView) {
-                ScrollView scroll = (ScrollView) current;
-                // The first focusable home item is the account region near the
-                // top. Focusing the ScrollView itself can preserve/reveal its
-                // previous descendant position, which places the poster first
-                // and hides the account row on tall, scrollable home layouts.
-                scroll.setFocusable(false);
-                scroll.setFocusableInTouchMode(false);
-                scroll.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
-                homeRoot.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+    private static void pinHomeAccountHeader(
+            Activity activity,
+            LinearLayout homeRoot,
+            TextView title,
+            TextView subtitle,
+            LinearLayout accountRegion
+    ) {
+        if (!(homeRoot.getParent() instanceof ScrollView)) return;
+        ScrollView bodyScroll = (ScrollView) homeRoot.getParent();
+        if (!(bodyScroll.getParent() instanceof FrameLayout)) return;
+        FrameLayout host = (FrameLayout) bodyScroll.getParent();
 
-                // Rebuilding the content changes its height after the parent
-                // ScrollView has already laid out. Reset after both the next
-                // layout and the later focus/layout pass to keep the account
-                // area visible on initial entry.
-                homeRoot.post(() -> scroll.scrollTo(0, 0));
-                scroll.postDelayed(() -> scroll.scrollTo(0, 0), 160L);
-                scroll.postDelayed(() -> scroll.scrollTo(0, 0), 420L);
-                return;
-            }
-        }
+        homeRoot.removeView(title);
+        homeRoot.removeView(subtitle);
+        homeRoot.removeView(accountRegion);
+
+        LinearLayout header = new LinearLayout(activity);
+        header.setTag(PINNED_HEADER_TAG);
+        header.setOrientation(LinearLayout.VERTICAL);
+        int side = RyluxViewport.widthDp(activity) <= 360 ? 10 : 16;
+        header.setPadding(dp(activity, side), dp(activity, 14), dp(activity, side), 0);
+        header.setBackgroundColor(Color.rgb(8, 13, 21));
+        header.setElevation(dp(activity, 6));
+        header.addView(title, title.getLayoutParams());
+        header.addView(subtitle, subtitle.getLayoutParams());
+        header.addView(accountRegion, accountRegion.getLayoutParams());
+
+        bodyScroll.setTag(HOME_BODY_SCROLL_TAG);
+        bodyScroll.setFocusable(false);
+        bodyScroll.setFocusableInTouchMode(false);
+        bodyScroll.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+        FrameLayout.LayoutParams bodyParams = bodyScroll.getLayoutParams()
+                instanceof FrameLayout.LayoutParams
+                ? (FrameLayout.LayoutParams) bodyScroll.getLayoutParams()
+                : new FrameLayout.LayoutParams(-1, -1);
+        bodyParams.width = ViewGroup.LayoutParams.MATCH_PARENT;
+        bodyParams.height = ViewGroup.LayoutParams.MATCH_PARENT;
+        bodyScroll.setLayoutParams(bodyParams);
+
+        host.addView(header, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP
+        ));
+        syncPinnedHeaderPosition(activity);
+        homeRoot.post(() -> bodyScroll.scrollTo(0, 0));
+        bodyScroll.postDelayed(() -> bodyScroll.scrollTo(0, 0), 180L);
+        bodyScroll.postDelayed(() -> bodyScroll.scrollTo(0, 0), 520L);
+    }
+
+    private static void syncPinnedHeaderPosition(Activity activity) {
+        View decor = activity.getWindow().getDecorView();
+        View header = findTagged(decor, PINNED_HEADER_TAG);
+        View scrollRaw = findTagged(decor, HOME_BODY_SCROLL_TAG);
+        if (header == null || !(scrollRaw instanceof ScrollView)
+                || !(header.getParent() instanceof FrameLayout)) return;
+
+        FrameLayout host = (FrameLayout) header.getParent();
+        int width = host.getWidth() > 0
+                ? host.getWidth()
+                : dp(activity, RyluxViewport.widthDp(activity));
+        header.measure(
+                View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        );
+        int headerHeight = header.getMeasuredHeight();
+        ScrollView bodyScroll = (ScrollView) scrollRaw;
+        ViewGroup.LayoutParams raw = bodyScroll.getLayoutParams();
+        if (!(raw instanceof FrameLayout.LayoutParams)) return;
+        FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) raw;
+        if (params.topMargin == headerHeight) return;
+        params.topMargin = headerHeight;
+        bodyScroll.setLayoutParams(params);
     }
 }

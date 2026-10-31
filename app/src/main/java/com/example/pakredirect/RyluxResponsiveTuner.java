@@ -27,6 +27,7 @@ import java.util.WeakHashMap;
  */
 public final class RyluxResponsiveTuner {
     private static final String HOME_NAVIGATION_TAG = "rylux_home_navigation_v3";
+    private static final String HOME_PINNED_HEADER_TAG = "rylux_home_pinned_header_v1";
     private static final WeakHashMap<Activity, ViewTreeObserver.OnGlobalLayoutListener> LISTENERS =
             new WeakHashMap<>();
     private static final WeakHashMap<TextView, Float> ORIGINAL_TEXT_SIZES = new WeakHashMap<>();
@@ -99,7 +100,8 @@ public final class RyluxResponsiveTuner {
     private static boolean isInsideHomeNavigation(View view) {
         View current = view;
         while (current != null) {
-            if (HOME_NAVIGATION_TAG.equals(current.getTag())) return true;
+            if (HOME_NAVIGATION_TAG.equals(current.getTag())
+                    || HOME_PINNED_HEADER_TAG.equals(current.getTag())) return true;
             if (!(current.getParent() instanceof View)) break;
             current = (View) current.getParent();
         }

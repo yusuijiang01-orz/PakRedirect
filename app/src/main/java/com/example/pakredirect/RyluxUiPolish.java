@@ -836,7 +836,9 @@ public final class RyluxUiPolish {
             cursor = (View) cursor.getParent();
             // The home navigation also contains an "账号中心" label. Its root is
             // inside a ScrollView, but it is not the account overlay panel.
-            if ("rylux_home_navigation_v3".equals(cursor.getTag())) return null;
+            if ("rylux_home_navigation_v3".equals(cursor.getTag())
+                    || "rylux_home_pinned_header_v1".equals(cursor.getTag())
+                    || "rylux_account_region_v3".equals(cursor.getTag())) return null;
             if (cursor instanceof LinearLayout
                     && (cursor.getParent() instanceof FrameLayout
                     || cursor.getParent() instanceof android.widget.ScrollView)) {
