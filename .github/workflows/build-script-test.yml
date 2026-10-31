@@ -82,19 +82,19 @@ jobs:
         run: |
           set -euo pipefail
           gradle assembleRelease --stacktrace \
-            -PryluxVersionName=2.4.83-test \
-            -PryluxVersionCode=104
+            -PryluxVersionName=2.4.84-test \
+            -PryluxVersionCode=105
           APK="$(find app/build/outputs/apk/release -name '*.apk' -type f | head -n 1)"
           test -n "$APK"
           "$ANDROID_HOME/build-tools/36.1.0/apksigner" verify --verbose --print-certs "$APK"
-          "$ANDROID_HOME/build-tools/36.1.0/aapt" dump badging "$APK" | grep -F "versionName='2.4.83-test'"
-          cp "$APK" RYLUX-v2.4.83-test.apk
-          sha256sum RYLUX-v2.4.81-test.apk
+          "$ANDROID_HOME/build-tools/36.1.0/aapt" dump badging "$APK" | grep -F "versionName='2.4.84-test'"
+          cp "$APK" RYLUX-v2.4.84-test.apk
+          sha256sum RYLUX-v2.4.84-test.apk
 
       - name: Upload test APK artifact only
         uses: actions/upload-artifact@v4
         with:
-          name: RYLUX-v2.4.83-test-${{ github.sha }}
-          path: RYLUX-v2.4.83-test.apk
+          name: RYLUX-v2.4.84-test-${{ github.sha }}
+          path: RYLUX-v2.4.84-test.apk
           if-no-files-found: error
           retention-days: 14
