@@ -281,7 +281,7 @@ public final class RyluxHomeNavigationPolish {
         root.addView(sandboxHint, sandboxHintLp);
 
         for (View child : preserved) root.addView(child);
-        pinHomeAccountHeader(activity, root, title, subtitle, accountRegion);
+        pinHomeAccountHeader(activity, root, title, subtitle, accountRegion, gameSection);
     }
 
     private static void adaptAccountRow(Activity activity, LinearLayout root) {
@@ -353,6 +353,23 @@ public final class RyluxHomeNavigationPolish {
         int heroHeightDp = landscape
                 ? Math.max(220, Math.min(300, Math.round(heightDp * 0.50f)))
                 : Math.max(340, Math.min(680, posterHeightDp));
+        return dp(activity, heroHeightDp);
+    }
+
+    static int homeHeroHeight(Activity activity, int measuredWidthPx) {
+        int widthDp = RyluxViewport.widthDp(activity);
+        int heightDp = RyluxViewport.heightDp(activity);
+        boolean landscape = widthDp > 600 && widthDp > heightDp;
+        if (landscape) {
+            int heroHeightDp = Math.max(220, Math.min(300, Math.round(heightDp * 0.50f)));
+            return dp(activity, heroHeightDp);
+        }
+
+        float density = activity.getResources().getDisplayMetrics().density;
+        int innerWidthPx = Math.max(1, measuredWidthPx - dp(activity, 4));
+        int posterWidthDp = Math.max(1, Math.round(innerWidthPx / Math.max(0.1f, density)));
+        int heroHeightDp = Math.max(340, Math.min(680,
+                Math.round(posterWidthDp * (2048f / 1529f))));
         return dp(activity, heroHeightDp);
     }
 
@@ -462,7 +479,8 @@ public final class RyluxHomeNavigationPolish {
             LinearLayout homeRoot,
             TextView title,
             TextView subtitle,
-            LinearLayout accountRegion
+            LinearLayout accountRegion,
+            TextView gameSection
     ) {
         if (!(homeRoot.getParent() instanceof ScrollView)) return;
         ScrollView previousScroll = (ScrollView) homeRoot.getParent();
@@ -478,6 +496,7 @@ public final class RyluxHomeNavigationPolish {
         homeRoot.removeView(title);
         homeRoot.removeView(subtitle);
         homeRoot.removeView(accountRegion);
+        homeRoot.removeView(gameSection);
 
         LinearLayout header = new LinearLayout(activity);
         header.setTag(PINNED_HEADER_TAG);
@@ -489,6 +508,7 @@ public final class RyluxHomeNavigationPolish {
         header.addView(title, title.getLayoutParams());
         header.addView(subtitle, subtitle.getLayoutParams());
         header.addView(accountRegion, accountRegion.getLayoutParams());
+        header.addView(gameSection, gameSection.getLayoutParams());
 
         // Replace the original ScrollView instead of reusing it: Android may
         // restore its old scroll offset before this post-resume layout pass.

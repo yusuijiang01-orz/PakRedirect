@@ -90,8 +90,20 @@ public final class RyluxAdaptiveLayoutFix {
         if (!(raw instanceof LinearLayout.LayoutParams)) return;
         LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) raw;
 
-        lp.height = RyluxHomeNavigationPolish.homeHeroHeight(activity);
-        heroShell.setLayoutParams(lp);
+        Runnable fitHeroToMeasuredWidth = () -> {
+            int measuredWidth = heroShell.getWidth();
+            if (measuredWidth <= 0) return;
+            ViewGroup.LayoutParams current = heroShell.getLayoutParams();
+            if (!(current instanceof LinearLayout.LayoutParams)) return;
+            LinearLayout.LayoutParams measuredParams = (LinearLayout.LayoutParams) current;
+            int fittedHeight = RyluxHomeNavigationPolish.homeHeroHeight(activity, measuredWidth);
+            if (measuredParams.height != fittedHeight) {
+                measuredParams.height = fittedHeight;
+                heroShell.setLayoutParams(measuredParams);
+            }
+        };
+        if (heroShell.getWidth() > 0) fitHeroToMeasuredWidth.run();
+        else heroShell.post(fitHeroToMeasuredWidth);
     }
 
     private static void tuneGamePanel(
