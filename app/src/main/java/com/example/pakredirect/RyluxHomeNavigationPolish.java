@@ -436,13 +436,22 @@ public final class RyluxHomeNavigationPolish {
             current = (View) current.getParent();
             if (current instanceof ScrollView) {
                 ScrollView scroll = (ScrollView) current;
-                scroll.setFocusable(true);
-                scroll.setFocusableInTouchMode(true);
-                scroll.setDescendantFocusability(ViewGroup.FOCUS_BEFORE_DESCENDANTS);
-                scroll.postDelayed(() -> {
-                    scroll.requestFocus();
-                    scroll.scrollTo(0, 0);
-                }, 150L);
+                // The first focusable home item is the account region near the
+                // top. Focusing the ScrollView itself can preserve/reveal its
+                // previous descendant position, which places the poster first
+                // and hides the account row on tall, scrollable home layouts.
+                scroll.setFocusable(false);
+                scroll.setFocusableInTouchMode(false);
+                scroll.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+                homeRoot.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+
+                // Rebuilding the content changes its height after the parent
+                // ScrollView has already laid out. Reset after both the next
+                // layout and the later focus/layout pass to keep the account
+                // area visible on initial entry.
+                homeRoot.post(() -> scroll.scrollTo(0, 0));
+                scroll.postDelayed(() -> scroll.scrollTo(0, 0), 160L);
+                scroll.postDelayed(() -> scroll.scrollTo(0, 0), 420L);
                 return;
             }
         }
