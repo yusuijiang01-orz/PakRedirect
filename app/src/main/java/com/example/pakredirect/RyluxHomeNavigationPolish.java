@@ -230,12 +230,14 @@ public final class RyluxHomeNavigationPolish {
         heroShell.setBackground(round(activity, SURFACE_2, 22, BORDER, 1));
         if (Build.VERSION.SDK_INT >= 21) heroShell.setElevation(dp(activity, 2));
 
-        FrameLayout.LayoutParams heroLp = new FrameLayout.LayoutParams(-1, -1);
+        // Let the poster image determine the card height from its intrinsic
+        // portrait ratio. A viewport-derived fixed height was repeatedly
+        // overwritten by other layout passes on high-density devices.
+        FrameLayout.LayoutParams heroLp = new FrameLayout.LayoutParams(-1, -2);
         hero.setLayoutParams(heroLp);
         heroShell.addView(hero);
 
-        int heroHeight = homeHeroHeight(activity);
-        LinearLayout.LayoutParams heroShellLp = new LinearLayout.LayoutParams(-1, heroHeight);
+        LinearLayout.LayoutParams heroShellLp = new LinearLayout.LayoutParams(-1, -2);
         heroShellLp.bottomMargin = dp(activity, 12);
         root.addView(heroShell, heroShellLp);
 
@@ -335,42 +337,6 @@ public final class RyluxHomeNavigationPolish {
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(activity, 40));
         params.topMargin = dp(activity, 8);
         return params;
-    }
-
-    static int homeHeroHeight(Activity activity) {
-        int widthDp = RyluxViewport.widthDp(activity);
-        int heightDp = RyluxViewport.heightDp(activity);
-        // Some Android emulators report a transiently short content height
-        // while the compact portrait window is settling. Do not classify a
-        // phone-width viewport as landscape from that temporary measurement.
-        boolean landscape = widthDp > 600 && widthDp > heightDp;
-        // Match the 1529x2048 poster's natural portrait ratio. A fixed 340dp
-        // card was wider than the artwork at phone widths, so CENTER_CROP
-        // removed the character's head and other important content.
-        int sidePaddingDp = widthDp <= 360 ? 10 : 16;
-        int posterWidthDp = Math.max(1, widthDp - (sidePaddingDp * 2) - 2);
-        int posterHeightDp = Math.round(posterWidthDp * (2048f / 1529f));
-        int heroHeightDp = landscape
-                ? Math.max(220, Math.min(300, Math.round(heightDp * 0.50f)))
-                : Math.max(340, Math.min(680, posterHeightDp));
-        return dp(activity, heroHeightDp);
-    }
-
-    static int homeHeroHeight(Activity activity, int measuredWidthPx) {
-        int widthDp = RyluxViewport.widthDp(activity);
-        int heightDp = RyluxViewport.heightDp(activity);
-        boolean landscape = widthDp > 600 && widthDp > heightDp;
-        if (landscape) {
-            int heroHeightDp = Math.max(220, Math.min(300, Math.round(heightDp * 0.50f)));
-            return dp(activity, heroHeightDp);
-        }
-
-        float density = activity.getResources().getDisplayMetrics().density;
-        int innerWidthPx = Math.max(1, measuredWidthPx - dp(activity, 4));
-        int posterWidthDp = Math.max(1, Math.round(innerWidthPx / Math.max(0.1f, density)));
-        int heroHeightDp = Math.max(340, Math.min(680,
-                Math.round(posterWidthDp * (2048f / 1529f))));
-        return dp(activity, heroHeightDp);
     }
 
     private static FrameLayout findHomeAvatar(LinearLayout root, GlowFrameLayout hero) {

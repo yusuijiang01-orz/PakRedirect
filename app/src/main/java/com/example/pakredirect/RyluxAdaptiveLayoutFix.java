@@ -83,25 +83,9 @@ public final class RyluxAdaptiveLayoutFix {
                 dp(activity, 28)
         );
 
-        FrameLayout heroShell = findHeroShell(root);
-        if (heroShell == null) return;
-
-        ViewGroup.LayoutParams raw = heroShell.getLayoutParams();
-        if (!(raw instanceof LinearLayout.LayoutParams)) return;
-        Runnable fitHeroToMeasuredWidth = () -> {
-            int measuredWidth = heroShell.getWidth();
-            if (measuredWidth <= 0) return;
-            ViewGroup.LayoutParams current = heroShell.getLayoutParams();
-            if (!(current instanceof LinearLayout.LayoutParams)) return;
-            LinearLayout.LayoutParams measuredParams = (LinearLayout.LayoutParams) current;
-            int fittedHeight = RyluxHomeNavigationPolish.homeHeroHeight(activity, measuredWidth);
-            if (measuredParams.height != fittedHeight) {
-                measuredParams.height = fittedHeight;
-                heroShell.setLayoutParams(measuredParams);
-            }
-        };
-        if (heroShell.getWidth() > 0) fitHeroToMeasuredWidth.run();
-        else heroShell.post(fitHeroToMeasuredWidth);
+        // The poster ImageView uses adjustViewBounds and has WRAP_CONTENT
+        // height. Keep the card shell content-sized instead of applying a
+        // second viewport-based height that can crop the source image.
     }
 
     private static void tuneGamePanel(
@@ -206,16 +190,6 @@ public final class RyluxAdaptiveLayoutFix {
         return scrollParams(activity, widthDp, widthDp > heightDp);
     }
 
-    private static FrameLayout findHeroShell(LinearLayout root) {
-        for (int i = 0; i < root.getChildCount(); i++) {
-            View child = root.getChildAt(i);
-            if (child instanceof FrameLayout && findFirst(child, GlowFrameLayout.class) != null) {
-                return (FrameLayout) child;
-            }
-        }
-        return null;
-    }
-
     private static LinearLayout findPanel(TextView heading) {
         View cursor = heading;
         for (int i = 0; i < 8; i++) {
@@ -257,18 +231,6 @@ public final class RyluxAdaptiveLayoutFix {
                 TextView found = findGameDetailHeading(group.getChildAt(i));
                 if (found != null) return found;
             }
-        }
-        return null;
-    }
-
-    @SuppressWarnings("unchecked")
-    private static <T extends View> T findFirst(View view, Class<T> type) {
-        if (type.isInstance(view)) return (T) view;
-        if (!(view instanceof ViewGroup)) return null;
-        ViewGroup group = (ViewGroup) view;
-        for (int i = 0; i < group.getChildCount(); i++) {
-            T found = findFirst(group.getChildAt(i), type);
-            if (found != null) return found;
         }
         return null;
     }

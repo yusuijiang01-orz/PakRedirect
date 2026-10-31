@@ -250,35 +250,15 @@ public final class RyluxUiPolish {
             hero.setClipToOutline(true);
         }
 
-        ViewGroup.LayoutParams raw = hero.getLayoutParams();
-        if (raw instanceof LinearLayout.LayoutParams) {
-            LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) raw;
-            lp.leftMargin = dp(activity, 3);
-            lp.rightMargin = dp(activity, 3);
-            lp.bottomMargin = dp(activity, 16);
-            hero.setLayoutParams(lp);
-        }
-
-        hero.post(() -> {
-            ViewGroup.LayoutParams params = hero.getLayoutParams();
-            if (!(params instanceof LinearLayout.LayoutParams) || hero.getWidth() <= 0) return;
-            LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) params;
-            int desired = Math.round(hero.getWidth() * 1.46f);
-            int min = dp(activity, 430);
-            int max = dp(activity, 620);
-            int height = Math.max(min, Math.min(max, desired));
-            if (lp.height != height) {
-                lp.height = height;
-                hero.setLayoutParams(lp);
-            }
-        });
-
         ImageView poster = new ImageView(activity);
         poster.setImageResource(R.drawable.fengshenbang_hero);
         poster.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        poster.setAdjustViewBounds(false);
+        // Preserve the full portrait artwork at every screen density. The
+        // image itself supplies the height; fixed card heights were cropping
+        // the character on 480dpi phones.
+        poster.setAdjustViewBounds(true);
         poster.setBackgroundColor(Color.rgb(10, 17, 28));
-        hero.addView(poster, new FrameLayout.LayoutParams(-1, -1));
+        hero.addView(poster, new FrameLayout.LayoutParams(-1, -2));
 
         View shade = new View(activity);
         shade.setBackground(new GradientDrawable(
