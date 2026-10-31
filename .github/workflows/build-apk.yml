@@ -6,7 +6,7 @@ on:
       version_name:
         description: 'Version name, for example 2.4.26-test'
         required: true
-        default: '2.4.63-test'
+        default: '2.4.64-test'
       version_code:
         description: 'Monotonically increasing Android versionCode'
         required: true
@@ -35,8 +35,8 @@ jobs:
       contents: write
 
     env:
-      RYLUX_VERSION_NAME: ${{ inputs.version_name || '2.4.63-test' }}
-      RYLUX_VERSION_CODE: ${{ inputs.version_code || '84' }}
+      RYLUX_VERSION_NAME: ${{ inputs.version_name || '2.4.64-test' }}
+      RYLUX_VERSION_CODE: ${{ inputs.version_code || '85' }}
       RYLUX_KEYSTORE_B64: ${{ secrets.RYLUX_KEYSTORE_B64 }}
       RYLUX_KEYSTORE_PASSWORD: ${{ secrets.RYLUX_KEYSTORE_PASSWORD }}
       RYLUX_KEY_ALIAS: ${{ secrets.RYLUX_KEY_ALIAS }}

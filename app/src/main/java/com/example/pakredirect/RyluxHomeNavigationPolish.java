@@ -6,6 +6,7 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -509,11 +510,38 @@ public final class RyluxHomeNavigationPolish {
         ));
         syncPinnedHeaderPosition(activity);
         Runnable resetHomeBody = () -> {
-            bodyScroll.scrollTo(0, 0);
             bodyScroll.requestFocus();
+            logHomeBodyState("reset-before", bodyScroll, homeRoot);
+            bodyScroll.scrollTo(0, 0);
+            logHomeBodyState("reset-after", bodyScroll, homeRoot);
         };
         bodyScroll.post(resetHomeBody);
         bodyScroll.postDelayed(resetHomeBody, 180L);
+        bodyScroll.postDelayed(() -> logHomeBodyState("settled-700ms", bodyScroll, homeRoot), 700L);
+        bodyScroll.postDelayed(() -> logHomeBodyState("settled-1500ms", bodyScroll, homeRoot), 1500L);
+    }
+
+    private static void logHomeBodyState(String stage, ScrollView scroll, LinearLayout root) {
+        StringBuilder children = new StringBuilder();
+        for (int i = 0; i < root.getChildCount(); i++) {
+            View child = root.getChildAt(i);
+            if (i > 0) children.append(" | ");
+            children.append(i).append(':').append(child.getClass().getSimpleName())
+                    .append('@').append(child.getTop()).append('+').append(child.getHeight())
+                    .append("/v").append(child.getVisibility());
+            if (child instanceof TextView) {
+                children.append('[').append(((TextView) child).getText()).append(']');
+            }
+        }
+        View focused = scroll.findFocus();
+        Log.d("RyluxHomeNav", stage
+                + " scrollY=" + scroll.getScrollY()
+                + " viewport=" + scroll.getHeight()
+                + " content=" + root.getHeight()
+                + " rootY=" + root.getY()
+                + " rootScrollY=" + root.getScrollY()
+                + " focused=" + (focused == null ? "none" : focused.getClass().getSimpleName())
+                + " children=" + children);
     }
 
     private static void syncPinnedHeaderPosition(Activity activity) {
