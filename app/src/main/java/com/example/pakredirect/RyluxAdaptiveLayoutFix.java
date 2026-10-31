@@ -4,8 +4,10 @@ import android.app.Activity;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewParent;
 import android.view.ViewTreeObserver;
 import android.util.Log;
+import android.graphics.Rect;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -23,6 +25,7 @@ public final class RyluxAdaptiveLayoutFix {
             new WeakHashMap<>();
     private static final WeakHashMap<View, String> LAST_HOME_KEY = new WeakHashMap<>();
     private static final WeakHashMap<View, String> LAST_PANEL_KEY = new WeakHashMap<>();
+    private static final WeakHashMap<View, Boolean> HOME_LAYOUT_DIAGNOSTICS = new WeakHashMap<>();
 
     private RyluxAdaptiveLayoutFix() {}
 
@@ -120,6 +123,9 @@ public final class RyluxAdaptiveLayoutFix {
                     + " desired=" + imageHeight + " heroLp="
                     + (heroBefore == null ? "null" : heroBefore.height)
                     + " attached=" + heroShell.isAttachedToWindow());
+            logHomeViewChain("shell", heroShell);
+            logHomeViewChain("hero", hero);
+            logHomeViewChain("poster", poster);
         };
 
         Log.i("RyluxHomeFit", "schedule shell=" + heroShell.getWidth() + "x"
@@ -128,6 +134,56 @@ public final class RyluxAdaptiveLayoutFix {
         heroShell.post(fit);
         heroShell.postDelayed(fit, 250L);
         heroShell.postDelayed(fit, 1000L);
+        if (!HOME_LAYOUT_DIAGNOSTICS.containsKey(heroShell)) {
+            HOME_LAYOUT_DIAGNOSTICS.put(heroShell, Boolean.TRUE);
+            View.OnLayoutChangeListener listener = (view, left, top, right, bottom,
+                    oldLeft, oldTop, oldRight, oldBottom) -> {
+                if (bottom - top != oldBottom - oldTop) {
+                    logHomeViewChain("layout-change", view);
+                }
+            };
+            heroShell.addOnLayoutChangeListener(listener);
+            hero.addOnLayoutChangeListener(listener);
+            poster.addOnLayoutChangeListener(listener);
+            heroShell.postDelayed(() -> {
+                logHomeViewChain("settled-shell", heroShell);
+                logHomeViewChain("settled-hero", hero);
+                logHomeViewChain("settled-poster", poster);
+            }, 2200L);
+        }
+    }
+
+    private static void logHomeViewChain(String label, View start) {
+        View current = start;
+        for (int depth = 0; current != null && depth < 7; depth++) {
+            Rect visible = new Rect();
+            boolean hasVisible = current.getGlobalVisibleRect(visible);
+            int[] location = new int[2];
+            current.getLocationOnScreen(location);
+            ViewGroup.LayoutParams lp = current.getLayoutParams();
+            ViewParent parent = current.getParent();
+            String parentName = parent instanceof View
+                    ? ((View) parent).getClass().getSimpleName() + "@"
+                            + Integer.toHexString(System.identityHashCode(parent))
+                    : String.valueOf(parent);
+            Log.i("RyluxHomeFit", label + " depth=" + depth + " view="
+                    + current.getClass().getSimpleName() + "@"
+                    + Integer.toHexString(System.identityHashCode(current))
+                    + " xy=" + location[0] + "," + location[1]
+                    + " size=" + current.getWidth() + "x" + current.getHeight()
+                    + " measured=" + current.getMeasuredWidth() + "x" + current.getMeasuredHeight()
+                    + " lp=" + (lp == null ? "null" : lp.width + "x" + lp.height)
+                    + " visible=" + hasVisible + ":" + visible
+                    + " clip=" + (current instanceof ViewGroup
+                            ? ((ViewGroup) current).getClipChildren() + "/"
+                                    + ((ViewGroup) current).getClipToPadding()
+                            : "-")
+                    + " scrollY=" + (current instanceof ScrollView
+                            ? ((ScrollView) current).getScrollY() : "-")
+                    + " tag=" + current.getTag()
+                    + " parent=" + parentName);
+            current = parent instanceof View ? (View) parent : null;
+        }
     }
 
     private static void setMeasuredHeight(View view, int height) {
