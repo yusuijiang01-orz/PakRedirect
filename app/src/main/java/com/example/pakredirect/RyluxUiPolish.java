@@ -8,6 +8,7 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.text.TextUtils;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -338,6 +339,11 @@ public final class RyluxUiPolish {
                     ? MeasureSpec.getSize(heightMeasureSpec)
                     : Math.max(getSuggestedMinimumHeight(), desiredHeight);
             setMeasuredDimension(measuredWidth, measuredHeight);
+            Log.i("RyluxPosterMeasure", "drawable=" + drawableWidth + "x" + drawableHeight
+                    + " specs=" + widthMode + "/" + widthSize + "," + heightMode + "/"
+                    + MeasureSpec.getSize(heightMeasureSpec) + " measured=" + measuredWidth
+                    + "x" + measuredHeight + " parent="
+                    + (getParent() == null ? "none" : getParent().getClass().getSimpleName()));
         }
     }
 
