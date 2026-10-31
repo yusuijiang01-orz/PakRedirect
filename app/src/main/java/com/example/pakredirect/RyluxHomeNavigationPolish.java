@@ -88,7 +88,7 @@ public final class RyluxHomeNavigationPolish {
                 activity.getWindow().getDecorView(), ROOT_TAG);
         if (homeRoot != null) {
             adaptAccountRow(activity, homeRoot);
-            restoreHomeRootTranslation(homeRoot);
+            restoreHomeRootPosition(homeRoot);
             syncPinnedHeaderPosition(activity);
             return;
         }
@@ -315,12 +315,12 @@ public final class RyluxHomeNavigationPolish {
         LAST_NARROW_MODE.put(root, narrow);
     }
 
-    private static void restoreHomeRootTranslation(LinearLayout homeRoot) {
+    private static void restoreHomeRootPosition(LinearLayout homeRoot) {
         // Responsive layout passes can translate the ScrollView's child while
-        // scrollY remains zero. Correct only that transform; leave the user's
-        // actual scroll position untouched.
-        if (Math.abs(homeRoot.getTranslationY()) > 0.5f) {
-            homeRoot.setTranslationY(0f);
+        // scrollY remains zero. Correct the view's actual Y position without
+        // changing the user's scroll offset.
+        if (Math.abs(homeRoot.getY()) > 0.5f) {
+            homeRoot.setY(0f);
         }
     }
 
@@ -527,7 +527,7 @@ public final class RyluxHomeNavigationPolish {
             // The runtime layout pass can translate the content root to the
             // bottom while the ScrollView itself still reports scrollY=0.
             // Re-anchor the root after the responsive tuners have settled.
-            homeRoot.setTranslationY(0f);
+            homeRoot.setY(0f);
         };
         bodyScroll.post(resetHomeBody);
         bodyScroll.postDelayed(resetHomeBody, 180L);
