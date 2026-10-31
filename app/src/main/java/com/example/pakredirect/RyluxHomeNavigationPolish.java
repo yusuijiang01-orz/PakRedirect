@@ -108,13 +108,15 @@ public final class RyluxHomeNavigationPolish {
         if (focused != null) focused.clearFocus();
         avatar.clearFocus();
         hero.clearFocus();
-        // The old home canvas is reparented into the poster card below. If it
-        // keeps keyboard focus, ScrollView scrolls back down to it after layout.
-        // It remains clickable; only focus-driven auto-scrolling is disabled.
+        // Keep the poster clickable without letting it win initial keyboard focus.
         hero.setFocusable(false);
         hero.setFocusableInTouchMode(false);
-        root.setFocusable(true);
-        root.setFocusableInTouchMode(true);
+        // The content root can be taller than the viewport. Focusing it makes
+        // ScrollView try to reveal the whole root and align its bottom, hiding
+        // the account row above. Let the ScrollView itself hold initial focus.
+        root.setFocusable(false);
+        root.setFocusableInTouchMode(false);
+        root.clearFocus();
 
         ArrayList<View> preserved = new ArrayList<>();
         for (int i = 0; i < root.getChildCount(); i++) {
@@ -434,12 +436,13 @@ public final class RyluxHomeNavigationPolish {
             current = (View) current.getParent();
             if (current instanceof ScrollView) {
                 ScrollView scroll = (ScrollView) current;
+                scroll.setFocusable(true);
                 scroll.setFocusableInTouchMode(true);
                 scroll.setDescendantFocusability(ViewGroup.FOCUS_BEFORE_DESCENDANTS);
-                scroll.post(() -> {
-                    homeRoot.requestFocus();
+                scroll.postDelayed(() -> {
+                    scroll.requestFocus();
                     scroll.scrollTo(0, 0);
-                });
+                }, 150L);
                 return;
             }
         }
