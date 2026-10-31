@@ -6,6 +6,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -83,9 +84,37 @@ public final class RyluxAdaptiveLayoutFix {
                 dp(activity, 28)
         );
 
-        // The poster ImageView uses adjustViewBounds and has WRAP_CONTENT
-        // height. Keep the card shell content-sized instead of applying a
-        // second viewport-based height that can crop the source image.
+        FrameLayout heroShell = findHeroShell(root);
+        if (heroShell != null) fitHomeHeroToArtwork(activity, heroShell);
+    }
+
+    private static void fitHomeHeroToArtwork(Activity activity, FrameLayout heroShell) {
+        GlowFrameLayout hero = findFirst(heroShell, GlowFrameLayout.class);
+        ImageView poster = hero == null ? null : findFirst(hero, ImageView.class);
+        if (hero == null || poster == null) return;
+
+        Runnable fit = () -> {
+            int imageWidth = poster.getWidth();
+            android.graphics.drawable.Drawable artwork = poster.getDrawable();
+            int artworkWidth = artwork == null ? 0 : artwork.getIntrinsicWidth();
+            int artworkHeight = artwork == null ? 0 : artwork.getIntrinsicHeight();
+            if (imageWidth <= 0 || artworkWidth <= 0 || artworkHeight <= 0) return;
+
+            int imageHeight = Math.round(imageWidth * (artworkHeight / (float) artworkWidth));
+            setMeasuredHeight(hero, imageHeight);
+            setMeasuredHeight(heroShell, imageHeight + heroShell.getPaddingTop() + heroShell.getPaddingBottom());
+        };
+
+        if (poster.getWidth() > 0) fit.run();
+        heroShell.post(fit);
+        heroShell.postDelayed(fit, 250L);
+    }
+
+    private static void setMeasuredHeight(View view, int height) {
+        ViewGroup.LayoutParams params = view.getLayoutParams();
+        if (params == null || params.height == height) return;
+        params.height = height;
+        view.setLayoutParams(params);
     }
 
     private static void tuneGamePanel(
@@ -199,6 +228,28 @@ public final class RyluxAdaptiveLayoutFix {
                 Object parent = cursor.getParent();
                 if (parent instanceof FrameLayout || parent instanceof ScrollView) return (LinearLayout) cursor;
             }
+        }
+        return null;
+    }
+
+    private static FrameLayout findHeroShell(LinearLayout root) {
+        for (int i = 0; i < root.getChildCount(); i++) {
+            View child = root.getChildAt(i);
+            if (child instanceof FrameLayout && findFirst(child, GlowFrameLayout.class) != null) {
+                return (FrameLayout) child;
+            }
+        }
+        return null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T extends View> T findFirst(View view, Class<T> type) {
+        if (type.isInstance(view)) return (T) view;
+        if (!(view instanceof ViewGroup)) return null;
+        ViewGroup group = (ViewGroup) view;
+        for (int i = 0; i < group.getChildCount(); i++) {
+            T found = findFirst(group.getChildAt(i), type);
+            if (found != null) return found;
         }
         return null;
     }

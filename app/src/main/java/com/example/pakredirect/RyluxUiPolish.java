@@ -1,14 +1,12 @@
 package com.example.pakredirect;
 
 import android.app.Activity;
-import android.content.Context;
 import android.graphics.Color;
 import android.graphics.Outline;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.text.TextUtils;
-import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -252,15 +250,12 @@ public final class RyluxUiPolish {
             hero.setClipToOutline(true);
         }
 
-        ImageView poster = new IntrinsicRatioPosterView(activity);
+        ImageView poster = new ImageView(activity);
         poster.setImageResource(R.drawable.fengshenbang_hero);
         poster.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        // Use an explicit measurement rule: some device/window combinations
-        // still constrained adjustViewBounds to the viewport and cropped the
-        // character's head at 480dpi.
         poster.setAdjustViewBounds(false);
         poster.setBackgroundColor(Color.rgb(10, 17, 28));
-        hero.addView(poster, new FrameLayout.LayoutParams(-1, -2));
+        hero.addView(poster, new FrameLayout.LayoutParams(-1, -1));
 
         View shade = new View(activity);
         shade.setBackground(new GradientDrawable(
@@ -301,50 +296,6 @@ public final class RyluxUiPolish {
                 new FrameLayout.LayoutParams(-1, -2);
         captionLp.gravity = Gravity.BOTTOM;
         hero.addView(caption, captionLp);
-    }
-
-    /** Measures the poster at the source image's aspect ratio. */
-    private static final class IntrinsicRatioPosterView extends ImageView {
-        IntrinsicRatioPosterView(Context context) {
-            super(context);
-        }
-
-        @Override
-        protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-            int drawableWidth = getDrawable() == null ? 0 : getDrawable().getIntrinsicWidth();
-            int drawableHeight = getDrawable() == null ? 0 : getDrawable().getIntrinsicHeight();
-            if (drawableWidth <= 0 || drawableHeight <= 0) {
-                super.onMeasure(widthMeasureSpec, heightMeasureSpec);
-                return;
-            }
-
-            int widthMode = MeasureSpec.getMode(widthMeasureSpec);
-            int widthSize = MeasureSpec.getSize(widthMeasureSpec);
-            int desiredWidth = getSuggestedMinimumWidth();
-            int measuredWidth;
-            if (widthMode == MeasureSpec.EXACTLY) {
-                measuredWidth = widthSize;
-            } else {
-                desiredWidth = Math.max(desiredWidth, drawableWidth + getPaddingLeft() + getPaddingRight());
-                measuredWidth = widthMode == MeasureSpec.AT_MOST
-                        ? Math.min(desiredWidth, widthSize)
-                        : desiredWidth;
-            }
-
-            int imageWidth = Math.max(1, measuredWidth - getPaddingLeft() - getPaddingRight());
-            int desiredHeight = Math.round(imageWidth * (drawableHeight / (float) drawableWidth))
-                    + getPaddingTop() + getPaddingBottom();
-            int heightMode = MeasureSpec.getMode(heightMeasureSpec);
-            int measuredHeight = heightMode == MeasureSpec.EXACTLY
-                    ? MeasureSpec.getSize(heightMeasureSpec)
-                    : Math.max(getSuggestedMinimumHeight(), desiredHeight);
-            setMeasuredDimension(measuredWidth, measuredHeight);
-            Log.i("RyluxPosterMeasure", "drawable=" + drawableWidth + "x" + drawableHeight
-                    + " specs=" + widthMode + "/" + widthSize + "," + heightMode + "/"
-                    + MeasureSpec.getSize(heightMeasureSpec) + " measured=" + measuredWidth
-                    + "x" + measuredHeight + " parent="
-                    + (getParent() == null ? "none" : getParent().getClass().getSimpleName()));
-        }
     }
 
     private static void stylePanel(Activity activity, TextView heading, boolean gamePanel) {
