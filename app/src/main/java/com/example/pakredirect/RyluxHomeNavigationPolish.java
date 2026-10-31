@@ -430,7 +430,7 @@ public final class RyluxHomeNavigationPolish {
         return Math.round(value * activity.getResources().getDisplayMetrics().density);
     }
 
-    private static void restoreHomeScrollPosition(View homeRoot) {
+    private static void restoreHomeScrollPosition(ViewGroup homeRoot) {
         View current = homeRoot;
         while (current.getParent() instanceof View) {
             current = (View) current.getParent();
