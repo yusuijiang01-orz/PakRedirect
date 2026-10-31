@@ -104,7 +104,27 @@ public final class RyluxHomeNavigationPolish {
         root.addView(section, sectionLp);
 
         FrameLayout card = gameCard(activity, hero, widthDp);
-        root.addView(card, new LinearLayout.LayoutParams(contentWidth, -2));
+        int initialCardWidthDp = widthDp >= 600 ? 560 : Math.max(1, widthDp - 32);
+        LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(
+                contentWidth, dp(activity, gameCardHeightDp(initialCardWidthDp)));
+        root.addView(card, cardLp);
+        // The backdrop fills the card, so the card itself must have a bounded
+        // height before the first measurement. Recompute from its real width
+        // when the window changes size, without allowing a MATCH_PARENT child
+        // to determine the height of a WRAP_CONTENT parent.
+        card.addOnLayoutChangeListener((view, left, top, right, bottom,
+                                        oldLeft, oldTop, oldRight, oldBottom) -> {
+            int widthPx = right - left;
+            if (widthPx <= 0) return;
+            float density = activity.getResources().getDisplayMetrics().density;
+            int measuredWidthDp = Math.round(widthPx / Math.max(0.1f, density));
+            int desiredHeight = dp(activity, gameCardHeightDp(measuredWidthDp));
+            ViewGroup.LayoutParams params = view.getLayoutParams();
+            if (params != null && params.height != desiredHeight) {
+                params.height = desiredHeight;
+                view.setLayoutParams(params);
+            }
+        });
         for (View child : preserved) root.addView(child);
 
         // fillViewport expands this spacer on tall phones; on short screens it
@@ -114,6 +134,10 @@ public final class RyluxHomeNavigationPolish {
         LinearLayout.LayoutParams sandboxLp = new LinearLayout.LayoutParams(contentWidth, -2);
         sandboxLp.topMargin = dp(activity, 28);
         root.addView(sandbox, sandboxLp);
+    }
+
+    private static int gameCardHeightDp(int cardWidthDp) {
+        return Math.max(104, Math.min(136, Math.round(cardWidthDp * 0.30f)));
     }
 
     private static void installBackground(Activity activity, LinearLayout root) {
@@ -278,8 +302,8 @@ public final class RyluxHomeNavigationPolish {
 
         LinearLayout content = new LinearLayout(activity);
         content.setGravity(Gravity.CENTER_VERTICAL);
-        content.setPadding(dp(activity, 14), dp(activity, 14), dp(activity, 14), dp(activity, 14));
-        int imageSize = dp(activity, widthDp < 340 ? 68 : 80);
+        content.setPadding(dp(activity, 14), dp(activity, 8), dp(activity, 14), dp(activity, 8));
+        int imageSize = dp(activity, widthDp < 340 ? 72 : 80);
         FrameLayout thumbnail = new FrameLayout(activity);
         thumbnail.setClipToOutline(true);
         thumbnail.setOutlineProvider(roundOutline(activity, 13));
@@ -294,7 +318,9 @@ public final class RyluxHomeNavigationPolish {
         description.setOrientation(LinearLayout.VERTICAL);
         description.setGravity(Gravity.CENTER_VERTICAL);
         TextView title = label(activity, "封神榜（汉化版）", widthDp < 340 ? 15 : 17, TEXT, true);
-        title.setMaxLines(3);
+        title.setMaxLines(2);
+        title.setAutoSizeTextTypeUniformWithConfiguration(
+                11, widthDp < 340 ? 15 : 17, 1, android.util.TypedValue.COMPLEX_UNIT_SP);
         description.addView(title, new LinearLayout.LayoutParams(-1, -2));
         LinearLayout status = new LinearLayout(activity);
         status.setGravity(Gravity.CENTER_VERTICAL);
@@ -307,7 +333,7 @@ public final class RyluxHomeNavigationPolish {
         supportedLp.leftMargin = dp(activity, 5);
         status.addView(supported, supportedLp);
         LinearLayout.LayoutParams statusLp = new LinearLayout.LayoutParams(-2, -2);
-        statusLp.topMargin = dp(activity, 10);
+        statusLp.topMargin = dp(activity, 6);
         description.addView(status, statusLp);
         LinearLayout.LayoutParams descriptionLp = new LinearLayout.LayoutParams(0, -2, 1f);
         descriptionLp.leftMargin = dp(activity, 12);
@@ -321,7 +347,7 @@ public final class RyluxHomeNavigationPolish {
         FrameLayout.LayoutParams arrowLp = new FrameLayout.LayoutParams(dp(activity, 22), dp(activity, 22), Gravity.CENTER);
         arrowCircle.addView(arrow, arrowLp);
         content.addView(arrowCircle, new LinearLayout.LayoutParams(dp(activity, 40), dp(activity, 40)));
-        card.addView(content, new FrameLayout.LayoutParams(-1, -2));
+        card.addView(content, new FrameLayout.LayoutParams(-1, -1));
         card.setForeground(round(activity, Color.TRANSPARENT, 18, Color.rgb(65, 145, 224), 1));
         return card;
     }
