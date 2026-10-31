@@ -2,8 +2,10 @@ package com.example.pakredirect;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Outline;
+import android.graphics.Paint;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.view.Gravity;
@@ -27,7 +29,6 @@ import java.util.WeakHashMap;
 public final class RyluxHomeNavigationPolish {
     private static final String ROOT_TAG = "rylux_home_navigation_v3";
     private static final int TEXT = Color.rgb(244, 248, 255);
-    private static final int CYAN = Color.rgb(121, 225, 255);
     private static final int GOLD = Color.rgb(255, 216, 132);
     private static final int GREEN = Color.rgb(86, 226, 189);
     private static final WeakHashMap<Activity, ViewTreeObserver.OnGlobalLayoutListener> LISTENERS =
@@ -131,7 +132,9 @@ public final class RyluxHomeNavigationPolish {
         // collapses to zero and the page scrolls rather than hiding controls.
         root.addView(new Space(activity), new LinearLayout.LayoutParams(1, 0, 1f));
         View sandbox = sandboxButton(activity);
-        LinearLayout.LayoutParams sandboxLp = new LinearLayout.LayoutParams(contentWidth, -2);
+        int sandboxWidth = widthDp >= 600
+                ? dp(activity, 470) : dp(activity, Math.max(1, Math.round(widthDp * 0.84f)));
+        LinearLayout.LayoutParams sandboxLp = new LinearLayout.LayoutParams(sandboxWidth, -2);
         sandboxLp.topMargin = dp(activity, 28);
         root.addView(sandbox, sandboxLp);
     }
@@ -154,7 +157,9 @@ public final class RyluxHomeNavigationPolish {
             host.setBackgroundColor(Color.rgb(3, 14, 33));
             ImageView background = new ImageView(activity);
             background.setImageResource(R.drawable.rylux_home_background);
-            background.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            // Preserve the designed light-ribbon positions across phone ratios.
+            // CENTER_CROP clips the top and bottom artwork on narrow devices.
+            background.setScaleType(ImageView.ScaleType.FIT_XY);
             background.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             host.addView(background, 0, new FrameLayout.LayoutParams(-1, -1));
         }
@@ -173,16 +178,20 @@ public final class RyluxHomeNavigationPolish {
         int avatarSize = dp(activity, narrow ? 50 : 58);
         View portrait = portrait(activity, originalAvatar);
         LinearLayout.LayoutParams portraitLp = new LinearLayout.LayoutParams(avatarSize, avatarSize);
-        portraitLp.rightMargin = dp(activity, 10);
+        portraitLp.rightMargin = dp(activity, 8);
         row.addView(portrait, portraitLp);
 
         View vip = membership(activity, originalAvatar);
-        row.addView(vip, new LinearLayout.LayoutParams(0, -2, 1f));
+        LinearLayout.LayoutParams vipLp = new LinearLayout.LayoutParams(
+                dp(activity, narrow ? 96 : 106), dp(activity, 32));
+        vipLp.leftMargin = dp(activity, 2);
+        row.addView(vip, vipLp);
         if (!narrow) {
+            row.addView(new Space(activity), new LinearLayout.LayoutParams(0, 1, 1f));
             row.addView(headerIcon(activity, R.drawable.ic_rylux_bell, "通知（暂不可用）"),
-                    iconParams(activity, 8));
+                    iconParams(activity, 0));
             row.addView(headerIcon(activity, R.drawable.ic_rylux_settings, "设置（暂不可用）"),
-                    iconParams(activity, 2));
+                    iconParams(activity, 0));
         }
         container.addView(row, new LinearLayout.LayoutParams(-1, -2));
         if (narrow) {
@@ -202,7 +211,7 @@ public final class RyluxHomeNavigationPolish {
         rim.setBackground(aura);
         FrameLayout ring = new FrameLayout(activity);
         GradientDrawable ringGradient = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                new int[]{Color.rgb(163, 246, 255), Color.rgb(54, 172, 255), Color.rgb(126, 135, 255)});
+                new int[]{Color.rgb(137, 246, 255), Color.rgb(64, 167, 255), Color.rgb(211, 143, 255)});
         ringGradient.setShape(GradientDrawable.OVAL);
         ring.setBackground(ringGradient);
         ring.setPadding(dp(activity, 2), dp(activity, 2), dp(activity, 2), dp(activity, 2));
@@ -239,32 +248,34 @@ public final class RyluxHomeNavigationPolish {
         LinearLayout pill = new LinearLayout(activity);
         pill.setOrientation(LinearLayout.HORIZONTAL);
         pill.setGravity(Gravity.CENTER_VERTICAL);
-        pill.setPadding(dp(activity, 10), dp(activity, 5), dp(activity, 10), dp(activity, 5));
-        pill.setMinimumHeight(dp(activity, 40));
+        pill.setPadding(dp(activity, 7), dp(activity, 2), dp(activity, 7), dp(activity, 2));
+        pill.setMinimumHeight(dp(activity, 30));
         GradientDrawable bg = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
                 new int[]{Color.rgb(103, 70, 30), Color.rgb(48, 39, 31), Color.rgb(34, 34, 43)});
-        bg.setCornerRadius(dp(activity, 24));
+        bg.setCornerRadius(dp(activity, 18));
         bg.setStroke(dp(activity, 1), Color.rgb(255, 210, 119));
         pill.setBackground(bg);
-        pill.setElevation(dp(activity, 4));
+        pill.setElevation(dp(activity, 2));
         pill.setClickable(true);
         pill.setFocusable(true);
         pill.setContentDescription(text + "，打开账号中心");
         pill.setOnClickListener(v -> originalAvatar.performClick());
-        ImageView crown = image(activity, R.drawable.ic_rylux_crown, 23);
-        pill.addView(crown, new LinearLayout.LayoutParams(dp(activity, 23), dp(activity, 23)));
-        TextView label = label(activity, text, trial ? 13 : 16, admin ? GREEN : GOLD, true);
-        label.setMaxLines(2);
+        ImageView crown = image(activity, R.drawable.ic_rylux_crown, 20);
+        pill.addView(crown, new LinearLayout.LayoutParams(dp(activity, 20), dp(activity, 20)));
+        TextView label = label(activity, text, trial ? 10 : 14, admin ? GREEN : GOLD, true);
+        label.setMaxLines(1);
+        label.setAutoSizeTextTypeUniformWithConfiguration(
+                8, trial ? 10 : 14, 1, android.util.TypedValue.COMPLEX_UNIT_SP);
         LinearLayout.LayoutParams textLp = new LinearLayout.LayoutParams(0, -2, 1f);
-        textLp.leftMargin = dp(activity, 6);
+        textLp.leftMargin = dp(activity, 4);
         pill.addView(label, textLp);
-        ImageView arrow = image(activity, R.drawable.ic_rylux_chevron_gold, 16);
+        ImageView arrow = image(activity, R.drawable.ic_rylux_chevron_gold, 13);
         arrow.setColorFilter(Color.rgb(255, 226, 164));
-        LinearLayout.LayoutParams arrowLp = new LinearLayout.LayoutParams(dp(activity, 16), dp(activity, 16));
-        arrowLp.leftMargin = dp(activity, 3);
+        LinearLayout.LayoutParams arrowLp = new LinearLayout.LayoutParams(dp(activity, 13), dp(activity, 13));
+        arrowLp.leftMargin = dp(activity, 2);
         pill.addView(arrow, arrowLp);
-        FrameLayout.LayoutParams pillLp = new FrameLayout.LayoutParams(-1, dp(activity, 40), Gravity.CENTER);
-        pillLp.setMargins(dp(activity, 4), dp(activity, 2), dp(activity, 4), dp(activity, 2));
+        FrameLayout.LayoutParams pillLp = new FrameLayout.LayoutParams(-1, dp(activity, 28), Gravity.CENTER);
+        pillLp.setMargins(dp(activity, 3), dp(activity, 2), dp(activity, 3), dp(activity, 2));
         shell.addView(pill, pillLp);
         View glint = new View(activity);
         GradientDrawable glintBg = new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
@@ -276,6 +287,7 @@ public final class RyluxHomeNavigationPolish {
                 Gravity.TOP | Gravity.CENTER_HORIZONTAL);
         glintLp.setMargins(dp(activity, 30), dp(activity, 4), dp(activity, 30), 0);
         shell.addView(glint, glintLp);
+        shell.addView(new GoldDustView(activity), new FrameLayout.LayoutParams(-1, -1));
         shell.setClickable(true);
         shell.setFocusable(true);
         shell.setContentDescription(text + "，打开账号中心");
@@ -288,13 +300,11 @@ public final class RyluxHomeNavigationPolish {
         column.setOrientation(LinearLayout.VERTICAL);
         LinearLayout row = new LinearLayout(activity);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        FrameLayout gamepad = iconBadge(activity, R.drawable.ic_rylux_gamepad, 36, 25,
-                Color.rgb(49, 169, 238));
-        row.addView(gamepad, new LinearLayout.LayoutParams(dp(activity, 36), dp(activity, 36)));
-        TextView title = label(activity, "游戏服务", 19, TEXT, true);
-        title.setShadowLayer(dp(activity, 8), 0, 0, Color.argb(145, 86, 187, 255));
+        ImageView gamepad = image(activity, R.drawable.ic_rylux_gamepad, 28);
+        row.addView(gamepad, new LinearLayout.LayoutParams(dp(activity, 28), dp(activity, 28)));
+        TextView title = label(activity, "游戏服务", 18, TEXT, true);
         LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(-2, -2);
-        titleLp.leftMargin = dp(activity, 10);
+        titleLp.leftMargin = dp(activity, 8);
         row.addView(title, titleLp);
         column.addView(row, new LinearLayout.LayoutParams(-1, -2));
         View line = new View(activity);
@@ -303,8 +313,8 @@ public final class RyluxHomeNavigationPolish {
         glow.setCornerRadius(dp(activity, 3));
         line.setBackground(glow);
         line.setElevation(dp(activity, 4));
-        LinearLayout.LayoutParams lineLp = new LinearLayout.LayoutParams(dp(activity, 106), dp(activity, 3));
-        lineLp.leftMargin = dp(activity, 36);
+        LinearLayout.LayoutParams lineLp = new LinearLayout.LayoutParams(dp(activity, 28), dp(activity, 2));
+        lineLp.leftMargin = dp(activity, 40);
         lineLp.topMargin = dp(activity, 9);
         column.addView(line, lineLp);
         return column;
@@ -313,7 +323,7 @@ public final class RyluxHomeNavigationPolish {
     private static FrameLayout gameCard(Activity activity, GlowFrameLayout hero, int widthDp) {
         FrameLayout card = new FrameLayout(activity);
         card.setClipToOutline(true);
-        card.setOutlineProvider(roundOutline(activity, 18));
+        card.setOutlineProvider(roundOutline(activity, 16));
         card.setBackgroundColor(Color.rgb(14, 36, 64));
         card.setElevation(dp(activity, 6));
         card.setClickable(true);
@@ -328,7 +338,7 @@ public final class RyluxHomeNavigationPolish {
         card.addView(backdrop, new FrameLayout.LayoutParams(-1, -1));
         View shade = new View(activity);
         shade.setBackground(new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-                new int[]{Color.argb(210, 8, 28, 53), Color.argb(130, 8, 27, 50), Color.argb(75, 7, 22, 45)}));
+                new int[]{Color.argb(224, 7, 24, 48), Color.argb(203, 7, 24, 48), Color.argb(170, 7, 24, 48)}));
         card.addView(shade, new FrameLayout.LayoutParams(-1, -1));
 
         LinearLayout content = new LinearLayout(activity);
@@ -349,7 +359,6 @@ public final class RyluxHomeNavigationPolish {
         description.setOrientation(LinearLayout.VERTICAL);
         description.setGravity(Gravity.CENTER_VERTICAL);
         TextView title = label(activity, "封神榜（汉化版）", widthDp < 340 ? 15 : 17, TEXT, true);
-        title.setShadowLayer(dp(activity, 7), 0, 0, Color.argb(120, 58, 147, 230));
         title.setMaxLines(2);
         title.setAutoSizeTextTypeUniformWithConfiguration(
                 11, widthDp < 340 ? 15 : 17, 1, android.util.TypedValue.COMPLEX_UNIT_SP);
@@ -378,11 +387,24 @@ public final class RyluxHomeNavigationPolish {
         descriptionLp.rightMargin = dp(activity, 6);
         content.addView(description, descriptionLp);
 
-        FrameLayout arrowCircle = iconBadge(activity, R.drawable.ic_rylux_chevron, 44, 26,
-                Color.rgb(65, 182, 255));
-        content.addView(arrowCircle, new LinearLayout.LayoutParams(dp(activity, 40), dp(activity, 40)));
+        FrameLayout arrowGlow = new FrameLayout(activity);
+        arrowGlow.setBackground(radialGlow(activity, Color.argb(115, 36, 161, 255),
+                Color.argb(28, 36, 161, 255), 28, 16));
+        FrameLayout arrowCircle = new FrameLayout(activity);
+        GradientDrawable arrowBg = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                new int[]{Color.argb(225, 16, 65, 118), Color.argb(225, 8, 37, 78)});
+        arrowBg.setShape(GradientDrawable.OVAL);
+        arrowBg.setStroke(dp(activity, 1), Color.rgb(83, 184, 255));
+        arrowCircle.setBackground(arrowBg);
+        ImageView arrow = image(activity, R.drawable.ic_rylux_chevron, 18);
+        FrameLayout.LayoutParams arrowLp = new FrameLayout.LayoutParams(dp(activity, 18),
+                dp(activity, 18), Gravity.CENTER);
+        arrowCircle.addView(arrow, arrowLp);
+        arrowGlow.addView(arrowCircle, new FrameLayout.LayoutParams(dp(activity, 26),
+                dp(activity, 26), Gravity.CENTER));
+        content.addView(arrowGlow, new LinearLayout.LayoutParams(dp(activity, 32), dp(activity, 32)));
         card.addView(content, new FrameLayout.LayoutParams(-1, -1));
-        card.setForeground(round(activity, Color.TRANSPARENT, 18, Color.rgb(65, 145, 224), 1));
+        card.setForeground(round(activity, Color.TRANSPARENT, 16, Color.rgb(65, 145, 224), 1));
         return card;
     }
 
@@ -392,8 +414,8 @@ public final class RyluxHomeNavigationPolish {
                 Color.argb(33, 37, 112, 214), 300, 24));
         LinearLayout button = new LinearLayout(activity);
         button.setGravity(Gravity.CENTER);
-        button.setPadding(dp(activity, 14), dp(activity, 12), dp(activity, 14), dp(activity, 12));
-        button.setMinimumHeight(dp(activity, 56));
+        button.setPadding(dp(activity, 12), dp(activity, 6), dp(activity, 12), dp(activity, 6));
+        button.setMinimumHeight(dp(activity, 44));
         GradientDrawable bg = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
                 new int[]{Color.rgb(29, 100, 176), Color.rgb(14, 54, 109), Color.rgb(9, 34, 76)});
         bg.setCornerRadius(dp(activity, 22));
@@ -403,13 +425,13 @@ public final class RyluxHomeNavigationPolish {
         button.setFocusable(true);
         button.setContentDescription("打开 BlackBox 游戏沙箱测试版");
         button.setOnClickListener(v -> activity.startActivity(new Intent(activity, BlackBoxSandboxActivity.class)));
-        ImageView icon = image(activity, R.drawable.ic_rylux_cube, 24);
-        button.addView(icon, new LinearLayout.LayoutParams(dp(activity, 24), dp(activity, 24)));
-        TextView title = label(activity, "BlackBox 游戏沙箱 · 测试版", 15, TEXT, true);
+        ImageView icon = image(activity, R.drawable.ic_rylux_cube, 18);
+        button.addView(icon, new LinearLayout.LayoutParams(dp(activity, 18), dp(activity, 18)));
+        TextView title = label(activity, "BlackBox 游戏沙箱 · 测试版", 14, TEXT, true);
         title.setGravity(Gravity.CENTER);
         title.setMaxLines(2);
         LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(-2, -2);
-        titleLp.leftMargin = dp(activity, 10);
+        titleLp.leftMargin = dp(activity, 8);
         button.addView(title, titleLp);
         FrameLayout.LayoutParams buttonLp = new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER);
         buttonLp.setMargins(dp(activity, 4), dp(activity, 3), dp(activity, 4), dp(activity, 3));
@@ -432,36 +454,13 @@ public final class RyluxHomeNavigationPolish {
     }
 
     private static FrameLayout headerIcon(Activity activity, int drawable, String description) {
-        int edge = drawable == R.drawable.ic_rylux_bell
-                ? Color.rgb(63, 192, 245) : Color.rgb(108, 155, 216);
-        FrameLayout shell = iconBadge(activity, drawable, 42, 24, edge);
+        FrameLayout shell = new FrameLayout(activity);
+        shell.setBackground(radialGlow(activity, Color.argb(34, 97, 195, 255),
+                Color.argb(10, 97, 195, 255), 34, 22));
+        ImageView icon = image(activity, drawable, 22);
+        shell.addView(icon, new FrameLayout.LayoutParams(dp(activity, 20), dp(activity, 20), Gravity.CENTER));
         shell.setContentDescription(description);
         shell.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
-        return shell;
-    }
-
-    private static FrameLayout iconBadge(Activity activity, int drawable, int sizeDp, int iconSizeDp,
-                                        int edgeColor) {
-        FrameLayout shell = new FrameLayout(activity);
-        shell.setBackground(radialGlow(activity, Color.argb(100,
-                Color.red(edgeColor), Color.green(edgeColor), Color.blue(edgeColor)),
-                Color.argb(18, Color.red(edgeColor), Color.green(edgeColor), Color.blue(edgeColor)),
-                sizeDp * 1.15f, sizeDp / 2f));
-        GradientDrawable plate = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                new int[]{Color.rgb(44, 71, 102), Color.rgb(18, 32, 53), Color.rgb(13, 25, 45)});
-        plate.setShape(GradientDrawable.OVAL);
-        plate.setStroke(dp(activity, 1), Color.argb(210,
-                Color.red(edgeColor), Color.green(edgeColor), Color.blue(edgeColor)));
-        FrameLayout face = new FrameLayout(activity);
-        face.setBackground(plate);
-        face.setElevation(dp(activity, 3));
-        ImageView icon = image(activity, drawable, iconSizeDp);
-        FrameLayout.LayoutParams iconLp = new FrameLayout.LayoutParams(dp(activity, iconSizeDp),
-                dp(activity, iconSizeDp), Gravity.CENTER);
-        face.addView(icon, iconLp);
-        FrameLayout.LayoutParams faceLp = new FrameLayout.LayoutParams(dp(activity, sizeDp - 5),
-                dp(activity, sizeDp - 5), Gravity.CENTER);
-        shell.addView(face, faceLp);
         return shell;
     }
 
@@ -478,8 +477,39 @@ public final class RyluxHomeNavigationPolish {
         return glow;
     }
 
+    private static final class GoldDustView extends View {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final float density;
+
+        GoldDustView(Activity activity) {
+            super(activity);
+            density = activity.getResources().getDisplayMetrics().density;
+            setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+            setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            float w = getWidth();
+            float h = getHeight();
+            float[][] particles = {
+                    {0.035f, 0.22f, 0.9f}, {0.075f, 0.78f, 0.75f},
+                    {0.925f, 0.17f, 0.8f}, {0.965f, 0.42f, 1.15f},
+                    {0.945f, 0.83f, 0.7f}, {0.885f, 0.91f, 0.55f}
+            };
+            for (int i = 0; i < particles.length; i++) {
+                float radius = particles[i][2] * density;
+                int color = i % 2 == 0 ? Color.rgb(255, 238, 188) : Color.rgb(255, 194, 94);
+                paint.setColor(color);
+                paint.setShadowLayer(radius * 2.4f, 0, 0, Color.argb(175, 255, 177, 66));
+                canvas.drawCircle(w * particles[i][0], h * particles[i][1], radius, paint);
+            }
+            paint.clearShadowLayer();
+        }
+    }
+
     private static LinearLayout.LayoutParams iconParams(Activity activity, int leftMargin) {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(activity, 44), dp(activity, 48));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(activity, 34), dp(activity, 40));
         lp.leftMargin = dp(activity, leftMargin);
         return lp;
     }
