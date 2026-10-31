@@ -449,9 +449,15 @@ public final class RyluxHomeNavigationPolish {
             LinearLayout accountRegion
     ) {
         if (!(homeRoot.getParent() instanceof ScrollView)) return;
-        ScrollView bodyScroll = (ScrollView) homeRoot.getParent();
-        if (!(bodyScroll.getParent() instanceof FrameLayout)) return;
-        FrameLayout host = (FrameLayout) bodyScroll.getParent();
+        ScrollView previousScroll = (ScrollView) homeRoot.getParent();
+        if (!(previousScroll.getParent() instanceof FrameLayout)) return;
+        FrameLayout host = (FrameLayout) previousScroll.getParent();
+        int scrollIndex = host.indexOfChild(previousScroll);
+        if (scrollIndex < 0) return;
+        ViewGroup.LayoutParams previousParams = previousScroll.getLayoutParams();
+        FrameLayout.LayoutParams bodyParams = previousParams instanceof FrameLayout.LayoutParams
+                ? new FrameLayout.LayoutParams((FrameLayout.LayoutParams) previousParams)
+                : new FrameLayout.LayoutParams(-1, -1);
 
         homeRoot.removeView(title);
         homeRoot.removeView(subtitle);
@@ -468,6 +474,18 @@ public final class RyluxHomeNavigationPolish {
         header.addView(subtitle, subtitle.getLayoutParams());
         header.addView(accountRegion, accountRegion.getLayoutParams());
 
+        // Replace the original ScrollView instead of reusing it: Android may
+        // restore its old scroll offset before this post-resume layout pass.
+        // A fresh viewport guarantees the homepage starts at its first section.
+        previousScroll.removeView(homeRoot);
+        host.removeView(previousScroll);
+        ScrollView bodyScroll = new ScrollView(activity);
+        bodyScroll.setFillViewport(true);
+        bodyScroll.setBackgroundColor(Color.rgb(8, 13, 21));
+        bodyScroll.addView(homeRoot, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        ));
         bodyScroll.setTag(HOME_BODY_SCROLL_TAG);
         // Do not restore the old offset from a previous screen layout. The
         // first focusable child below is an action button; allowing descendants
@@ -477,13 +495,12 @@ public final class RyluxHomeNavigationPolish {
         bodyScroll.setFocusable(true);
         bodyScroll.setFocusableInTouchMode(true);
         bodyScroll.setDescendantFocusability(ViewGroup.FOCUS_BEFORE_DESCENDANTS);
-        FrameLayout.LayoutParams bodyParams = bodyScroll.getLayoutParams()
-                instanceof FrameLayout.LayoutParams
-                ? (FrameLayout.LayoutParams) bodyScroll.getLayoutParams()
-                : new FrameLayout.LayoutParams(-1, -1);
         bodyParams.width = ViewGroup.LayoutParams.MATCH_PARENT;
         bodyParams.height = ViewGroup.LayoutParams.MATCH_PARENT;
+        bodyParams.topMargin = 0;
+        bodyParams.bottomMargin = 0;
         bodyScroll.setLayoutParams(bodyParams);
+        host.addView(bodyScroll, Math.min(scrollIndex, host.getChildCount()), bodyParams);
 
         host.addView(header, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
