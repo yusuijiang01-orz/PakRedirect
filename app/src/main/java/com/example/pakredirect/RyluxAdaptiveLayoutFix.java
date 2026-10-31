@@ -5,6 +5,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
+import android.util.Log;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -91,23 +92,42 @@ public final class RyluxAdaptiveLayoutFix {
     private static void fitHomeHeroToArtwork(Activity activity, FrameLayout heroShell) {
         GlowFrameLayout hero = findFirst(heroShell, GlowFrameLayout.class);
         ImageView poster = hero == null ? null : findFirst(hero, ImageView.class);
-        if (hero == null || poster == null) return;
+        if (hero == null || poster == null) {
+            Log.i("RyluxHomeFit", "missing hero shell children=" + heroShell.getChildCount());
+            return;
+        }
 
         Runnable fit = () -> {
             int imageWidth = poster.getWidth();
             android.graphics.drawable.Drawable artwork = poster.getDrawable();
             int artworkWidth = artwork == null ? 0 : artwork.getIntrinsicWidth();
             int artworkHeight = artwork == null ? 0 : artwork.getIntrinsicHeight();
-            if (imageWidth <= 0 || artworkWidth <= 0 || artworkHeight <= 0) return;
+            if (imageWidth <= 0 || artworkWidth <= 0 || artworkHeight <= 0) {
+                Log.i("RyluxHomeFit", "not ready shell=" + heroShell.getWidth() + "x"
+                        + heroShell.getHeight() + " poster=" + poster.getWidth() + "x"
+                        + poster.getHeight() + " drawable=" + artworkWidth + "x" + artworkHeight);
+                return;
+            }
 
             int imageHeight = Math.round(imageWidth * (artworkHeight / (float) artworkWidth));
+            ViewGroup.LayoutParams heroBefore = hero.getLayoutParams();
+            ViewGroup.LayoutParams shellBefore = heroShell.getLayoutParams();
             setMeasuredHeight(hero, imageHeight);
             setMeasuredHeight(heroShell, imageHeight + heroShell.getPaddingTop() + heroShell.getPaddingBottom());
+            Log.i("RyluxHomeFit", "fit shell=" + heroShell.getWidth() + "x"
+                    + heroShell.getHeight() + " lp=" + (shellBefore == null ? "null" : shellBefore.height)
+                    + " poster=" + poster.getWidth() + "x" + poster.getHeight()
+                    + " desired=" + imageHeight + " heroLp="
+                    + (heroBefore == null ? "null" : heroBefore.height)
+                    + " attached=" + heroShell.isAttachedToWindow());
         };
 
+        Log.i("RyluxHomeFit", "schedule shell=" + heroShell.getWidth() + "x"
+                + heroShell.getHeight() + " attached=" + heroShell.isAttachedToWindow());
         if (poster.getWidth() > 0) fit.run();
         heroShell.post(fit);
         heroShell.postDelayed(fit, 250L);
+        heroShell.postDelayed(fit, 1000L);
     }
 
     private static void setMeasuredHeight(View view, int height) {
