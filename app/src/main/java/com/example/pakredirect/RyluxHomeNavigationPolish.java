@@ -469,9 +469,14 @@ public final class RyluxHomeNavigationPolish {
         header.addView(accountRegion, accountRegion.getLayoutParams());
 
         bodyScroll.setTag(HOME_BODY_SCROLL_TAG);
-        bodyScroll.setFocusable(false);
-        bodyScroll.setFocusableInTouchMode(false);
-        bodyScroll.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+        // Do not restore the old offset from a previous screen layout. The
+        // first focusable child below is an action button; allowing descendants
+        // to win initial focus makes Android scroll the long page down to it,
+        // hiding the game heading and the top of the poster on launch.
+        bodyScroll.setSaveEnabled(false);
+        bodyScroll.setFocusable(true);
+        bodyScroll.setFocusableInTouchMode(true);
+        bodyScroll.setDescendantFocusability(ViewGroup.FOCUS_BEFORE_DESCENDANTS);
         FrameLayout.LayoutParams bodyParams = bodyScroll.getLayoutParams()
                 instanceof FrameLayout.LayoutParams
                 ? (FrameLayout.LayoutParams) bodyScroll.getLayoutParams()
@@ -486,9 +491,12 @@ public final class RyluxHomeNavigationPolish {
                 Gravity.TOP
         ));
         syncPinnedHeaderPosition(activity);
-        homeRoot.post(() -> bodyScroll.scrollTo(0, 0));
-        bodyScroll.postDelayed(() -> bodyScroll.scrollTo(0, 0), 180L);
-        bodyScroll.postDelayed(() -> bodyScroll.scrollTo(0, 0), 520L);
+        Runnable resetHomeBody = () -> {
+            bodyScroll.scrollTo(0, 0);
+            bodyScroll.requestFocus();
+        };
+        bodyScroll.post(resetHomeBody);
+        bodyScroll.postDelayed(resetHomeBody, 180L);
     }
 
     private static void syncPinnedHeaderPosition(Activity activity) {
