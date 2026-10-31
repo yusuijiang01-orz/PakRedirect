@@ -83,7 +83,7 @@ public final class RyluxResponsiveTuner {
                     LinearLayout panel = findPanel((TextView) view);
                     if (panel != null) tunePanel(activity, panel, false, compact, wide);
                 }
-            } else if (text.contains("游戏详情")) {
+            } else if (text.contains("游戏详情") && !isInsideHomeNavigation(view)) {
                 LinearLayout panel = findPanel((TextView) view);
                 if (panel != null) tunePanel(activity, panel, true, compact, wide);
             }

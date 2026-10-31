@@ -6,7 +6,6 @@ import android.graphics.Outline;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
-import android.util.Log;
 import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
@@ -280,16 +279,6 @@ public final class RyluxUiPolish {
         poster.setAdjustViewBounds(false);
         poster.setBackgroundColor(Color.rgb(10, 17, 28));
         hero.addView(poster, new FrameLayout.LayoutParams(-1, -1));
-        poster.post(() -> {
-            android.graphics.drawable.Drawable drawable = poster.getDrawable();
-            ViewGroup.LayoutParams posterParams = poster.getLayoutParams();
-            ViewGroup.LayoutParams heroParams = hero.getLayoutParams();
-            Log.i("RYLUX_HOME_DIAG", "poster=" + poster.getWidth() + "x" + poster.getHeight()
-                    + " image=" + (drawable == null ? "null" : drawable.getIntrinsicWidth() + "x" + drawable.getIntrinsicHeight())
-                    + " layer=" + poster.getLayerType()
-                    + " posterLp=" + (posterParams == null ? "null" : posterParams.width + "x" + posterParams.height)
-                    + " heroLp=" + (heroParams == null ? "null" : heroParams.getClass().getSimpleName() + ":" + heroParams.width + "x" + heroParams.height));
-        });
 
         View shade = new View(activity);
         shade.setBackground(new GradientDrawable(

@@ -1,7 +1,6 @@
 package com.example.pakredirect;
 
 import android.app.Activity;
-import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -89,8 +88,6 @@ public final class RyluxAdaptiveLayoutFix {
 
         ViewGroup.LayoutParams raw = heroShell.getLayoutParams();
         if (!(raw instanceof LinearLayout.LayoutParams)) return;
-        LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) raw;
-
         Runnable fitHeroToMeasuredWidth = () -> {
             int measuredWidth = heroShell.getWidth();
             if (measuredWidth <= 0) return;
@@ -98,18 +95,9 @@ public final class RyluxAdaptiveLayoutFix {
             if (!(current instanceof LinearLayout.LayoutParams)) return;
             LinearLayout.LayoutParams measuredParams = (LinearLayout.LayoutParams) current;
             int fittedHeight = RyluxHomeNavigationPolish.homeHeroHeight(activity, measuredWidth);
-            Log.i("RYLUX_HOME_DIAG", "tune viewport=" + widthDp + "x" + RyluxViewport.heightDp(activity)
-                    + " density=" + activity.getResources().getDisplayMetrics().density
-                    + " shell=" + measuredWidth + "x" + heroShell.getHeight()
-                    + " beforeLp=" + measuredParams.height + " fittedPx=" + fittedHeight);
             if (measuredParams.height != fittedHeight) {
                 measuredParams.height = fittedHeight;
                 heroShell.setLayoutParams(measuredParams);
-                heroShell.postDelayed(() -> {
-                    ViewGroup.LayoutParams settled = heroShell.getLayoutParams();
-                    Log.i("RYLUX_HOME_DIAG", "settled shell=" + heroShell.getWidth() + "x" + heroShell.getHeight()
-                            + " lp=" + (settled == null ? -999 : settled.height));
-                }, 800L);
             }
         };
         if (heroShell.getWidth() > 0) fitHeroToMeasuredWidth.run();

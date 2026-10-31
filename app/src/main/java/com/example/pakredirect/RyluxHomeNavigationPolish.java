@@ -6,7 +6,6 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
-import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -236,9 +235,6 @@ public final class RyluxHomeNavigationPolish {
         heroShell.addView(hero);
 
         int heroHeight = homeHeroHeight(activity);
-        Log.i("RYLUX_HOME_DIAG", "rebuild viewport=" + widthDp + "x" + RyluxViewport.heightDp(activity)
-                + " density=" + activity.getResources().getDisplayMetrics().density
-                + " heroInitialPx=" + heroHeight + " rootWidth=" + root.getWidth());
         LinearLayout.LayoutParams heroShellLp = new LinearLayout.LayoutParams(-1, heroHeight);
         heroShellLp.bottomMargin = dp(activity, 12);
         root.addView(heroShell, heroShellLp);
