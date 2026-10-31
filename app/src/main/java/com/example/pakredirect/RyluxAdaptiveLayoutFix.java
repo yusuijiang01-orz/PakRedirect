@@ -98,7 +98,7 @@ public final class RyluxAdaptiveLayoutFix {
             if (!(current instanceof LinearLayout.LayoutParams)) return;
             LinearLayout.LayoutParams measuredParams = (LinearLayout.LayoutParams) current;
             int fittedHeight = RyluxHomeNavigationPolish.homeHeroHeight(activity, measuredWidth);
-            Log.i("RYLUX_HOME_DIAG", "tune viewport=" + widthDp + "x" + heightDp
+            Log.i("RYLUX_HOME_DIAG", "tune viewport=" + widthDp + "x" + RyluxViewport.heightDp(activity)
                     + " density=" + activity.getResources().getDisplayMetrics().density
                     + " shell=" + measuredWidth + "x" + heroShell.getHeight()
                     + " beforeLp=" + measuredParams.height + " fittedPx=" + fittedHeight);
