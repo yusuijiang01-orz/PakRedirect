@@ -104,6 +104,18 @@ public final class RyluxHomeNavigationPolish {
             FrameLayout avatar,
             GlowFrameLayout hero
     ) {
+        View focused = root.findFocus();
+        if (focused != null) focused.clearFocus();
+        avatar.clearFocus();
+        hero.clearFocus();
+        // The old home canvas is reparented into the poster card below. If it
+        // keeps keyboard focus, ScrollView scrolls back down to it after layout.
+        // It remains clickable; only focus-driven auto-scrolling is disabled.
+        hero.setFocusable(false);
+        hero.setFocusableInTouchMode(false);
+        root.setFocusable(true);
+        root.setFocusableInTouchMode(true);
+
         ArrayList<View> preserved = new ArrayList<>();
         for (int i = 0; i < root.getChildCount(); i++) {
             View child = root.getChildAt(i);
@@ -425,7 +437,7 @@ public final class RyluxHomeNavigationPolish {
                 scroll.setFocusableInTouchMode(true);
                 scroll.setDescendantFocusability(ViewGroup.FOCUS_BEFORE_DESCENDANTS);
                 scroll.post(() -> {
-                    scroll.requestFocus();
+                    homeRoot.requestFocus();
                     scroll.scrollTo(0, 0);
                 });
                 return;
