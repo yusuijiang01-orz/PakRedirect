@@ -3,15 +3,16 @@ package com.example.pakredirect;
 import android.app.Activity;
 import android.content.Intent;
 import android.graphics.Color;
+import android.graphics.Outline;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
-import android.os.Build;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewOutlineProvider;
 import android.view.ViewTreeObserver;
-import android.widget.Button;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Space;
@@ -22,38 +23,16 @@ import java.util.Collections;
 import java.util.Set;
 import java.util.WeakHashMap;
 
-/**
- * Adds an explicit navigation hierarchy to the logged-in home screen without
- * moving any account/game behavior out of MainActivity. Existing avatar and
- * hero click listeners remain the source of truth; this class only provides
- * clearer labels and controls that forward to those existing actions.
- */
+/** Presents the existing account, game and sandbox actions on the home screen. */
 public final class RyluxHomeNavigationPolish {
-    private static final int TEXT = Color.rgb(241, 246, 252);
-    private static final int MUTED = Color.rgb(142, 157, 177);
-    private static final int SURFACE = Color.rgb(16, 24, 36);
-    private static final int SURFACE_2 = Color.rgb(20, 31, 47);
-    private static final int BORDER = Color.rgb(49, 70, 99);
-    private static final int BLUE = Color.rgb(58, 129, 255);
-    private static final int BLUE_LIGHT = Color.rgb(92, 161, 255);
-    private static final int BLUE_DARK = Color.rgb(24, 79, 188);
-
     private static final String ROOT_TAG = "rylux_home_navigation_v3";
-    private static final String PINNED_HEADER_TAG = "rylux_home_pinned_header_v1";
-    private static final String HOME_BODY_SCROLL_TAG = "rylux_home_body_scroll_v1";
-    private static final String ACCOUNT_REGION_TAG = "rylux_account_region_v3";
-    private static final String IDENTITY_ROW_TAG = "rylux_account_identity_row_v1";
-    private static final String ACCOUNT_BUTTON_TAG = "rylux_account_button_v1";
-    // Keep the account action inline on 360dp phones (for example 1080x1920
-    // at 480dpi). Moving it below the identity row made the pinned header so
-    // tall that it pushed the game section out of the remaining viewport.
-    private static final int ACCOUNT_BUTTON_BELOW_BREAKPOINT_DP = 340;
-
+    private static final int TEXT = Color.rgb(244, 248, 255);
+    private static final int CYAN = Color.rgb(104, 210, 255);
+    private static final int GOLD = Color.rgb(255, 222, 152);
+    private static final int GREEN = Color.rgb(76, 228, 177);
     private static final WeakHashMap<Activity, ViewTreeObserver.OnGlobalLayoutListener> LISTENERS =
             new WeakHashMap<>();
-    private static final Set<View> STYLED =
-            Collections.newSetFromMap(new WeakHashMap<>());
-    private static final WeakHashMap<View, Boolean> LAST_NARROW_MODE = new WeakHashMap<>();
+    private static final Set<View> STYLED = Collections.newSetFromMap(new WeakHashMap<>());
 
     private RyluxHomeNavigationPolish() {}
 
@@ -65,8 +44,7 @@ public final class RyluxHomeNavigationPolish {
                 return;
             }
             View decor = activity.getWindow().getDecorView();
-            ViewTreeObserver.OnGlobalLayoutListener listener =
-                    () -> decor.post(() -> polish(activity));
+            ViewTreeObserver.OnGlobalLayoutListener listener = () -> decor.post(() -> polish(activity));
             LISTENERS.put(activity, listener);
             decor.getViewTreeObserver().addOnGlobalLayoutListener(listener);
             decor.post(() -> polish(activity));
@@ -77,273 +55,356 @@ public final class RyluxHomeNavigationPolish {
         synchronized (LISTENERS) {
             ViewTreeObserver.OnGlobalLayoutListener listener = LISTENERS.remove(activity);
             if (listener == null) return;
-            View decor = activity.getWindow().getDecorView();
-            ViewTreeObserver observer = decor.getViewTreeObserver();
+            ViewTreeObserver observer = activity.getWindow().getDecorView().getViewTreeObserver();
             if (observer.isAlive()) observer.removeOnGlobalLayoutListener(listener);
         }
     }
 
     private static void polish(Activity activity) {
-        LinearLayout homeRoot = (LinearLayout) findTagged(
-                activity.getWindow().getDecorView(), ROOT_TAG);
-        if (homeRoot != null) {
-            adaptAccountRow(activity, homeRoot);
-            restoreHomeRootPosition(homeRoot);
-            syncPinnedHeaderPosition(activity);
-            return;
-        }
-
-        GlowFrameLayout hero = findHero(activity.getWindow().getDecorView());
-        if (hero == null || hero.getChildCount() < 3) return;
-        if (!(hero.getParent() instanceof LinearLayout)) return;
+        View decor = activity.getWindow().getDecorView();
+        if (findTagged(decor, ROOT_TAG) != null) return;
+        GlowFrameLayout hero = findHero(decor);
+        if (hero == null || !(hero.getParent() instanceof LinearLayout)) return;
         LinearLayout root = (LinearLayout) hero.getParent();
-        if (STYLED.contains(root)) {
-            adaptAccountRow(activity, root);
-            return;
-        }
-
+        if (STYLED.contains(root)) return;
         FrameLayout avatar = findHomeAvatar(root, hero);
         if (avatar == null) return;
-
         STYLED.add(root);
         root.setTag(ROOT_TAG);
         rebuild(activity, root, avatar, hero);
-        LAST_NARROW_MODE.put(root, RyluxViewport.widthDp(activity) <= ACCOUNT_BUTTON_BELOW_BREAKPOINT_DP);
     }
 
-    private static void rebuild(
-            Activity activity,
-            LinearLayout root,
-            FrameLayout avatar,
-            GlowFrameLayout hero
-    ) {
-        View focused = root.findFocus();
-        if (focused != null) focused.clearFocus();
-        avatar.clearFocus();
-        hero.clearFocus();
-        // Keep the poster clickable without letting it win initial keyboard focus.
-        hero.setFocusable(false);
-        hero.setFocusableInTouchMode(false);
-        // The content root can be taller than the viewport. Focusing it makes
-        // ScrollView try to reveal the whole root and align its bottom, hiding
-        // the account row above. Let the ScrollView itself hold initial focus.
-        root.setFocusable(false);
-        root.setFocusableInTouchMode(false);
-        root.clearFocus();
-
+    private static void rebuild(Activity activity, LinearLayout root, FrameLayout avatar,
+                                GlowFrameLayout hero) {
         ArrayList<View> preserved = new ArrayList<>();
         for (int i = 0; i < root.getChildCount(); i++) {
             View child = root.getChildAt(i);
             if (child != avatar && child != hero && !(child instanceof Space)) preserved.add(child);
         }
-
-        root.removeView(avatar);
-        root.removeView(hero);
-        for (int i = root.getChildCount() - 1; i >= 0; i--) {
-            if (root.getChildAt(i) instanceof Space) root.removeViewAt(i);
-        }
-        for (View child : preserved) root.removeView(child);
+        root.removeAllViews();
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setGravity(Gravity.CENTER_HORIZONTAL);
+        root.setFocusable(false);
+        root.setFocusableInTouchMode(false);
+        root.setClipChildren(false);
+        root.setClipToPadding(false);
+        root.setPadding(dp(activity, 16), dp(activity, 14), dp(activity, 16), dp(activity, 28));
+        root.setBackgroundColor(Color.TRANSPARENT);
+        installBackground(activity, root);
 
         int widthDp = RyluxViewport.widthDp(activity);
-        boolean narrow = widthDp <= ACCOUNT_BUTTON_BELOW_BREAKPOINT_DP;
+        int contentWidth = widthDp >= 600 ? dp(activity, 560) : ViewGroup.LayoutParams.MATCH_PARENT;
+        LinearLayout header = header(activity, avatar, widthDp < 310);
+        root.addView(header, new LinearLayout.LayoutParams(contentWidth, -2));
 
-        root.setPadding(
-                dp(activity, widthDp <= 360 ? 10 : 16),
-                dp(activity, 14),
-                dp(activity, widthDp <= 360 ? 10 : 16),
-                dp(activity, 30)
-        );
+        LinearLayout section = sectionHeading(activity);
+        LinearLayout.LayoutParams sectionLp = new LinearLayout.LayoutParams(contentWidth, -2);
+        sectionLp.topMargin = dp(activity, widthDp < 310 ? 18 : 34);
+        sectionLp.bottomMargin = dp(activity, 16);
+        root.addView(section, sectionLp);
 
-        TextView title = label(activity, "RYLUX 控制台", widthDp <= 360 ? 20 : 23, TEXT, true);
-        root.addView(title, new LinearLayout.LayoutParams(-1, -2));
-
-        TextView subtitle = label(activity, "选择下方功能继续", 13, MUTED, false);
-        LinearLayout.LayoutParams subtitleLp = new LinearLayout.LayoutParams(-1, -2);
-        subtitleLp.topMargin = dp(activity, 4);
-        subtitleLp.bottomMargin = dp(activity, 14);
-        root.addView(subtitle, subtitleLp);
-
-        LinearLayout accountRegion = new LinearLayout(activity);
-        accountRegion.setTag(ACCOUNT_REGION_TAG);
-        accountRegion.setOrientation(LinearLayout.VERTICAL);
-        accountRegion.setGravity(Gravity.CENTER_VERTICAL);
-        accountRegion.setPadding(dp(activity, 12), dp(activity, 12), dp(activity, 12), dp(activity, 12));
-        accountRegion.setBackground(round(activity, SURFACE_2, 16, BORDER, 1));
-        accountRegion.setMinimumHeight(dp(activity, widthDp <= 360 ? 88 : 96));
-        accountRegion.setClickable(true);
-        accountRegion.setFocusable(true);
-        accountRegion.setOnClickListener(v -> avatar.performClick());
-
-        LinearLayout identityRow = new LinearLayout(activity);
-        identityRow.setTag(IDENTITY_ROW_TAG);
-        identityRow.setOrientation(LinearLayout.HORIZONTAL);
-        identityRow.setGravity(Gravity.CENTER_VERTICAL);
-        identityRow.setBaselineAligned(false);
-        identityRow.setMinimumHeight(dp(activity, widthDp <= 360 ? 64 : 72));
-
-        int avatarSize = dp(activity, widthDp <= 360 ? 64 : 72);
-        LinearLayout.LayoutParams avatarLp = new LinearLayout.LayoutParams(avatarSize, avatarSize);
-        avatarLp.rightMargin = dp(activity, widthDp <= 360 ? 10 : 12);
-        identityRow.addView(avatar, avatarLp);
-
-        LinearLayout accountText = new LinearLayout(activity);
-        accountText.setOrientation(LinearLayout.VERTICAL);
-        accountText.setGravity(Gravity.CENTER_VERTICAL);
-
-        TextView accountTitle = label(activity, "账号中心", widthDp <= 360 ? 16 : 17, TEXT, true);
-        accountTitle.setSingleLine(true);
-        accountText.addView(accountTitle, new LinearLayout.LayoutParams(-1, -2));
-        identityRow.addView(accountText, new LinearLayout.LayoutParams(0, -2, 1f));
-
-        Button accountButton = smallButton(activity, narrow ? "查看账号" : "查看");
-        accountButton.setTag(ACCOUNT_BUTTON_TAG);
-        accountButton.setOnClickListener(v -> avatar.performClick());
-        if (!narrow) identityRow.addView(accountButton, accountButtonParams(activity, widthDp));
-
-        accountRegion.addView(identityRow, new LinearLayout.LayoutParams(-1, -2));
-
-        // Give the description the full card width and its own natural-height
-        // row so it does not compete with the avatar and button for space.
-        TextView accountHint = label(activity, "会员状态 · 兑换码 · 退出登录", widthDp <= 360 ? 12 : 13, MUTED, false);
-        accountHint.setIncludeFontPadding(true);
-        accountHint.setMaxLines(2);
-        accountHint.setHorizontallyScrolling(false);
-        LinearLayout.LayoutParams hintLp = new LinearLayout.LayoutParams(-1, -2);
-        hintLp.topMargin = dp(activity, 6);
-        accountRegion.addView(accountHint, hintLp);
-
-        if (narrow) {
-            accountRegion.addView(accountButton, accountButtonBelowParams(activity));
-        }
-
-        LinearLayout.LayoutParams accountLp = new LinearLayout.LayoutParams(-1, -2);
-        accountLp.bottomMargin = dp(activity, 18);
-        root.addView(accountRegion, accountLp);
-
-        TextView gameSection = label(activity, "游戏服务", 16, TEXT, true);
-        LinearLayout.LayoutParams sectionLp = new LinearLayout.LayoutParams(-1, -2);
-        sectionLp.bottomMargin = dp(activity, 9);
-        root.addView(gameSection, sectionLp);
-
-        FrameLayout heroShell = new FrameLayout(activity);
-        heroShell.setPadding(dp(activity, 1), dp(activity, 1), dp(activity, 1), dp(activity, 1));
-        heroShell.setBackground(round(activity, SURFACE_2, 22, BORDER, 1));
-        if (Build.VERSION.SDK_INT >= 21) heroShell.setElevation(dp(activity, 2));
-
-        // Let the poster image determine the card height from its intrinsic
-        // portrait ratio. A viewport-derived fixed height was repeatedly
-        // overwritten by other layout passes on high-density devices.
-        FrameLayout.LayoutParams heroLp = new FrameLayout.LayoutParams(-1, -2);
-        hero.setLayoutParams(heroLp);
-        heroShell.addView(hero);
-
-        LinearLayout.LayoutParams heroShellLp = new LinearLayout.LayoutParams(-1, -2);
-        heroShellLp.bottomMargin = dp(activity, 12);
-        root.addView(heroShell, heroShellLp);
-
-        LinearLayout flowCard = new LinearLayout(activity);
-        flowCard.setOrientation(LinearLayout.VERTICAL);
-        flowCard.setPadding(dp(activity, 14), dp(activity, 12), dp(activity, 14), dp(activity, 12));
-        flowCard.setBackground(round(activity, SURFACE, 15, BORDER, 1));
-
-        TextView flowTitle = label(activity, "操作流程", 14, TEXT, true);
-        flowCard.addView(flowTitle, new LinearLayout.LayoutParams(-1, -2));
-        TextView flow = label(activity, "① 安装游戏   →   ② 启动游戏", widthDp <= 360 ? 11.5f : 12.5f, MUTED, false);
-        flow.setLineSpacing(0f, 1.15f);
-        LinearLayout.LayoutParams flowLp = new LinearLayout.LayoutParams(-1, -2);
-        flowLp.topMargin = dp(activity, 6);
-        flowCard.addView(flow, flowLp);
-
-        LinearLayout.LayoutParams flowCardLp = new LinearLayout.LayoutParams(-1, -2);
-        flowCardLp.bottomMargin = dp(activity, 12);
-        root.addView(flowCard, flowCardLp);
-
-        Button enter = primaryButton(activity, "进入游戏详情");
-        enter.setOnClickListener(v -> hero.performClick());
-        LinearLayout.LayoutParams enterLp = new LinearLayout.LayoutParams(-1, dp(activity, 52));
-        enterLp.bottomMargin = dp(activity, 8);
-        root.addView(enter, enterLp);
-
-        TextView enterHint = label(activity, "安装和启动入口都在游戏详情中", 11.5f, MUTED, false);
-        enterHint.setGravity(Gravity.CENTER);
-        root.addView(enterHint, new LinearLayout.LayoutParams(-1, -2));
-
-        Button sandbox = smallButton(activity, "BlackBox 游戏沙箱 · 测试版");
-        sandbox.setOnClickListener(v -> activity.startActivity(
-                new Intent(activity, BlackBoxSandboxActivity.class)
-        ));
-        LinearLayout.LayoutParams sandboxLp = new LinearLayout.LayoutParams(-1, dp(activity, 48));
-        sandboxLp.topMargin = dp(activity, 16);
-        root.addView(sandbox, sandboxLp);
-
-        TextView sandboxHint = label(activity, "导入 APK，在虚拟环境中尝试运行", 11.5f, MUTED, false);
-        sandboxHint.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams sandboxHintLp = new LinearLayout.LayoutParams(-1, -2);
-        sandboxHintLp.topMargin = dp(activity, 6);
-        root.addView(sandboxHint, sandboxHintLp);
-
+        FrameLayout card = gameCard(activity, hero, widthDp);
+        root.addView(card, new LinearLayout.LayoutParams(contentWidth, -2));
         for (View child : preserved) root.addView(child);
-        pinHomeAccountHeader(activity, root, title, subtitle, accountRegion, gameSection);
+
+        // fillViewport expands this spacer on tall phones; on short screens it
+        // collapses to zero and the page scrolls rather than hiding controls.
+        root.addView(new Space(activity), new LinearLayout.LayoutParams(1, 0, 1f));
+        View sandbox = sandboxButton(activity);
+        LinearLayout.LayoutParams sandboxLp = new LinearLayout.LayoutParams(contentWidth, -2);
+        sandboxLp.topMargin = dp(activity, 28);
+        root.addView(sandbox, sandboxLp);
     }
 
-    private static void adaptAccountRow(Activity activity, LinearLayout root) {
-        Boolean wasNarrow = LAST_NARROW_MODE.get(root);
-        if (wasNarrow == null) return;
-        boolean narrow = RyluxViewport.widthDp(activity) <= ACCOUNT_BUTTON_BELOW_BREAKPOINT_DP;
-        if (wasNarrow == narrow) return;
-
-        View decor = activity.getWindow().getDecorView();
-        View regionRaw = findTagged(decor, ACCOUNT_REGION_TAG);
-        View rowRaw = findTagged(decor, IDENTITY_ROW_TAG);
-        View buttonRaw = findTagged(decor, ACCOUNT_BUTTON_TAG);
-        if (!(regionRaw instanceof LinearLayout)
-                || !(rowRaw instanceof LinearLayout)
-                || !(buttonRaw instanceof Button)) return;
-
-        LinearLayout region = (LinearLayout) regionRaw;
-        LinearLayout row = (LinearLayout) rowRaw;
-        Button button = (Button) buttonRaw;
-        if (button.getParent() instanceof ViewGroup) {
-            ((ViewGroup) button.getParent()).removeView(button);
+    private static void installBackground(Activity activity, LinearLayout root) {
+        if (!(root.getParent() instanceof ScrollView)) return;
+        ScrollView scroll = (ScrollView) root.getParent();
+        scroll.setBackgroundColor(Color.TRANSPARENT);
+        scroll.setFillViewport(true);
+        scroll.setClipToPadding(false);
+        scroll.setSaveEnabled(false);
+        scroll.setFocusableInTouchMode(true);
+        scroll.setDescendantFocusability(ViewGroup.FOCUS_BEFORE_DESCENDANTS);
+        if (scroll.getParent() instanceof FrameLayout) {
+            FrameLayout host = (FrameLayout) scroll.getParent();
+            host.setBackgroundColor(Color.rgb(3, 14, 33));
+            ImageView background = new ImageView(activity);
+            background.setImageResource(R.drawable.rylux_home_background);
+            background.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            background.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            host.addView(background, 0, new FrameLayout.LayoutParams(-1, -1));
         }
+        scroll.post(() -> {
+            scroll.requestFocus();
+            scroll.scrollTo(0, 0);
+        });
+    }
 
+    private static LinearLayout header(Activity activity, FrameLayout originalAvatar, boolean narrow) {
+        LinearLayout container = new LinearLayout(activity);
+        container.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout row = new LinearLayout(activity);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setBaselineAligned(false);
+        int avatarSize = dp(activity, narrow ? 50 : 58);
+        View portrait = portrait(activity, originalAvatar);
+        LinearLayout.LayoutParams portraitLp = new LinearLayout.LayoutParams(avatarSize, avatarSize);
+        portraitLp.rightMargin = dp(activity, 10);
+        row.addView(portrait, portraitLp);
+
+        LinearLayout vip = membership(activity, originalAvatar);
+        row.addView(vip, new LinearLayout.LayoutParams(0, -2, 1f));
+        if (!narrow) {
+            row.addView(headerIcon(activity, R.drawable.ic_rylux_bell, "通知（暂不可用）"),
+                    iconParams(activity, 8));
+            row.addView(headerIcon(activity, R.drawable.ic_rylux_settings, "设置（暂不可用）"),
+                    iconParams(activity, 2));
+        }
+        container.addView(row, new LinearLayout.LayoutParams(-1, -2));
         if (narrow) {
-            button.setText("查看账号");
-            region.addView(button, accountButtonBelowParams(activity));
-        } else {
-            button.setText("查看");
-            row.addView(button, accountButtonParams(activity, RyluxViewport.widthDp(activity)));
+            LinearLayout actions = new LinearLayout(activity);
+            actions.setGravity(Gravity.END);
+            actions.addView(headerIcon(activity, R.drawable.ic_rylux_bell, "通知（暂不可用）"), iconParams(activity, 0));
+            actions.addView(headerIcon(activity, R.drawable.ic_rylux_settings, "设置（暂不可用）"), iconParams(activity, 2));
+            container.addView(actions, new LinearLayout.LayoutParams(-1, -2));
         }
-        LAST_NARROW_MODE.put(root, narrow);
+        return container;
     }
 
-    private static void restoreHomeRootPosition(LinearLayout homeRoot) {
-        // Responsive layout passes can translate the ScrollView's child while
-        // scrollY remains zero. Correct the view's actual Y position without
-        // changing the user's scroll offset.
-        if (Math.abs(homeRoot.getY()) > 0.5f) {
-            homeRoot.setY(0f);
-        }
+    private static View portrait(Activity activity, FrameLayout originalAvatar) {
+        FrameLayout rim = new FrameLayout(activity);
+        GradientDrawable ring = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                new int[]{Color.rgb(77, 218, 255), Color.rgb(169, 141, 255), Color.rgb(255, 221, 158)});
+        ring.setShape(GradientDrawable.OVAL);
+        rim.setBackground(ring);
+        rim.setPadding(dp(activity, 2), dp(activity, 2), dp(activity, 2), dp(activity, 2));
+        rim.setElevation(dp(activity, 4));
+        ImageView image = new ImageView(activity);
+        image.setImageResource(R.drawable.default_avatar);
+        image.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        image.setOutlineProvider(new ViewOutlineProvider() {
+            @Override public void getOutline(View view, Outline outline) {
+                outline.setOval(0, 0, view.getWidth(), view.getHeight());
+            }
+        });
+        image.setClipToOutline(true);
+        rim.addView(image, new FrameLayout.LayoutParams(-1, -1));
+        rim.setClickable(true);
+        rim.setFocusable(true);
+        rim.setContentDescription("打开账号中心");
+        rim.setOnClickListener(v -> originalAvatar.performClick());
+        return rim;
     }
 
-    private static LinearLayout.LayoutParams accountButtonParams(Activity activity, int widthDp) {
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                dp(activity, widthDp >= 600 ? 78 : 68), dp(activity, 42));
-        params.leftMargin = dp(activity, 10);
-        return params;
+    private static LinearLayout membership(Activity activity, FrameLayout originalAvatar) {
+        MainActivity main = (MainActivity) activity;
+        boolean admin = "admin".equalsIgnoreCase(MainActivity.currentRole);
+        boolean active = main.homeMembershipActive();
+        String kind = main.homeMembershipKind();
+        boolean trial = active && "trial".equalsIgnoreCase(kind);
+        String text = admin ? "Admin" : (!active ? "已过期" : (trial ? "24小时体验" : "VIP"));
+        LinearLayout pill = new LinearLayout(activity);
+        pill.setOrientation(LinearLayout.HORIZONTAL);
+        pill.setGravity(Gravity.CENTER_VERTICAL);
+        pill.setPadding(dp(activity, 10), dp(activity, 5), dp(activity, 10), dp(activity, 5));
+        pill.setMinimumHeight(dp(activity, 40));
+        GradientDrawable bg = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{Color.rgb(76, 57, 38), Color.rgb(34, 31, 29)});
+        bg.setCornerRadius(dp(activity, 24));
+        bg.setStroke(dp(activity, 1), Color.rgb(241, 196, 113));
+        pill.setBackground(bg);
+        pill.setElevation(dp(activity, 3));
+        pill.setClickable(true);
+        pill.setFocusable(true);
+        pill.setContentDescription(text + "，打开账号中心");
+        pill.setOnClickListener(v -> originalAvatar.performClick());
+        ImageView crown = image(activity, R.drawable.ic_rylux_crown, 23);
+        pill.addView(crown, new LinearLayout.LayoutParams(dp(activity, 23), dp(activity, 23)));
+        TextView label = label(activity, text, trial ? 13 : 16, admin ? GREEN : GOLD, true);
+        label.setMaxLines(2);
+        LinearLayout.LayoutParams textLp = new LinearLayout.LayoutParams(0, -2, 1f);
+        textLp.leftMargin = dp(activity, 6);
+        pill.addView(label, textLp);
+        ImageView arrow = image(activity, R.drawable.ic_rylux_chevron_gold, 16);
+        LinearLayout.LayoutParams arrowLp = new LinearLayout.LayoutParams(dp(activity, 16), dp(activity, 16));
+        arrowLp.leftMargin = dp(activity, 3);
+        pill.addView(arrow, arrowLp);
+        return pill;
     }
 
-    private static LinearLayout.LayoutParams accountButtonBelowParams(Activity activity) {
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(activity, 40));
-        params.topMargin = dp(activity, 8);
-        return params;
+    private static LinearLayout sectionHeading(Activity activity) {
+        LinearLayout column = new LinearLayout(activity);
+        column.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout row = new LinearLayout(activity);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        ImageView icon = image(activity, R.drawable.ic_rylux_gamepad, 26);
+        row.addView(icon, new LinearLayout.LayoutParams(dp(activity, 26), dp(activity, 26)));
+        TextView title = label(activity, "游戏服务", 19, TEXT, true);
+        LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(-2, -2);
+        titleLp.leftMargin = dp(activity, 10);
+        row.addView(title, titleLp);
+        column.addView(row, new LinearLayout.LayoutParams(-1, -2));
+        View line = new View(activity);
+        GradientDrawable glow = new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
+                new int[]{Color.rgb(26, 156, 255), Color.rgb(125, 233, 255), Color.TRANSPARENT});
+        glow.setCornerRadius(dp(activity, 3));
+        line.setBackground(glow);
+        LinearLayout.LayoutParams lineLp = new LinearLayout.LayoutParams(dp(activity, 86), dp(activity, 3));
+        lineLp.leftMargin = dp(activity, 36);
+        lineLp.topMargin = dp(activity, 9);
+        column.addView(line, lineLp);
+        return column;
+    }
+
+    private static FrameLayout gameCard(Activity activity, GlowFrameLayout hero, int widthDp) {
+        FrameLayout card = new FrameLayout(activity);
+        card.setClipToOutline(true);
+        card.setOutlineProvider(roundOutline(activity, 18));
+        card.setBackgroundColor(Color.rgb(14, 36, 64));
+        card.setClickable(true);
+        card.setFocusable(true);
+        card.setContentDescription("封神榜汉化版，已支持汉化，打开游戏详情");
+        card.setOnClickListener(v -> hero.performClick());
+
+        ImageView backdrop = new ImageView(activity);
+        backdrop.setImageResource(R.drawable.rylux_game_card_background);
+        backdrop.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        backdrop.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        card.addView(backdrop, new FrameLayout.LayoutParams(-1, -1));
+        View shade = new View(activity);
+        shade.setBackground(new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
+                new int[]{Color.argb(210, 8, 28, 53), Color.argb(130, 8, 27, 50), Color.argb(75, 7, 22, 45)}));
+        card.addView(shade, new FrameLayout.LayoutParams(-1, -1));
+
+        LinearLayout content = new LinearLayout(activity);
+        content.setGravity(Gravity.CENTER_VERTICAL);
+        content.setPadding(dp(activity, 14), dp(activity, 14), dp(activity, 14), dp(activity, 14));
+        int imageSize = dp(activity, widthDp < 340 ? 68 : 80);
+        FrameLayout thumbnail = new FrameLayout(activity);
+        thumbnail.setClipToOutline(true);
+        thumbnail.setOutlineProvider(roundOutline(activity, 13));
+        ImageView image = new ImageView(activity);
+        image.setImageResource(R.drawable.fengshenbang_thumb);
+        image.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        thumbnail.addView(image, new FrameLayout.LayoutParams(-1, -1));
+        thumbnail.setForeground(round(activity, Color.TRANSPARENT, 13, Color.rgb(215, 193, 143), 1));
+        content.addView(thumbnail, new LinearLayout.LayoutParams(imageSize, imageSize));
+
+        LinearLayout description = new LinearLayout(activity);
+        description.setOrientation(LinearLayout.VERTICAL);
+        description.setGravity(Gravity.CENTER_VERTICAL);
+        TextView title = label(activity, "封神榜（汉化版）", widthDp < 340 ? 15 : 17, TEXT, true);
+        title.setMaxLines(3);
+        description.addView(title, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout status = new LinearLayout(activity);
+        status.setGravity(Gravity.CENTER_VERTICAL);
+        status.setPadding(dp(activity, 7), dp(activity, 4), dp(activity, 9), dp(activity, 4));
+        status.setBackground(round(activity, Color.argb(145, 0, 83, 78), 20, GREEN, 1));
+        ImageView check = image(activity, R.drawable.ic_rylux_check, 15);
+        status.addView(check, new LinearLayout.LayoutParams(dp(activity, 15), dp(activity, 15)));
+        TextView supported = label(activity, "已支持汉化", 12, TEXT, true);
+        LinearLayout.LayoutParams supportedLp = new LinearLayout.LayoutParams(-2, -2);
+        supportedLp.leftMargin = dp(activity, 5);
+        status.addView(supported, supportedLp);
+        LinearLayout.LayoutParams statusLp = new LinearLayout.LayoutParams(-2, -2);
+        statusLp.topMargin = dp(activity, 10);
+        description.addView(status, statusLp);
+        LinearLayout.LayoutParams descriptionLp = new LinearLayout.LayoutParams(0, -2, 1f);
+        descriptionLp.leftMargin = dp(activity, 12);
+        descriptionLp.rightMargin = dp(activity, 6);
+        content.addView(description, descriptionLp);
+
+        FrameLayout arrowCircle = new FrameLayout(activity);
+        arrowCircle.setBackground(round(activity, Color.argb(195, 17, 66, 122), 24,
+                Color.rgb(75, 181, 255), 1));
+        ImageView arrow = image(activity, R.drawable.ic_rylux_chevron, 22);
+        FrameLayout.LayoutParams arrowLp = new FrameLayout.LayoutParams(dp(activity, 22), dp(activity, 22), Gravity.CENTER);
+        arrowCircle.addView(arrow, arrowLp);
+        content.addView(arrowCircle, new LinearLayout.LayoutParams(dp(activity, 40), dp(activity, 40)));
+        card.addView(content, new FrameLayout.LayoutParams(-1, -2));
+        card.setForeground(round(activity, Color.TRANSPARENT, 18, Color.rgb(65, 145, 224), 1));
+        return card;
+    }
+
+    private static View sandboxButton(Activity activity) {
+        LinearLayout button = new LinearLayout(activity);
+        button.setGravity(Gravity.CENTER);
+        button.setPadding(dp(activity, 14), dp(activity, 12), dp(activity, 14), dp(activity, 12));
+        button.setMinimumHeight(dp(activity, 56));
+        GradientDrawable bg = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{Color.rgb(22, 88, 162), Color.rgb(8, 40, 86)});
+        bg.setCornerRadius(dp(activity, 22));
+        bg.setStroke(dp(activity, 1.5f), Color.rgb(89, 197, 255));
+        button.setBackground(bg);
+        button.setElevation(dp(activity, 6));
+        button.setClickable(true);
+        button.setFocusable(true);
+        button.setContentDescription("打开 BlackBox 游戏沙箱测试版");
+        button.setOnClickListener(v -> activity.startActivity(new Intent(activity, BlackBoxSandboxActivity.class)));
+        ImageView icon = image(activity, R.drawable.ic_rylux_cube, 24);
+        button.addView(icon, new LinearLayout.LayoutParams(dp(activity, 24), dp(activity, 24)));
+        TextView title = label(activity, "BlackBox 游戏沙箱 · 测试版", 15, TEXT, true);
+        title.setGravity(Gravity.CENTER);
+        title.setMaxLines(2);
+        LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(-2, -2);
+        titleLp.leftMargin = dp(activity, 10);
+        button.addView(title, titleLp);
+        return button;
+    }
+
+    private static FrameLayout headerIcon(Activity activity, int drawable, String description) {
+        FrameLayout shell = new FrameLayout(activity);
+        shell.setContentDescription(description);
+        shell.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+        ImageView icon = image(activity, drawable, 25);
+        shell.addView(icon, new FrameLayout.LayoutParams(dp(activity, 25), dp(activity, 25), Gravity.CENTER));
+        return shell;
+    }
+
+    private static LinearLayout.LayoutParams iconParams(Activity activity, int leftMargin) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(activity, 44), dp(activity, 48));
+        lp.leftMargin = dp(activity, leftMargin);
+        return lp;
+    }
+
+    private static ImageView image(Activity activity, int resource, int sizeDp) {
+        ImageView view = new ImageView(activity);
+        view.setImageResource(resource);
+        view.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        view.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        return view;
+    }
+
+    private static TextView label(Activity activity, String text, float size, int color, boolean bold) {
+        TextView view = new TextView(activity);
+        view.setText(text);
+        view.setTextSize(size);
+        view.setTextColor(color);
+        view.setIncludeFontPadding(true);
+        view.setTypeface(Typeface.DEFAULT, bold ? Typeface.BOLD : Typeface.NORMAL);
+        return view;
+    }
+
+    private static GradientDrawable round(Activity activity, int color, float radius, int stroke, float strokeWidth) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(color);
+        drawable.setCornerRadius(dp(activity, radius));
+        drawable.setStroke(dp(activity, strokeWidth), stroke);
+        return drawable;
+    }
+
+    private static ViewOutlineProvider roundOutline(Activity activity, float radius) {
+        return new ViewOutlineProvider() {
+            @Override public void getOutline(View view, Outline outline) {
+                outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), dp(activity, radius));
+            }
+        };
     }
 
     private static FrameLayout findHomeAvatar(LinearLayout root, GlowFrameLayout hero) {
         for (int i = 0; i < root.getChildCount(); i++) {
             View child = root.getChildAt(i);
-            if (child == hero) continue;
-            if (child instanceof FrameLayout && !(child instanceof GlowFrameLayout)) {
+            if (child != hero && child instanceof FrameLayout && !(child instanceof GlowFrameLayout)) {
                 return (FrameLayout) child;
             }
         }
@@ -372,181 +433,7 @@ public final class RyluxHomeNavigationPolish {
         return null;
     }
 
-    private static Button smallButton(Activity activity, String text) {
-        Button button = new Button(activity);
-        button.setText(text);
-        button.setAllCaps(false);
-        button.setTextSize(13);
-        button.setTextColor(Color.rgb(218, 232, 255));
-        button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        button.setGravity(Gravity.CENTER);
-        button.setPadding(dp(activity, 10), 0, dp(activity, 10), 0);
-        button.setBackground(round(activity, Color.rgb(24, 47, 87), 10, Color.rgb(64, 123, 219), 1));
-        if (Build.VERSION.SDK_INT >= 21) {
-            button.setStateListAnimator(null);
-            button.setElevation(0);
-        }
-        return button;
-    }
-
-    private static Button primaryButton(Activity activity, String text) {
-        Button button = new Button(activity);
-        button.setText(text);
-        button.setAllCaps(false);
-        button.setTextSize(16);
-        button.setTextColor(Color.WHITE);
-        button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        button.setGravity(Gravity.CENTER);
-        button.setPadding(dp(activity, 14), 0, dp(activity, 14), 0);
-        GradientDrawable bg = new GradientDrawable(
-                GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{BLUE_LIGHT, BLUE, BLUE_DARK}
-        );
-        bg.setCornerRadius(dp(activity, 13));
-        bg.setStroke(dp(activity, 1), Color.rgb(104, 173, 255));
-        button.setBackground(bg);
-        if (Build.VERSION.SDK_INT >= 21) {
-            button.setStateListAnimator(null);
-            button.setElevation(dp(activity, 2));
-        }
-        return button;
-    }
-
-    private static TextView label(Activity activity, String text, float size, int color, boolean bold) {
-        TextView view = new TextView(activity);
-        view.setText(text);
-        view.setTextSize(size);
-        view.setTextColor(color);
-        view.setIncludeFontPadding(false);
-        view.setTypeface(Typeface.DEFAULT, bold ? Typeface.BOLD : Typeface.NORMAL);
-        return view;
-    }
-
-    private static GradientDrawable round(
-            Activity activity,
-            int fill,
-            float radiusDp,
-            int stroke,
-            int strokeDp
-    ) {
-        GradientDrawable drawable = new GradientDrawable();
-        drawable.setColor(fill);
-        drawable.setCornerRadius(dp(activity, radiusDp));
-        if (strokeDp > 0) drawable.setStroke(dp(activity, strokeDp), stroke);
-        return drawable;
-    }
-
     private static int dp(Activity activity, float value) {
         return Math.round(value * activity.getResources().getDisplayMetrics().density);
-    }
-
-    private static void pinHomeAccountHeader(
-            Activity activity,
-            LinearLayout homeRoot,
-            TextView title,
-            TextView subtitle,
-            LinearLayout accountRegion,
-            TextView gameSection
-    ) {
-        if (!(homeRoot.getParent() instanceof ScrollView)) return;
-        ScrollView previousScroll = (ScrollView) homeRoot.getParent();
-        if (!(previousScroll.getParent() instanceof FrameLayout)) return;
-        FrameLayout host = (FrameLayout) previousScroll.getParent();
-        int scrollIndex = host.indexOfChild(previousScroll);
-        if (scrollIndex < 0) return;
-        ViewGroup.LayoutParams previousParams = previousScroll.getLayoutParams();
-        FrameLayout.LayoutParams bodyParams = previousParams instanceof FrameLayout.LayoutParams
-                ? new FrameLayout.LayoutParams((FrameLayout.LayoutParams) previousParams)
-                : new FrameLayout.LayoutParams(-1, -1);
-
-        homeRoot.removeView(title);
-        homeRoot.removeView(subtitle);
-        homeRoot.removeView(accountRegion);
-        homeRoot.removeView(gameSection);
-
-        LinearLayout header = new LinearLayout(activity);
-        header.setTag(PINNED_HEADER_TAG);
-        header.setOrientation(LinearLayout.VERTICAL);
-        int side = RyluxViewport.widthDp(activity) <= 360 ? 10 : 16;
-        header.setPadding(dp(activity, side), dp(activity, 14), dp(activity, side), 0);
-        header.setBackgroundColor(Color.rgb(8, 13, 21));
-        header.setElevation(dp(activity, 6));
-        header.addView(title, title.getLayoutParams());
-        header.addView(subtitle, subtitle.getLayoutParams());
-        header.addView(accountRegion, accountRegion.getLayoutParams());
-        header.addView(gameSection, gameSection.getLayoutParams());
-
-        // Replace the original ScrollView instead of reusing it: Android may
-        // restore its old scroll offset before this post-resume layout pass.
-        // A fresh viewport guarantees the homepage starts at its first section.
-        previousScroll.removeView(homeRoot);
-        host.removeView(previousScroll);
-        ScrollView bodyScroll = new ScrollView(activity);
-        bodyScroll.setFillViewport(true);
-        bodyScroll.setBackgroundColor(Color.rgb(8, 13, 21));
-        bodyScroll.addView(homeRoot, new ScrollView.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-        ));
-        bodyScroll.setTag(HOME_BODY_SCROLL_TAG);
-        // Do not restore the old offset from a previous screen layout. The
-        // first focusable child below is an action button; allowing descendants
-        // to win initial focus makes Android scroll the long page down to it,
-        // hiding the game heading and the top of the poster on launch.
-        bodyScroll.setSaveEnabled(false);
-        bodyScroll.setFocusable(true);
-        bodyScroll.setFocusableInTouchMode(true);
-        // Prevent the first focusable button from pulling a tall page down on
-        // compact screens before the user touches it. Touch clicks still work.
-        bodyScroll.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
-        bodyParams.width = ViewGroup.LayoutParams.MATCH_PARENT;
-        bodyParams.height = ViewGroup.LayoutParams.MATCH_PARENT;
-        bodyParams.topMargin = 0;
-        bodyParams.bottomMargin = 0;
-        bodyScroll.setLayoutParams(bodyParams);
-        host.addView(bodyScroll, Math.min(scrollIndex, host.getChildCount()), bodyParams);
-
-        host.addView(header, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                Gravity.TOP
-        ));
-        syncPinnedHeaderPosition(activity);
-        Runnable resetHomeBody = () -> {
-            bodyScroll.requestFocus();
-            bodyScroll.scrollTo(0, 0);
-            // The runtime layout pass can translate the content root to the
-            // bottom while the ScrollView itself still reports scrollY=0.
-            // Re-anchor the root after the responsive tuners have settled.
-            homeRoot.setY(0f);
-        };
-        bodyScroll.post(resetHomeBody);
-        bodyScroll.postDelayed(resetHomeBody, 180L);
-        bodyScroll.postDelayed(resetHomeBody, 700L);
-    }
-
-    private static void syncPinnedHeaderPosition(Activity activity) {
-        View decor = activity.getWindow().getDecorView();
-        View header = findTagged(decor, PINNED_HEADER_TAG);
-        View scrollRaw = findTagged(decor, HOME_BODY_SCROLL_TAG);
-        if (header == null || !(scrollRaw instanceof ScrollView)
-                || !(header.getParent() instanceof FrameLayout)) return;
-
-        FrameLayout host = (FrameLayout) header.getParent();
-        int width = host.getWidth() > 0
-                ? host.getWidth()
-                : dp(activity, RyluxViewport.widthDp(activity));
-        header.measure(
-                View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
-                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
-        );
-        int headerHeight = header.getMeasuredHeight();
-        ScrollView bodyScroll = (ScrollView) scrollRaw;
-        ViewGroup.LayoutParams raw = bodyScroll.getLayoutParams();
-        if (!(raw instanceof FrameLayout.LayoutParams)) return;
-        FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) raw;
-        if (params.topMargin == headerHeight) return;
-        params.topMargin = headerHeight;
-        bodyScroll.setLayoutParams(params);
     }
 }

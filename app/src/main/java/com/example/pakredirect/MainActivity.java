@@ -82,6 +82,9 @@ public class MainActivity extends Activity {
     public static String currentRole = "user";
     private boolean registerMode;
 
+    boolean homeMembershipActive() { return currentMembershipActive; }
+    String homeMembershipKind() { return currentMembershipKind; }
+
     private EditText usernameEdit;
     private EditText passwordEdit;
     private EditText confirmPasswordEdit;
