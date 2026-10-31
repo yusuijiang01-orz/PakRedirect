@@ -44,7 +44,10 @@ public final class RyluxHomeNavigationPolish {
     private static final String ACCOUNT_REGION_TAG = "rylux_account_region_v3";
     private static final String IDENTITY_ROW_TAG = "rylux_account_identity_row_v1";
     private static final String ACCOUNT_BUTTON_TAG = "rylux_account_button_v1";
-    private static final int ACCOUNT_BUTTON_BELOW_BREAKPOINT_DP = 420;
+    // Keep the account action inline on 360dp phones (for example 1080x1920
+    // at 480dpi). Moving it below the identity row made the pinned header so
+    // tall that it pushed the game section out of the remaining viewport.
+    private static final int ACCOUNT_BUTTON_BELOW_BREAKPOINT_DP = 340;
 
     private static final WeakHashMap<Activity, ViewTreeObserver.OnGlobalLayoutListener> LISTENERS =
             new WeakHashMap<>();
@@ -85,6 +88,7 @@ public final class RyluxHomeNavigationPolish {
                 activity.getWindow().getDecorView(), ROOT_TAG);
         if (homeRoot != null) {
             adaptAccountRow(activity, homeRoot);
+            restoreHomeRootTranslation(homeRoot);
             syncPinnedHeaderPosition(activity);
             return;
         }
@@ -311,6 +315,15 @@ public final class RyluxHomeNavigationPolish {
         LAST_NARROW_MODE.put(root, narrow);
     }
 
+    private static void restoreHomeRootTranslation(LinearLayout homeRoot) {
+        // Responsive layout passes can translate the ScrollView's child while
+        // scrollY remains zero. Correct only that transform; leave the user's
+        // actual scroll position untouched.
+        if (Math.abs(homeRoot.getTranslationY()) > 0.5f) {
+            homeRoot.setTranslationY(0f);
+        }
+    }
+
     private static LinearLayout.LayoutParams accountButtonParams(Activity activity, int widthDp) {
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 dp(activity, widthDp >= 600 ? 78 : 68), dp(activity, 42));
@@ -514,7 +527,7 @@ public final class RyluxHomeNavigationPolish {
             // The runtime layout pass can translate the content root to the
             // bottom while the ScrollView itself still reports scrollY=0.
             // Re-anchor the root after the responsive tuners have settled.
-            homeRoot.setY(0f);
+            homeRoot.setTranslationY(0f);
         };
         bodyScroll.post(resetHomeBody);
         bodyScroll.postDelayed(resetHomeBody, 180L);
