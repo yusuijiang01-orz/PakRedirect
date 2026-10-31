@@ -189,12 +189,19 @@ public final class GameApkCloudInstaller {
     }
 
     private static RemoteApkInfo parseRemoteApkInfo(String body) throws Exception {
-        JSONObject json = new JSONObject(body);
+        String normalizedBody = body == null ? "" : body.trim();
+        if (normalizedBody.startsWith("\uFEFF")) {
+            normalizedBody = normalizedBody.substring(1).trim();
+        }
+        JSONObject json = new JSONObject(normalizedBody);
         String sha256 = json.optString("sha256", "").trim().toLowerCase(Locale.US);
         long size = json.optLong("sizeBytes", -1L);
         org.json.JSONArray partsJson = json.optJSONArray("parts");
         int expectedParts = json.optInt("partCount", -1);
-        if (json.optInt("schema", 0) != 1
+        // Older SplitUploadToGitee.ps1 releases omitted schema; treat that
+        // legacy format as schema 1 while rejecting unsupported explicit values.
+        int schema = json.has("schema") ? json.optInt("schema", -1) : 1;
+        if (schema != 1
                 || sha256.length() != 64 || !sha256.matches("[0-9a-f]{64}")
                 || size <= 0L || size > MAX_APK_BYTES
                 || partsJson == null || partsJson.length() < 2 || partsJson.length() > 20
