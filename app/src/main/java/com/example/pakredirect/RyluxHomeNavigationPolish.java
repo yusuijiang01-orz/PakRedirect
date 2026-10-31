@@ -340,7 +340,10 @@ public final class RyluxHomeNavigationPolish {
     static int homeHeroHeight(Activity activity) {
         int widthDp = RyluxViewport.widthDp(activity);
         int heightDp = RyluxViewport.heightDp(activity);
-        boolean landscape = widthDp > heightDp;
+        // Some Android emulators report a transiently short content height
+        // while the compact portrait window is settling. Do not classify a
+        // phone-width viewport as landscape from that temporary measurement.
+        boolean landscape = widthDp > 600 && widthDp > heightDp;
         // Match the 1529x2048 poster's natural portrait ratio. A fixed 340dp
         // card was wider than the artwork at phone widths, so CENTER_CROP
         // removed the character's head and other important content.
@@ -507,7 +510,9 @@ public final class RyluxHomeNavigationPolish {
         bodyScroll.setSaveEnabled(false);
         bodyScroll.setFocusable(true);
         bodyScroll.setFocusableInTouchMode(true);
-        bodyScroll.setDescendantFocusability(ViewGroup.FOCUS_BEFORE_DESCENDANTS);
+        // Prevent the first focusable button from pulling a tall page down on
+        // compact screens before the user touches it. Touch clicks still work.
+        bodyScroll.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         bodyParams.width = ViewGroup.LayoutParams.MATCH_PARENT;
         bodyParams.height = ViewGroup.LayoutParams.MATCH_PARENT;
         bodyParams.topMargin = 0;

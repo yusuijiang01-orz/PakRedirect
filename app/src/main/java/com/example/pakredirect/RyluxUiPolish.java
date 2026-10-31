@@ -278,6 +278,11 @@ public final class RyluxUiPolish {
         poster.setScaleType(ImageView.ScaleType.FIT_CENTER);
         poster.setAdjustViewBounds(false);
         poster.setBackgroundColor(Color.rgb(10, 17, 28));
+        if (RyluxViewport.widthDp(activity) <= 380) {
+            // A few high-density emulator GPU profiles fail to upload the
+            // large poster texture even though other views render normally.
+            poster.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+        }
         hero.addView(poster, new FrameLayout.LayoutParams(-1, -1));
 
         View shade = new View(activity);
