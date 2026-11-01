@@ -31,7 +31,23 @@ android {
             // in tools/lua-regression, not Android's local unit-test runtime.
             java.exclude '**/RecoveredLuaTaskTest.java'
             java.exclude '**/RecoveredLuaLiveLoginTest.java'
+            java.exclude '**/RecoveredLuaLiveActivityPanelTest.java'
+            java.exclude '**/RecoveredLuaLiveCombatTest.java'
+            java.exclude '**/RecoveredLuaLiveMedicineTest.java'
+            java.exclude '**/RecoveredLuaLiveMerchantTest.java'
+            java.exclude '**/RecoveredLuaLivePartyCreationTest.java'
+            java.exclude '**/RecoveredLuaLivePartyPanelTest.java'
+            java.exclude '**/RecoveredLuaLiveRouteTest.java'
             java.exclude '**/LiveLuaDeviceHost.java'
+            java.exclude '**/AdbLoginPngDecodeTest.java'
+            java.exclude '**/AdbSemanticLoginTest.java'
+            java.exclude '**/AdbVisionAdapterTest.java'
+            java.exclude '**/LuaWebRouteFlowTest.java'
+            java.exclude '**/ScriptMapCatalogParityTest.java'
+            java.exclude '**/ScriptRuntimeLogTest.java'
+            java.exclude '**/ScriptWebProfileQueueTest.java'
+            java.exclude '**/ScriptWebRouteQueueTest.java'
+            java.exclude '**/SemanticLoginFlowTest.java'
         }
     }
 
