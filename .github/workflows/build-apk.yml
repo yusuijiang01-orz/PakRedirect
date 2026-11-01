@@ -27,6 +27,7 @@ on:
       - app/src/main/java/com/example/pakredirect/RyluxUiPolish.java
       - app/src/main/java/com/example/pakredirect/RyluxResponsiveTuner.java
       - app/src/main/java/com/example/pakredirect/RyluxViewport.java
+      - app/src/test/**
 
 jobs:
   build-apk:
