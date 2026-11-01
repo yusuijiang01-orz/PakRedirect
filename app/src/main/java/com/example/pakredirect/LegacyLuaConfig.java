@@ -76,6 +76,7 @@ final class LegacyLuaConfig {
         values.put("队员找不到队长组队就回家次数", "2");
         values.put("保护装备不出售", "true");
         values.put("出售装备", "false");
+        values.put("出售装备品质上限", "0");
         values.put("出售装备品质_白色", "true");
         values.put("出售装备品质_蓝色", "true");
         values.put("出售装备品质_绿色", "false");

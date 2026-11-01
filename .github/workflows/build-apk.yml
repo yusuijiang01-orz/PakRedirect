@@ -22,6 +22,7 @@ on:
     paths:
       - .github/workflows/build-apk.yml
       - app/build.gradle
+      - app/src/main/**
       - app/src/main/java/com/example/pakredirect/RyluxAdaptiveLayoutFix.java
       - app/src/main/java/com/example/pakredirect/RyluxHomeNavigationPolish.java
       - app/src/main/java/com/example/pakredirect/RyluxUiPolish.java
