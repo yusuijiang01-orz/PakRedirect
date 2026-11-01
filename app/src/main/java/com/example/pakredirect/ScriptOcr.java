@@ -11,15 +11,20 @@ import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions;
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions;
 
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import android.util.Log;
 
 /** On-device OCR bridge for the legacy Chinese and Vietnamese game UI. */
 public final class ScriptOcr implements AutoCloseable {
     static final long LUA_TIMEOUT_MS = 30_000L;
+    private static final String TAG = "RYLUX-ScriptOcr";
+    private static final Executor CALLBACK_EXECUTOR = Runnable::run;
     private static final Semaphore PROCESS_GATE = new Semaphore(1, true);
+    private static final AtomicInteger REQUEST_SEQUENCE = new AtomicInteger();
     private final TextRecognizer chinese = TextRecognition.getClient(
             new ChineseTextRecognizerOptions.Builder().build());
     private final TextRecognizer latin = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
@@ -30,9 +35,12 @@ public final class ScriptOcr implements AutoCloseable {
     public Result recognize(Bitmap bitmap, boolean chineseText, long timeoutMs) throws Exception {
         if (bitmap == null || bitmap.isRecycled()) throw new IllegalArgumentException("OCR 图片不可用");
         if (closeRequested.get()) throw new IllegalStateException("OCR 识别器已关闭");
+        int requestId = REQUEST_SEQUENCE.incrementAndGet();
         long timeout = Math.max(1L, timeoutMs);
         long deadline = android.os.SystemClock.elapsedRealtime() + timeout;
         if (!PROCESS_GATE.tryAcquire(timeout, TimeUnit.MILLISECONDS)) {
+            Log.w(TAG, "OCR #" + requestId + " semaphore timeout; source="
+                    + bitmap.getWidth() + "x" + bitmap.getHeight());
             throw new IllegalStateException("OCR 识别超时：上一张图片仍在识别");
         }
         AtomicBoolean gateReleased = new AtomicBoolean();
@@ -56,9 +64,15 @@ public final class ScriptOcr implements AutoCloseable {
             final Bitmap taskInput = input;
             final int inputWidth = taskInput.getWidth();
             final int inputHeight = taskInput.getHeight();
+            long taskStart = android.os.SystemClock.elapsedRealtime();
             markTaskStarted();
             Runnable finishTask = () -> {
                 if (!taskFinished.compareAndSet(false, true)) return;
+                long elapsed = android.os.SystemClock.elapsedRealtime() - taskStart;
+                if (elapsed >= 5_000L) {
+                    Log.w(TAG, "OCR #" + requestId + " completed in " + elapsed + "ms; input="
+                            + inputWidth + "x" + inputHeight);
+                }
                 if (!taskInput.isRecycled()) taskInput.recycle();
                 markTaskFinished();
                 done.countDown();
@@ -66,7 +80,7 @@ public final class ScriptOcr implements AutoCloseable {
             };
             try {
                 Task<Text> task = recognizer.process(InputImage.fromBitmap(taskInput, 0));
-                task.addOnCompleteListener(result -> {
+                task.addOnCompleteListener(CALLBACK_EXECUTOR, result -> {
                     try {
                         if (result.isSuccessful()) output[0] = result.getResult();
                         else {
@@ -86,6 +100,9 @@ public final class ScriptOcr implements AutoCloseable {
             }
             long remaining = deadline - android.os.SystemClock.elapsedRealtime();
             if (remaining <= 0 || !done.await(remaining, TimeUnit.MILLISECONDS)) {
+                Log.e(TAG, "OCR #" + requestId + " inference timeout; source="
+                        + bitmap.getWidth() + "x" + bitmap.getHeight() + ", input="
+                        + inputWidth + "x" + inputHeight + ", timeout=" + timeout + "ms");
                 throw new IllegalStateException("OCR 识别超时（等待 " + timeout + " 毫秒）");
             }
             if (failure[0] != null) throw failure[0];

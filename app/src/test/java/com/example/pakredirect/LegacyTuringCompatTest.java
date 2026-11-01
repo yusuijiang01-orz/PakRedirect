@@ -15,8 +15,8 @@ public class LegacyTuringCompatTest {
     }
 
     @Test
-    public void leavesAlreadyLargeOcrImagesAtTheirOriginalSize() {
-        assertArrayEquals(new int[]{1600, 900}, LegacyTuringCompat.ocrInputDimensions(1600, 900));
+    public void capsLargeOcrImagesWithoutChangingAspectRatio() {
+        assertArrayEquals(new int[]{960, 540}, LegacyTuringCompat.ocrInputDimensions(1600, 900));
     }
 
     @Test(expected = IllegalArgumentException.class)

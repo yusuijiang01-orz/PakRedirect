@@ -14,6 +14,7 @@ import java.util.List;
 
 /** Minimal, explicit compatibility surface for the recovered script's TURING OCR calls. */
 final class LegacyTuringCompat {
+    private static final int OCR_MAX_INPUT_EDGE = 960;
     interface Recognizer {
         String recognize(Request request) throws Exception;
     }
@@ -64,10 +65,11 @@ final class LegacyTuringCompat {
     /** ML Kit rejects source images with either dimension below 32 pixels. */
     static int[] ocrInputDimensions(int width, int height) {
         if (width <= 0 || height <= 0) throw new IllegalArgumentException("OCR 图片尺寸无效");
-        double scale = Math.max(1d, Math.max(32d / width, 32d / height));
+        double scale = Math.min(1d, (double) OCR_MAX_INPUT_EDGE / Math.max(width, height));
+        scale = Math.max(scale, Math.max(32d / width, 32d / height));
         return new int[]{
-                Math.max(32, (int) Math.ceil(width * scale)),
-                Math.max(32, (int) Math.ceil(height * scale))
+                Math.max(32, (int) Math.round(width * scale)),
+                Math.max(32, (int) Math.round(height * scale))
         };
     }
 
