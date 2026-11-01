@@ -59,12 +59,12 @@ public final class LegacyLuaConfigTest {
         Path root = Paths.get(System.getProperty("user.dir"));
         if (!Files.isDirectory(root.resolve("app/src/main/java"))) root = root.resolve("..");
         Path sources = root.resolve("app/src/main/java/com/example/pakredirect");
-        String activity = Files.readString(sources.resolve("ScriptToolsActivity.java"), StandardCharsets.UTF_8);
+        String activity = new String(Files.readAllBytes(sources.resolve("ScriptToolsActivity.java")), StandardCharsets.UTF_8);
         String loadProfile = activity.substring(activity.indexOf("private void loadProfile()"),
                 activity.indexOf("private void put("));
         assertTrue(loadProfile.contains("if (!values.has(\"虚拟屏幕DPI\")) put(\"虚拟屏幕DPI\", LegacyLuaConfig.defaults().get(\"虚拟屏幕DPI\"))"));
 
-        String runtime = Files.readString(sources.resolve("LegacyLuaRuntime.java"), StandardCharsets.UTF_8);
+        String runtime = new String(Files.readAllBytes(sources.resolve("LegacyLuaRuntime.java")), StandardCharsets.UTF_8);
         String getDpi = runtime.substring(runtime.indexOf("globals.set(\"getDisplayDpi\""),
                 runtime.indexOf("globals.set(\"exitScript\""));
         assertTrue(getDpi.contains("config.optInt(\"虚拟屏幕DPI\","));
