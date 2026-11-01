@@ -17,7 +17,9 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -28,7 +30,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.imageio.ImageIO;
 
-/** Real ADB screenshots, OCR, and touches for one bounded recovered-Lua login run. */
+/** Real ADB screenshots, OCR, and touches for one bounded recovered-Lua device run. */
 final class LiveLuaDeviceHost implements AutoCloseable {
     static final class Row {
         final String text;
@@ -40,20 +42,33 @@ final class LiveLuaDeviceHost implements AutoCloseable {
     static final class Frame {
         final BufferedImage image;
         final LegacyCoordinateMapper mapper;
-        final List<Row> rows;
+        final Path screenshot;
+        final Map<String, LegacyImageMatcher.Match> imageMatches = new HashMap<>();
+        List<Row> rows;
         final int number;
         final long capturedAt;
-        Frame(BufferedImage image, List<Row> rows, int number) {
+        Frame(BufferedImage image, Path screenshot, int number) {
             this.image = image;
             this.mapper = new LegacyCoordinateMapper(720, 1280, image.getWidth(), image.getHeight());
-            this.rows = rows;
+            this.screenshot = screenshot;
             this.number = number;
             this.capturedAt = System.nanoTime();
         }
     }
 
+    private static final class CropOcrCache {
+        final int[] pixels;
+        final List<Row> rows;
+        CropOcrCache(int[] pixels, List<Row> rows) {
+            this.pixels = pixels;
+            this.rows = rows;
+        }
+    }
+
     private final String adb, serial;
     private final Path evidence;
+    private final Path accessibilityTextProbe;
+    private boolean accessibilityTextProbePushed;
     private final long deadline;
     private final ExecutorService io = Executors.newCachedThreadPool(r -> {
         Thread t = new Thread(r, "live-lua-device-io"); t.setDaemon(true); return t;
@@ -61,6 +76,7 @@ final class LiveLuaDeviceHost implements AutoCloseable {
     private final Process ocr;
     private final BufferedReader ocrOutput;
     private final BufferedWriter ocrInput;
+    private final Map<String, CropOcrCache> cropOcrCache = new HashMap<>();
     private Frame current;
     private int captures, actions;
 
@@ -68,6 +84,9 @@ final class LiveLuaDeviceHost implements AutoCloseable {
         this.adb = requiredFile("RYLUX_ADB_EXECUTABLE");
         this.serial = requiredText("RYLUX_ADB_DEVICE");
         String python = requiredFile("RYLUX_OCR_PYTHON");
+        String textProbe = System.getenv("RYLUX_UIAUTOMATOR_TEXT_JAR");
+        this.accessibilityTextProbe = textProbe == null || textProbe.trim().isEmpty()
+                ? null : Paths.get(textProbe.trim()).toAbsolutePath().normalize();
         this.evidence = Paths.get(requiredText("RYLUX_LIVE_EVIDENCE_DIR")).toAbsolutePath().normalize();
         Files.createDirectories(evidence);
         if (!Files.isDirectory(evidence) || !Files.isWritable(evidence))
@@ -104,7 +123,7 @@ final class LiveLuaDeviceHost implements AutoCloseable {
     }
 
     void checkDeadline() throws IOException {
-        if (System.nanoTime() >= deadline) throw new IOException("Live login exceeded its 3-minute deadline");
+        if (System.nanoTime() >= deadline) throw new IOException("Live device run exceeded its deadline");
     }
 
     private long remaining(long cap) throws IOException {
@@ -171,15 +190,54 @@ final class LiveLuaDeviceHost implements AutoCloseable {
         int number = ++captures;
         Path path = evidence.resolve(String.format("capture-%03d.png", number));
         Files.write(path, png);
-        List<Row> rows = recognize(path);
+        current = new Frame(image, path, number);
+        event("capture", number + " " + image.getWidth() + "x" + image.getHeight() + " ocr=pending");
+        return current;
+    }
+
+    List<Row> rows(Frame frame) throws Exception {
+        if (frame.rows != null) return frame.rows;
+        List<Row> rows = recognize(frame.screenshot);
         StringBuilder transcript = new StringBuilder("text_base64\traw_center_x\traw_center_y\tconfidence\n");
         for (Row row : rows) transcript.append(Base64.getEncoder().encodeToString(row.text.getBytes(StandardCharsets.UTF_8)))
                 .append('\t').append(row.x).append('\t').append(row.y).append('\t').append(row.confidence).append('\n');
-        Files.writeString(evidence.resolve(String.format("capture-%03d.ocr.tsv", number)), transcript,
+        Files.writeString(evidence.resolve(String.format("capture-%03d.ocr.tsv", frame.number)), transcript,
                 StandardCharsets.UTF_8);
-        current = new Frame(image, rows, number);
-        event("capture", number + " " + image.getWidth() + "x" + image.getHeight() + " rows=" + rows.size());
-        return current;
+        frame.rows = rows;
+        event("ocr", "capture=" + frame.number + " rows=" + rows.size());
+        return rows;
+    }
+
+    /** OCR only the Lua reference-space crop requested by tomocrtexttable. */
+    List<Row> rowsInReferenceRegion(Frame frame, double left, double top, double right, double bottom)
+            throws Exception {
+        int x1 = frame.mapper.left(left), y1 = frame.mapper.top(top);
+        int x2 = frame.mapper.edgeRight(right), y2 = frame.mapper.edgeBottom(bottom);
+        if (x2 <= x1 || y2 <= y1) return new ArrayList<>();
+        int width = x2 - x1, height = y2 - y1;
+        String cropKey = frame.image.getWidth() + "x" + frame.image.getHeight()
+                + ":" + x1 + "," + y1 + "," + x2 + "," + y2;
+        int[] pixels = frame.image.getRGB(x1, y1, width, height, null, 0, width);
+        CropOcrCache cached = cropOcrCache.get(cropKey);
+        if (cached != null && Arrays.equals(cached.pixels, pixels)) {
+            event("ocr_cache", "capture=" + frame.number + " crop=" + cropKey);
+            return cached.rows;
+        }
+        Path cropPath = Files.createTempFile(evidence, "ocr-region-", ".png");
+        try {
+            BufferedImage crop = frame.image.getSubimage(x1, y1, width, height);
+            if (!ImageIO.write(crop, "png", cropPath.toFile()))
+                throw new IOException("Could not encode live OCR crop");
+            List<Row> rows = new ArrayList<>();
+            for (Row row : recognize(cropPath)) {
+                rows.add(new Row(row.text, frame.mapper.toReferenceX(row.x + x1),
+                        frame.mapper.toReferenceY(row.y + y1), row.confidence));
+            }
+            cropOcrCache.put(cropKey, new CropOcrCache(pixels, rows));
+            return rows;
+        } finally {
+            Files.deleteIfExists(cropPath);
+        }
     }
 
     Frame frame() throws Exception {
@@ -202,7 +260,9 @@ final class LiveLuaDeviceHost implements AutoCloseable {
         ocrInput.write("IMAGE\t" + request + "\n"); ocrInput.flush();
         List<Row> rows = new ArrayList<>();
         while (true) {
-            String line = timedLine(12_000);
+            // A cold OCR engine may load its ONNX models on the first captured frame.
+            // Keep the wait bounded, but do not treat model initialization as a dead worker.
+            String line = timedLine(45_000);
             if (line == null) throw new IOException("RapidOCR worker exited; see ocr-stderr.log");
             if ("END".equals(line)) return rows;
             String[] fields = line.split("\t", -1);
@@ -223,6 +283,62 @@ final class LiveLuaDeviceHost implements AutoCloseable {
         event("action", (++actions) + " " + label + " ref=" + referenceX + "," + referenceY
                 + " raw=" + x + "," + y + " source=capture-" + before.number);
         adb(8_000, "shell", "input", "tap", Integer.toString(x), Integer.toString(y));
+        invalidate();
+    }
+
+    void doubleTap(double referenceX, double referenceY, String label) throws Exception {
+        Frame before = frame();
+        requireForeground();
+        int x = before.mapper.toScreenX(referenceX), y = before.mapper.toScreenY(referenceY);
+        if (x < 0 || y < 0 || x >= before.image.getWidth() || y >= before.image.getHeight())
+            throw new IOException("Lua requested out-of-screen double-tap: " + referenceX + "," + referenceY);
+        event("action", (++actions) + " " + label + " ref=" + referenceX + "," + referenceY
+                + " raw=" + x + "," + y + " source=capture-" + before.number);
+        // Keep both touch-down/up pairs in one adb shell so screenshot/foreground
+        // instrumentation cannot split the game's double-click window.
+        adb(8_000, "shell", "input tap " + x + " " + y + "; input tap " + x + " " + y);
+        invalidate();
+    }
+
+    void inputText(String text) throws Exception {
+        if (text == null || !text.matches("[\\p{IsHan}A-Za-z0-9]+"))
+            throw new IOException("Refusing unsupported live IME text");
+        boolean hasHan = false;
+        for (int offset = 0; offset < text.length();) {
+            int codePoint = text.codePointAt(offset);
+            if (Character.UnicodeScript.of(codePoint) == Character.UnicodeScript.HAN)
+                hasHan = true;
+            offset += Character.charCount(codePoint);
+        }
+        requireForeground();
+        if (hasHan) {
+            if (accessibilityTextProbe == null || !Files.isRegularFile(accessibilityTextProbe))
+                throw new IOException("Live CJK text requires RYLUX_UIAUTOMATOR_TEXT_JAR, which verifies "
+                        + "AccessibilityNodeInfo ACTION_SET_TEXT on the focused Android field");
+            final String deviceJar = "/data/local/tmp/rylux-accessibility-text-probe.jar";
+            if (!accessibilityTextProbePushed) {
+                adb(10_000, "push", accessibilityTextProbe.toString(), deviceJar);
+                accessibilityTextProbePushed = true;
+            }
+            String output = new String(adb(20_000, "shell", "uiautomator", "runtest", deviceJar,
+                    "/system/framework/android.test.base.jar", "-c",
+                    "testhelper.AccessibilityTextProbe", "-e", "text", text), StandardCharsets.UTF_8);
+            if (!output.contains("OK (1 test)") || output.contains("FAILURES!!!")
+                    || output.contains("Error in test:"))
+                throw new IOException("Android ACTION_SET_TEXT did not verify CJK text: "
+                        + output.replaceAll("[\\r\\n\\t]+", " ").trim());
+            event("ime_accessibility", "ACTION_SET_TEXT verified Han length=" + text.length());
+            invalidate();
+            return;
+        }
+        adb(8_000, "shell", "input", "text", text);
+        event("ime_text", "sent length=" + text.length());
+        invalidate();
+    }
+
+    void deleteKey() throws Exception {
+        requireForeground();
+        adb(8_000, "shell", "input", "keyevent", "KEYCODE_DEL");
         invalidate();
     }
 

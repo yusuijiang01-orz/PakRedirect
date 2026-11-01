@@ -1,6 +1,8 @@
 package com.example.pakredirect;
 
+import android.app.ActivityManager;
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.os.SystemClock;
@@ -47,6 +49,8 @@ final class LegacyLuaRuntime {
     private final JSONObject config;
     private final Listener listener;
     private final Consumer<Throwable> failureListener;
+    private final ScriptWebRouteBridge routeBridge;
+    private final ScriptRuntimeLog runtimeLog;
     private final AtomicBoolean captureHeld = new AtomicBoolean(false);
     private final CopyOnWriteArrayList<Thread> threads = new CopyOnWriteArrayList<>();
     private final ScriptHudStatus hudStatus = new ScriptHudStatus();
@@ -60,12 +64,15 @@ final class LegacyLuaRuntime {
     private volatile Toast currentToast;
 
     LegacyLuaRuntime(Context context, ScriptExecutionControl control, JSONObject config,
-                     Listener listener, Consumer<Throwable> failureListener) {
+                     Listener listener, Consumer<Throwable> failureListener,
+                     ScriptWebRouteBridge routeBridge, ScriptRuntimeLog runtimeLog) {
         this.context = context.getApplicationContext();
         this.control = control;
         this.config = config;
         this.listener = listener;
         this.failureListener = failureListener;
+        this.routeBridge = routeBridge;
+        this.runtimeLog = runtimeLog;
     }
 
     static String[] compatibilityBlockers(Context context) {
@@ -158,6 +165,22 @@ final class LegacyLuaRuntime {
                 } catch (Exception error) { rethrowIfStopped(); throw new LuaError("触控失败：" + error.getMessage()); }
             }
         });
+        globals.set("doubleTap", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                control.checkpoint();
+                try {
+                    Bitmap screen = frame();
+                    LegacyCoordinateMapper mapper = mapperFor(screen);
+                    int x = mapper.toScreenX(args.arg(1).todouble());
+                    int y = mapper.toScreenY(args.arg(2).todouble());
+                    requireDisplayPoint(x, y, screen);
+                    awaitGameForeground();
+                    boolean ok = ScriptGameAdapter.requireConnected(control).doubleTap(x, y, 5000);
+                    if (!ok) throw new LuaError("系统未接受双击手势");
+                    return LuaValue.TRUE;
+                } catch (Exception error) { rethrowIfStopped(); throw new LuaError("双击失败：" + error.getMessage()); }
+            }
+        });
         globals.set("swipe", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) {
                 control.checkpoint();
@@ -237,7 +260,8 @@ final class LegacyLuaRuntime {
         });
         globals.set("getDisplayDpi", new ZeroFunction() {
             @Override public LuaValue invoke() {
-                return LuaValue.valueOf(context.getResources().getDisplayMetrics().densityDpi);
+                return LuaValue.valueOf(config.optInt("虚拟屏幕DPI",
+                        context.getResources().getDisplayMetrics().densityDpi));
             }
         });
         globals.set("exitScript", new ZeroFunction() {
@@ -269,8 +293,7 @@ final class LegacyLuaRuntime {
                 if (!isAllowedPackage(target)) {
                     throw new LuaError("安全限制：脚本只能启动封神榜游戏或已配置的 Clash VPN");
                 }
-                boolean launched = top.niunaijun.blackbox.BlackBoxCore.get().launchApk(target, 0);
-                return LuaValue.valueOf(launched);
+                return LuaValue.valueOf(launchScriptPackage(target));
             }
         });
         globals.set("stopApp", new OneArgFunction() {
@@ -278,8 +301,7 @@ final class LegacyLuaRuntime {
                 control.checkpoint();
                 String target = packageName.checkjstring();
                 if (!isAllowedPackage(target)) throw new LuaError("安全限制：脚本只能停止封神榜游戏或已配置的 Clash VPN");
-                top.niunaijun.blackbox.BlackBoxCore.get().stopPackage(target, 0);
-                return LuaValue.TRUE;
+                return LuaValue.valueOf(stopScriptPackage(target));
             }
         });
         globals.set("appIsRunning", new OneArgFunction() {
@@ -288,6 +310,12 @@ final class LegacyLuaRuntime {
                 String target = packageName.checkjstring();
                 if (!isAllowedPackage(target)) {
                     throw new LuaError("安全限制：脚本只能查询封神榜游戏或已配置的 Clash VPN");
+                }
+                if (isDesktopGameTarget(target)) {
+                    // Android hides other apps' process state. For the recovered
+                    // script's check-then-launch flow, foreground is the reliable
+                    // signal: a background or stopped app will be opened by runApp.
+                    return LuaValue.valueOf(ScriptGameAdapter.isTargetGameForeground());
                 }
                 try {
                     top.niunaijun.blackbox.entity.am.RunningAppProcessInfo processes =
@@ -302,6 +330,33 @@ final class LegacyLuaRuntime {
         });
         globals.set("frontAppName", new ZeroFunction() {
             @Override public LuaValue invoke() { return LuaValue.valueOf(ScriptGameAdapter.foregroundPackage()); }
+        });
+        globals.set("gameUiState", new ZeroFunction() {
+            @Override public LuaValue invoke() {
+                control.checkpoint();
+                try {
+                    awaitGameForeground();
+                    return LuaValue.valueOf(ScriptGameAdapter.requireConnected(control).semanticGameState());
+                } catch (Exception error) {
+                    rethrowIfStopped();
+                    throw new LuaError("读取游戏无障碍状态失败：" + error.getMessage());
+                }
+            }
+        });
+        globals.set("gameUiClick", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue actionValue) {
+                control.checkpoint();
+                String action = actionValue.checkjstring();
+                try {
+                    awaitGameForeground();
+                    boolean clicked = ScriptGameAdapter.requireConnected(control)
+                            .clickSemanticGameAction(action);
+                    return LuaValue.valueOf(clicked);
+                } catch (Exception error) {
+                    rethrowIfStopped();
+                    throw new LuaError("执行游戏无障碍动作失败：" + error.getMessage());
+                }
+            }
         });
         globals.set("cmpColorEx", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) {
@@ -436,6 +491,86 @@ final class LegacyLuaRuntime {
             }
         });
         globals.set("imeLib", ime);
+        globals.set("pollWebRouteRequest", new ZeroFunction() {
+            @Override public LuaValue invoke() {
+                control.checkpoint();
+                ScriptWebRouteQueue.Request request = routeBridge.poll();
+                if (request == null) return LuaValue.NIL;
+                LuaTable value = new LuaTable();
+                value.set("requestId", LuaValue.valueOf(request.requestId));
+                value.set("mapName", LuaValue.valueOf(request.mapName));
+                value.set("x", LuaValue.valueOf(request.x));
+                value.set("y", LuaValue.valueOf(request.y));
+                return value;
+            }
+        });
+        globals.set("pollWebProfileRequest", new ZeroFunction() {
+            @Override public LuaValue invoke() {
+                control.checkpoint();
+                ScriptWebProfileQueue.Request request = routeBridge.pollProfile();
+                if (request == null) return LuaValue.NIL;
+                LuaTable value = new LuaTable();
+                LuaTable fields = new LuaTable();
+                value.set("requestId", LuaValue.valueOf(request.requestId));
+                boolean mapperSettingsChanged = false;
+                for (java.util.Map.Entry<String, String> entry : request.values.entrySet()) {
+                    fields.set(entry.getKey(), LuaValue.valueOf(entry.getValue()));
+                    if ("虚拟屏幕宽度".equals(entry.getKey()) || "虚拟屏幕高度".equals(entry.getKey())) {
+                        try { config.put(entry.getKey(), Integer.parseInt(entry.getValue())); }
+                        catch (Exception invalid) { throw new LuaError("网页虚拟屏幕设置无效：" + entry.getKey()); }
+                        mapperSettingsChanged = true;
+                    }
+                    if ("虚拟屏幕DPI".equals(entry.getKey())) {
+                        try { config.put(entry.getKey(), Integer.parseInt(entry.getValue())); }
+                        catch (Exception invalid) { throw new LuaError("网页虚拟屏幕 DPI 无效"); }
+                    }
+                }
+                if (mapperSettingsChanged) coordinateMapper = null;
+                value.set("values", fields);
+                return value;
+            }
+        });
+        globals.set("updateWebRouteRequest", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                control.checkpoint();
+                routeBridge.update(args.arg(1).optjstring(""), args.arg(2).optjstring("failed"),
+                        args.arg(3).optjstring(""));
+                return LuaValue.NONE;
+            }
+        });
+        globals.set("updateWebProfileRequest", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                control.checkpoint();
+                String requestId = args.arg(1).optjstring("");
+                String next = args.arg(2).optjstring("failed");
+                ScriptWebProfileQueue.Request request = routeBridge.getProfile(requestId);
+                if (request != null && ScriptWebProfileQueue.APPLYING.equals(request.state)
+                        && ScriptWebProfileQueue.APPLIED.equals(next)) {
+                    runtimeLog.applySettings(request.values);
+                }
+                routeBridge.updateProfile(requestId, next, args.arg(3).optjstring(""));
+                return LuaValue.NONE;
+            }
+        });
+        globals.set("requireWebRouteDisplay", new ZeroFunction() {
+            @Override public LuaValue invoke() {
+                control.checkpoint();
+                Bitmap display = null;
+                try {
+                    display = ScriptGameAdapter.requireConnected(control).captureDisplay(5_000);
+                    if (display.getWidth() != 1600 || display.getHeight() != 900) {
+                        throw new LuaError("网页路线只支持已校准的 1600×900 横屏；未执行路线");
+                    }
+                    return LuaValue.TRUE;
+                } catch (LuaError error) { throw error; }
+                catch (Exception error) {
+                    rethrowIfStopped();
+                    throw new LuaError("网页路线前台/截图检查失败：" + error.getMessage());
+                } finally {
+                    if (display != null && !display.isRecycled()) display.recycle();
+                }
+            }
+        });
         globals.set("httpGet", new OneArgFunction() {
             @Override public LuaValue call(LuaValue url) { return LuaValue.valueOf(""); }
         });
@@ -489,6 +624,47 @@ final class LegacyLuaRuntime {
 
     private static boolean isAllowedPackage(String packageName) {
         return GAME_PACKAGE.equals(packageName) || VPN_PACKAGE.equals(packageName);
+    }
+
+    private boolean isDesktopGameTarget(String packageName) {
+        return GAME_PACKAGE.equals(packageName)
+                && ScriptToolsActivity.TARGET_MODE_DESKTOP.equals(
+                        config.optString("目标运行环境", ScriptToolsActivity.TARGET_MODE_SANDBOX));
+    }
+
+    private boolean launchScriptPackage(String packageName) {
+        if (!isDesktopGameTarget(packageName)) {
+            return top.niunaijun.blackbox.BlackBoxCore.get().launchApk(packageName, 0);
+        }
+        Intent launch = context.getPackageManager().getLaunchIntentForPackage(packageName);
+        if (launch == null) return false;
+        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            context.startActivity(launch);
+            return true;
+        } catch (RuntimeException unavailable) {
+            return false;
+        }
+    }
+
+    private boolean stopScriptPackage(String packageName) {
+        if (!isDesktopGameTarget(packageName)) {
+            top.niunaijun.blackbox.BlackBoxCore.get().stopPackage(packageName, 0);
+            return true;
+        }
+        try {
+            if (!ScriptGameAdapter.requireConnected(control).pressHome()) return false;
+            control.sleep(700L);
+            ActivityManager activityManager = (ActivityManager)
+                    context.getSystemService(Context.ACTIVITY_SERVICE);
+            if (activityManager != null) activityManager.killBackgroundProcesses(packageName);
+            listener.onStatus("桌面客户端已退到后台。Android 不允许 RYLUX 可靠强制结束其他应用；脚本稍后会尝试重新打开它。");
+            return false;
+        } catch (ScriptExecutionControl.StopRequestedException stopped) {
+            throw stopped;
+        } catch (RuntimeException unavailable) {
+            return false;
+        }
     }
 
     private LuaValue installTuringCompat() {
@@ -656,6 +832,17 @@ final class LegacyLuaRuntime {
                     String key = keys.next();
                     Object value = config.opt(key);
                     values.set(key, LuaValue.valueOf(value == null || value == JSONObject.NULL ? "" : String.valueOf(value)));
+                }
+                boolean hasGearQualitySelection = config.has("出售装备品质_白色")
+                        || config.has("出售装备品质_蓝色") || config.has("出售装备品质_绿色")
+                        || config.has("出售装备品质_黄色") || config.has("出售装备品质_橙色");
+                if (!hasGearQualitySelection && config.has("出售装备品质上限")) {
+                    int legacyLevel = Math.max(0, Math.min(2, config.optInt("出售装备品质上限", 0)));
+                    values.set("出售装备品质_白色", LuaValue.valueOf(legacyLevel >= 1));
+                    values.set("出售装备品质_蓝色", LuaValue.FALSE);
+                    values.set("出售装备品质_绿色", LuaValue.valueOf(legacyLevel >= 2));
+                    values.set("出售装备品质_黄色", LuaValue.FALSE);
+                    values.set("出售装备品质_橙色", LuaValue.FALSE);
                 }
                 String[] blueFilterFlags = LegacyLuaConfig.blueFilterFlags(
                         values.get("蓝条筛选模式").isnil() ? null : values.get("蓝条筛选模式").tojstring());
@@ -831,9 +1018,12 @@ final class LegacyLuaRuntime {
             Bitmap bitmap = BitmapFactory.decodeFile(local.getAbsolutePath());
             if (bitmap != null) return bitmap;
         }
-        String name = new File(path.replace('\\', '/')).getName();
-        if (name.isEmpty() || name.contains("..")) return null;
-        try (InputStream input = context.getAssets().open(ASSET_ROOT + "脚本/" + name)) {
+        String relative = path.replace('\\', '/').trim();
+        if (relative.isEmpty() || relative.startsWith("/") || relative.matches("^[A-Za-z]:.*")) return null;
+        for (String segment : relative.split("/", -1)) {
+            if (segment.isEmpty() || segment.equals(".") || segment.equals("..")) return null;
+        }
+        try (InputStream input = context.getAssets().open(ASSET_ROOT + "脚本/" + relative)) {
             return BitmapFactory.decodeStream(input);
         } catch (Exception ignored) { return null; }
     }
@@ -898,7 +1088,7 @@ final class LegacyLuaRuntime {
                             .captureDisplay(Math.min(SCREENSHOT_TIMEOUT_MS, remainingMs)),
                     ScriptGameAdapter::isTargetGameForeground, control::checkpoint,
                     this::releaseFrame, this::onGameForegroundLost, this::onGameForegroundResumed,
-                    FOREGROUND_RETURN_TIMEOUT_MS, "沙箱游戏连续 30 秒不在前台，截图已停止等待");
+                    FOREGROUND_RETURN_TIMEOUT_MS, "所选游戏连续 30 秒不在前台，截图已停止等待");
             Bitmap old = latestFrame;
             latestFrame = capture;
             coordinateMapper = mapperFor(capture.getWidth(), capture.getHeight());
@@ -906,7 +1096,7 @@ final class LegacyLuaRuntime {
         } catch (InterruptedException interrupted) {
             control.checkpoint();
             Thread.currentThread().interrupt();
-            throw new LuaError("等待沙箱游戏返回前台时被中断");
+            throw new LuaError("等待所选游戏返回前台时被中断");
         } catch (TimeoutException timeout) {
             rethrowIfStopped();
             throw new LuaError("截图失败：" + timeout.getMessage() + "（"
@@ -938,11 +1128,11 @@ final class LegacyLuaRuntime {
                     control::checkpoint, this::onGameForegroundLost,
                     this::onGameForegroundResumed,
                     FOREGROUND_RETURN_TIMEOUT_MS,
-                    "沙箱游戏连续 30 秒不在前台");
+                    "所选游戏连续 30 秒不在前台");
         } catch (InterruptedException interrupted) {
             control.checkpoint();
             Thread.currentThread().interrupt();
-            throw new LuaError("等待沙箱游戏返回前台时被中断");
+            throw new LuaError("等待所选游戏返回前台时被中断");
         } catch (TimeoutException timeout) {
             throw new LuaError(timeout.getMessage() + "，脚本已停止等待（"
                     + ScriptGameAdapter.foregroundDiagnostic() + "）");

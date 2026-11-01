@@ -36,6 +36,7 @@ final class LegacyLuaConfig {
         values.put("自动使用蓝药", "false");
         values.put("法力药触发阈值", "20");
         values.put("手机编号", "");
+        values.put("虚拟屏幕DPI", "320");
         values.put("队长名", "");
         values.put("队员名", "");
         values.put("是否队长", "0");
@@ -75,7 +76,11 @@ final class LegacyLuaConfig {
         values.put("队员找不到队长组队就回家次数", "2");
         values.put("保护装备不出售", "true");
         values.put("出售装备", "false");
-        values.put("出售装备品质上限", "0");
+        values.put("出售装备品质_白色", "true");
+        values.put("出售装备品质_蓝色", "true");
+        values.put("出售装备品质_绿色", "false");
+        values.put("出售装备品质_黄色", "false");
+        values.put("出售装备品质_橙色", "false");
         values.put("出售装备二次确认", "true");
         values.put("允许出售物品", "false");
         values.put("出售物品清单", "");

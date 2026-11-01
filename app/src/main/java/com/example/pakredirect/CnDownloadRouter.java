@@ -92,14 +92,35 @@ public final class CnDownloadRouter {
         if (safeName.contains("/")) throw new IllegalArgumentException("Invalid protected file name");
         if (safeName.toLowerCase().endsWith(".rpe")) {
             String tag = githubUrl != null && githubUrl.contains("/pak-test/") ? "pak-test" : "pak-latest";
-            return new String[]{"https://gitee.com/" + GITEE_REPO + "/releases/download/" + tag + "/" + safeName};
+            String original = githubUrl == null ? "" : githubUrl.trim();
+            String giteeRelease = "https://gitee.com/" + GITEE_REPO
+                    + "/releases/download/" + tag + "/" + safeName + sha256Query(original);
+            // Gitee's stable release URL can be served from a stale CDN object
+            // immediately after an attachment is replaced. Include the
+            // manifest-authorized hash in its cache key, then retain exact-byte
+            // checked GitHub routes as fallbacks if the mirror is incomplete.
+            return unique(giteeRelease, original, CF_WORKER + original, GH_PROXY + original);
         }
         // linkspak.txt is part of the same authorized content bundle as the
         // encrypted PAKs. Preserve the manifest-selected channel (pak or
         // pak-test); always routing it to production makes beta manifests fail
         // their SHA-256 check before the sandbox can launch.
         String mapped = mapOwnedGithubUrl(githubUrl == null ? "" : githubUrl.trim());
-        return new String[]{mapped == null ? githubUrl : mapped};
+        String original = githubUrl == null ? "" : githubUrl.trim();
+        if (mapped == null) return new String[]{githubUrl};
+        // Gitee Raw can return an HTML/login response on some Android network
+        // paths. The caller verifies exact size and SHA-256, so retain it as the
+        // preferred mirror but fall back to the signed GitHub URL and proxies
+        // instead of treating one bad mirror response as a fatal download.
+        return unique(mapped, original, CF_WORKER + original, GH_PROXY + original);
+    }
+
+    private static String sha256Query(String url) {
+        if (url == null) return "";
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("[?&]sha256=([0-9a-fA-F]{64})(?:&|$)")
+                .matcher(url);
+        return matcher.find() ? "?sha256=" + matcher.group(1) : "";
     }
 
     private static String mapOwnedGithubUrl(String value) {

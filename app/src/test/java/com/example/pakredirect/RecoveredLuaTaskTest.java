@@ -58,6 +58,7 @@ public final class RecoveredLuaTaskTest {
                         && windows.contains("com.tepaylink.tamgioiphantranhmobile"));
 
         BufferedImage before = readDeviceScreenshot(adb, serial);
+        saveLiveEvidenceScreenshot("backpack-before.png", before);
         LegacyCoordinateMapper mapper = new LegacyCoordinateMapper(720, 1280,
                 before.getWidth(), before.getHeight());
         Globals globals = JsePlatform.standardGlobals();
@@ -94,6 +95,7 @@ public final class RecoveredLuaTaskTest {
             Thread.sleep(900);
             opened = true;
             BufferedImage backpack = readDeviceScreenshot(adb, serial);
+            saveLiveEvidenceScreenshot("backpack-open.png", backpack);
             long openedDifference = sampledDifference(before, backpack);
             assertTrue("The recovered Lua click must open the inventory panel on the live game",
                     openedDifference > 500);
@@ -103,6 +105,7 @@ public final class RecoveredLuaTaskTest {
             Thread.sleep(900);
             opened = false;
             BufferedImage after = readDeviceScreenshot(adb, serial);
+            saveLiveEvidenceScreenshot("backpack-after-close.png", after);
             long closedDifference = sampledDifference(before, after);
             assertTrue("The recovered Lua click must close the inventory and restore gameplay",
                     closedDifference < openedDifference / 4);
@@ -114,22 +117,25 @@ public final class RecoveredLuaTaskTest {
         }
     }
 
-    @Test public void recoveredLuaParsesQuantityFromLiveSandboxBackpackOcr() throws Exception {
-        String screenshotPath = System.getenv("RYLUX_LIVE_DEVICE_SCREENSHOT");
-        String ocrPath = System.getenv("RYLUX_LIVE_DEVICE_OCR_CSV");
-        assumeTrue("Set RYLUX_LIVE_DEVICE_SCREENSHOT and RYLUX_LIVE_DEVICE_OCR_CSV for an opt-in emulator check",
-                screenshotPath != null && ocrPath != null);
-
-        BufferedImage screenshot = ImageIO.read(Paths.get(screenshotPath).toFile());
-        assertTrue("The screenshot must come from the live 1600x900 sandbox display",
-                screenshot != null && screenshot.getWidth() == 1600 && screenshot.getHeight() == 900);
-        List<String[]> ocrRows = new ArrayList<>();
-        List<String> csv = Files.readAllLines(Paths.get(ocrPath), StandardCharsets.UTF_8);
-        assertEquals("text,raw_center_x,raw_center_y,confidence", csv.get(0));
-        for (int i = 1; i < csv.size(); i++) ocrRows.add(csv.get(i).split(",", 4));
+    @Test public void recoveredLuaParsesQuantityFromSavedBackpackOcr() throws Exception {
+        BufferedImage screenshot = readFixture("/game/localized-backpack-live-20261019.png");
+        List<OcrLine> ocrRows = readRapidOcrFixture(
+                "/game/localized-backpack-live-20261019-counts-rapidocr.csv");
+        assertEquals(1600, screenshot.getWidth());
+        assertEquals(900, screenshot.getHeight());
+        assertEquals("The saved backpack OCR has one observed count", 1, ocrRows.size());
+        OcrLine observedCount = ocrRows.get(0);
+        assertEquals("1", observedCount.text);
+        assertEquals(1026d, observedCount.centerX, 0.01d);
+        assertEquals(249.5d, observedCount.centerY, 0.01d);
+        assertTrue("The saved count must have high OCR confidence", observedCount.confidence >= 0.99d);
 
         LegacyCoordinateMapper mapper = new LegacyCoordinateMapper(720, 1280,
                 screenshot.getWidth(), screenshot.getHeight());
+        int centerX = mapper.toReferenceX(observedCount.centerX);
+        int centerY = mapper.toReferenceY(observedCount.centerY);
+        assertEquals(821, centerX);
+        assertEquals(200, centerY);
         Globals globals = JsePlatform.standardGlobals();
         globals.set("_ENV", globals);
         globals.set("tickCount", new ZeroArgFunction() {
@@ -141,15 +147,15 @@ public final class RecoveredLuaTaskTest {
                 double right = args.arg(3).todouble(), bottom = args.arg(4).todouble();
                 LuaTable rows = new LuaTable();
                 int index = 1;
-                for (String[] values : ocrRows) {
-                    double x = mapper.toReferenceX(Double.parseDouble(values[1]));
-                    double y = mapper.toReferenceY(Double.parseDouble(values[2]));
+                for (OcrLine line : ocrRows) {
+                    double x = mapper.toReferenceX(line.centerX);
+                    double y = mapper.toReferenceY(line.centerY);
                     if (x < left || x > right || y < top || y > bottom) continue;
                     LuaTable row = new LuaTable();
-                    row.set("words", LuaValue.valueOf(values[0]));
+                    row.set("words", LuaValue.valueOf(line.text));
                     row.set("x", LuaValue.valueOf(x));
                     row.set("y", LuaValue.valueOf(y));
-                    row.set("score", LuaValue.valueOf(Double.parseDouble(values[3])));
+                    row.set("score", LuaValue.valueOf(line.confidence));
                     rows.set(index++, row);
                 }
                 return rows;
@@ -161,13 +167,12 @@ public final class RecoveredLuaTaskTest {
             loadModule(globals, scriptRoot().resolve(module), module);
         }
 
-        // RapidOCR observed the blue-potion stack's literal count at screen pixel (1214, 250).
-        // The legacy 1280x720 Lua reference maps that OCR box to approximately (971, 200).
         LuaValue quantity = globals.get("去卖货_识别物品数量").checkfunction().invoke(
-                LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(950), LuaValue.valueOf(180),
-                        LuaValue.valueOf(995), LuaValue.valueOf(220)})).arg1();
-        assertEquals("Recovered Lua should accept the high-confidence count from the live sandbox screen",
-                100, quantity.toint());
+                LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(centerX - 20),
+                        LuaValue.valueOf(centerY - 20), LuaValue.valueOf(centerX + 20),
+                        LuaValue.valueOf(centerY + 20)})).arg1();
+        assertEquals("Recovered Lua should accept the observed high-confidence backpack count",
+                1, quantity.toint());
     }
 
     @Test public void recoveredInventoryImageTemplateIsPresentForTheLuaFindPicCalls() throws Exception {
@@ -460,8 +465,11 @@ public final class RecoveredLuaTaskTest {
 
     @Test public void localizedActivityPanelClosesOnlyWhenItsTitleAndMenuAreVisible() throws Exception {
         Globals globals = JsePlatform.standardGlobals();
-        AtomicReference<String> title = new AtomicReference<>("活动");
-        AtomicReference<String> menu = new AtomicReference<>("签到|幸运转轮|每日");
+        // The device crop can merge its unrelated 18+ HUD label with the
+        // activity title, and the OCR bridge may report a zero score.
+        AtomicReference<String> title = new AtomicReference<>("18+活动");
+        AtomicReference<Double> titleScore = new AtomicReference<>(0d);
+        AtomicReference<String> menu = new AtomicReference<>("报到|04|幸运转轮|每日|GiftCode|活力");
         List<String> clicks = new ArrayList<>();
         globals.set("tickCount", new ZeroArgFunction() {
             @Override public LuaValue call() { return LuaValue.ZERO; }
@@ -472,20 +480,21 @@ public final class RecoveredLuaTaskTest {
         globals.set("找到", new OneArgFunction() {
             @Override public LuaValue call(LuaValue ignored) { return LuaValue.FALSE; }
         });
-        globals.set("tomocrtext", new VarArgFunction() {
-            @Override public Varargs invoke(Varargs args) {
-                String region = args.arg(1).toint() + "|" + args.arg(2).toint() + "|"
-                        + args.arg(3).toint() + "|" + args.arg(4).toint();
-                if ("270|35|445|105".equals(region)) return LuaValue.valueOf(title.get());
-                return LuaValue.valueOf("");
-            }
-        });
         globals.set("tomocrtexttable", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) {
                 String region = args.arg(1).toint() + "|" + args.arg(2).toint() + "|"
                         + args.arg(3).toint() + "|" + args.arg(4).toint();
                 LuaTable rows = new LuaTable();
-                if ("1050|170|1190|540".equals(region)) {
+                if ("270|35|445|105".equals(region)) {
+                    int index = 1;
+                    for (String text : title.get().split("\\|")) {
+                        LuaTable row = new LuaTable();
+                        row.set("words", LuaValue.valueOf(text));
+                        row.set("score", LuaValue.valueOf(text.contains("活动")
+                                ? titleScore.get() : 0.99d));
+                        rows.set(index++, row);
+                    }
+                } else if ("1050|170|1190|540".equals(region)) {
                     int index = 1;
                     for (String label : menu.get().split("\\|")) {
                         LuaTable row = new LuaTable();
@@ -529,11 +538,15 @@ public final class RecoveredLuaTaskTest {
         assertEquals("@@关闭活动页面|1203|130", clicks.get(0));
 
         clicks.clear();
-        title.set("主页面");
+        title.set("主页面|设置");
         globals.get("通用处理").checkfunction().call();
         assertTrue("A main screen must never receive the activity-modal close tap", clicks.isEmpty());
         title.set("活动");
-        menu.set("签到");
+        titleScore.set(0.4d);
+        assertFalse("A low-confidence title must not trigger a blind close",
+                globals.get("活动_页面已打开").checkfunction().call().toboolean());
+        titleScore.set(0.95d);
+        menu.set("报到");
         assertFalse("A lone matching menu label must not trigger a blind close",
                 globals.get("活动_页面已打开").checkfunction().call().toboolean());
     }
@@ -559,23 +572,131 @@ public final class RecoveredLuaTaskTest {
             @Override public Varargs invoke(Varargs args) {
                 LuaTable rows = new LuaTable();
                 LuaTable row = new LuaTable();
-                row.set("words", LuaValue.valueOf("创建队伍"));
-                row.set("x", LuaValue.valueOf(917.5));
-                row.set("y", LuaValue.valueOf(640.5));
-                row.set("score", LuaValue.valueOf(0.93));
+                boolean verifyRegion = args.arg1().toint() == 350;
+                if (verifyRegion && !teamMarkerVisible.get()) return rows;
+                row.set("words", LuaValue.valueOf(verifyRegion ? "解散" : "组队"));
+                row.set("x", LuaValue.valueOf(verifyRegion ? 405.0 : 965.2));
+                row.set("y", LuaValue.valueOf(verifyRegion ? 643.0 : 645.2));
+                row.set("score", LuaValue.valueOf(verifyRegion ? 0.99 : 0.93));
                 rows.set(1, row);
                 return rows;
             }
         });
         Varargs button = globals.get("组队_识别创建队伍按钮").checkfunction().invoke(LuaValue.NONE);
         assertEquals("The team create tap must follow the actual localized OCR row center",
-                917, button.arg1().toint());
-        assertEquals(640, button.arg(2).toint());
-        assertFalse("The team page must remain unconfirmed when its left team marker is absent",
+                965, button.arg1().toint());
+        assertEquals(645, button.arg(2).toint());
+        assertFalse("A create button alone must not confirm a team without its result marker",
                 globals.get("组队_已确认创建成功").checkfunction().call().toboolean());
         teamMarkerVisible.set(true);
-        assertTrue("Only the visible team marker confirms successful creation",
+        assertTrue("The localized 解散 action confirms that team creation succeeded",
                 globals.get("组队_已确认创建成功").checkfunction().call().toboolean());
+    }
+
+    @Test public void partyInviteAcceptsOnlyAConfidentConfiguredNameMatch() throws Exception {
+        LuaTable rows = new LuaTable();
+        rows.set(1, ocrRow("unrelated", 500, 280));
+        LuaTable match = ocrRow("abcdf", 500, 280);
+        match.set("score", LuaValue.valueOf(0.8));
+        rows.set(2, match);
+        assertEquals("A later confident row at similarity 0.8 should accept exactly once",
+                Arrays.asList("@@允许进入队伍|542|407"), partyInviteDecision(rows, "abcde"));
+    }
+
+    @Test public void partyInviteRejectsUnmatchedNamesDespiteStaleGlobalPermission() throws Exception {
+        LuaTable rows = new LuaTable();
+        rows.set(1, ocrRow("stranger", 500, 280));
+        assertEquals(Arrays.asList("@@不允许进入队伍|764|412"), partyInviteDecision(rows, "abcde"));
+        rows.set(1, ocrRow("abcde", 500, 280));
+        assertEquals("No configured teammate must fail closed",
+                Arrays.asList("@@不允许进入队伍|764|412"), partyInviteDecision(rows));
+    }
+
+    @Test public void partyInviteRejectsEmptyNamelessAndUncertainOcr() throws Exception {
+        List<LuaValue> unreadable = new ArrayList<>();
+        unreadable.add(LuaValue.NIL);
+        unreadable.add(new LuaTable());
+        for (String name : Arrays.asList("", "   ", "abcde")) {
+            LuaTable row = ocrRow(name, 500, 280);
+            if ("abcde".equals(name)) row.set("score", LuaValue.valueOf(0.79));
+            LuaTable rows = new LuaTable();
+            rows.set(1, row);
+            unreadable.add(rows);
+        }
+        LuaTable nameless = ocrRow("abcde", 500, 280);
+        nameless.set("words", LuaValue.NIL);
+        LuaTable namelessRows = new LuaTable();
+        namelessRows.set(1, nameless);
+        unreadable.add(namelessRows);
+        LuaTable unscored = ocrRow("abcde", 500, 280);
+        unscored.set("score", LuaValue.NIL);
+        LuaTable unscoredRows = new LuaTable();
+        unscoredRows.set(1, unscored);
+        unreadable.add(unscoredRows);
+        for (LuaValue rows : unreadable) {
+            assertEquals("Unreadable or uncertain OCR must click rejection without accepting",
+                    Arrays.asList("@@不允许进入队伍|764|412"), partyInviteDecision(rows, "abcde", ""));
+        }
+    }
+
+    private static List<String> partyInviteDecision(LuaValue rows, String... teammates) throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.ZERO; }
+        });
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot().resolve(module), module);
+        }
+        globals.set("_ENV", globals);
+        for (String name : Arrays.asList("print", "通用处理", "执行自动战斗", "执行自动补给")) {
+            globals.set(name, noOpFunction());
+        }
+        ZeroArgFunction falseResult = new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.FALSE; }
+        };
+        for (String name : Arrays.asList("登录_判断一轮", "处理网页方案队列", "处理网页路线队列",
+                "检测挂机长时间不移动")) globals.set(name, falseResult);
+        globals.set("在主页面", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.TRUE; }
+        });
+        LuaTable config = new LuaTable();
+        config.set("是否队长", LuaValue.valueOf("0"));
+        globals.set("界面数据", config);
+        LuaTable names = new LuaTable();
+        for (int i = 0; i < teammates.length; i++) names.set(i + 1, LuaValue.valueOf(teammates[i]));
+        globals.set("队友名称数组", names);
+        globals.set("是否允许进入队伍", LuaValue.TRUE);
+        LuaTable invitation = new LuaTable();
+        LuaTable templates = new LuaTable();
+        templates.set("是否允许队伍申请弹出", invitation);
+        globals.set("tz", templates);
+        globals.set("找到", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                assertTrue("Only the invitation template should be needed", args.arg1().raweq(invitation));
+                // Keep the popup visible after accepting so the local decision must suppress rejection.
+                return LuaValue.varargsOf(new LuaValue[]{LuaValue.TRUE, LuaValue.valueOf(800), LuaValue.valueOf(300)});
+            }
+        });
+        globals.set("tomocrtexttable", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return rows; }
+        });
+        List<String> clicks = new ArrayList<>();
+        globals.set("点击", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                clicks.add(args.arg1().tojstring() + "|" + args.arg(2).toint() + "|" + args.arg(3).toint());
+                return LuaValue.NONE;
+            }
+        });
+        globals.set("通用关闭", new ZeroArgFunction() {
+            @Override public LuaValue call() { throw new org.luaj.vm2.LuaError("stop-after-party-decision"); }
+        });
+        try {
+            globals.get("挂机模式").checkfunction().call();
+            throw new AssertionError("The fixture must stop after one party decision");
+        } catch (org.luaj.vm2.LuaError expected) {
+            assertTrue("Unexpected Lua error: " + expected.getMessage(), expected.getMessage().contains("stop-after-party-decision"));
+        }
+        return clicks;
     }
 
     @Test public void localizedServerClusterRequiresChineseTitleAndConfirmBeforeTap() throws Exception {
@@ -622,71 +743,44 @@ public final class RecoveredLuaTaskTest {
         assertTrue("The helper requires both OCR signatures", clicks.isEmpty());
     }
 
-    @Test public void localizedLoginRequiresKnownChinesePageAndSavedAccount() throws Exception {
+    @Test public void localizedLoginUsesTheCapturedLoginButtonTemplateAndFastHumanDelay() throws Exception {
         Globals globals = JsePlatform.standardGlobals();
-        AtomicReference<LuaTable> rows = new AtomicReference<>(new LuaTable());
         List<String> clicks = new ArrayList<>();
-        List<String> regions = new ArrayList<>();
         globals.set("tickCount", new ZeroArgFunction() {
             @Override public LuaValue call() { return LuaValue.ZERO; }
         });
         for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
             loadModule(globals, scriptRoot().resolve(module), module);
         }
-        globals.set("tomocrtexttable", new VarArgFunction() {
-            @Override public Varargs invoke(Varargs args) {
-                regions.add(args.arg(1).toint() + "|" + args.arg(2).toint() + "|"
-                        + args.arg(3).toint() + "|" + args.arg(4).toint());
-                return rows.get();
-            }
-        });
+        installLoginTemplateMatch(globals, "汉化登录按钮.png", 497, 493);
+        assertEquals("The matcher callback itself should return the configured hit", 1,
+                globals.get("findPic").invoke(LuaValue.varargsOf(new LuaValue[]{LuaValue.ZERO,
+                        LuaValue.ZERO, LuaValue.ZERO, LuaValue.ZERO,
+                        LuaValue.valueOf("素材库/汉化登录按钮.png"), LuaValue.valueOf("101010"),
+                        LuaValue.ZERO, LuaValue.valueOf(0.84)})).arg1().toint());
+        assertEquals("Lua's template helper should expose the matched button center", 650,
+                globals.get("登录_找素材按钮").checkfunction().call(LuaValue.valueOf("登录")).toint());
         globals.set("点击", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) {
                 clicks.add(args.arg(1).tojstring() + "|" + args.arg(2).tojstring()
-                        + "|" + args.arg(3).tojstring());
+                        + "|" + args.arg(3).tojstring() + "|" + args.arg(4).toint());
                 return LuaValue.TRUE;
             }
         });
-
-        LuaTable shuffledRows = new LuaTable();
-        shuffledRows.set(1, ocrRow("登录", 663, 525));
-        shuffledRows.set(2, ocrRow(" sbs139502 ", 660, 300));
-        rows.set(shuffledRows);
-        assertTrue("A saved account and login button should submit even if side-link OCR is missed",
+        assertTrue("A visible localized login template should submit without a slow OCR pass",
                 globals.get("登录_汉化账号确认").checkfunction().call().toboolean());
-        assertEquals("The OCR-recognized button center should be tapped",
-                "@@汉化账号密码登录|663|525", clicks.get(0));
-        assertEquals("The helper should read one broad localized-login region",
-                Arrays.asList("400|70|1270|590"), regions);
-
-        clicks.clear();
-        LuaTable noAccountRows = new LuaTable();
-        noAccountRows.set(1, ocrRow("忘记密码?", 1160, 125));
-        noAccountRows.set(2, ocrRow("注册账号", 1160, 250));
-        noAccountRows.set(3, ocrRow("登录", 663, 525));
-        rows.set(noAccountRows);
-        assertTrue("An empty account field must never trigger login",
-                !globals.get("登录_汉化账号确认").checkfunction().call().toboolean());
-        assertTrue("No tap is allowed when the saved account is empty", clicks.isEmpty());
-
-        LuaTable misplacedLoginRows = new LuaTable();
-        misplacedLoginRows.set(1, ocrRow("忘记密码", 1160, 125));
-        misplacedLoginRows.set(2, ocrRow("注册账号", 1160, 250));
-        misplacedLoginRows.set(3, ocrRow("sbs139502", 660, 300));
-        misplacedLoginRows.set(4, ocrRow("登录", 200, 525));
-        rows.set(misplacedLoginRows);
-        assertTrue("A login-like label outside the login button zone must not submit",
-                !globals.get("登录_汉化账号确认").checkfunction().call().toboolean());
-        assertTrue("The localized login helper must require all positioned anchors", clicks.isEmpty());
+        String[] fields = clicks.get(0).split("\\|");
+        assertEquals(Arrays.asList("@@汉化账号密码登录", "650", "530"),
+                Arrays.asList(fields[0], fields[1], fields[2]));
+        assertTrue("w.tap jitter plus Lua random delay must stay within 500..1500 ms",
+                Integer.parseInt(fields[3]) >= 550 && Integer.parseInt(fields[3]) <= 1450);
+        assertTrue("The matcher must read the saved material from a bounded account-button ROI",
+                globals.get("登录_找素材按钮").checkfunction().call(LuaValue.valueOf("登录")).arg1().toint() == 650);
     }
 
-    @Test public void localizedCharacterSelectConfirmsOcrPositionWhenLegacyTemplateMisses() throws Exception {
+    @Test public void localizedCharacterSelectUsesTheCapturedConfirmButtonTemplate() throws Exception {
         Globals globals = JsePlatform.standardGlobals();
         List<String> clicks = new ArrayList<>();
-        LuaTable rows = new LuaTable();
-        rows.set(1, ocrRow("返回", 1084, 646));
-        rows.set(2, ocrRow(" 确认 ", 1086, 568));
-        rows.set(3, ocrRow("创建角色", 189, 569));
         globals.set("tickCount", new ZeroArgFunction() {
             @Override public LuaValue call() { return LuaValue.ZERO; }
         });
@@ -702,31 +796,23 @@ public final class RecoveredLuaTaskTest {
         globals.set("找到", new OneArgFunction() {
             @Override public LuaValue call(LuaValue ignored) { return LuaValue.FALSE; }
         });
-        globals.set("登录_汉化选区确认", new ZeroArgFunction() {
-            @Override public LuaValue call() { return LuaValue.FALSE; }
-        });
-        globals.set("登录_汉化账号确认", new ZeroArgFunction() {
-            @Override public LuaValue call() { return LuaValue.FALSE; }
-        });
-        globals.set("tomocrtexttable", new VarArgFunction() {
-            @Override public Varargs invoke(Varargs args) { return rows; }
-        });
+        installLoginTemplateMatch(globals, "汉化角色确认按钮.png", 984, 538);
         globals.set("点击", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) {
                 clicks.add(args.arg(1).tojstring() + "|" + args.arg(2).toint()
-                        + "|" + args.arg(3).toint());
+                        + "|" + args.arg(3).toint() + "|" + args.arg(4).toint());
                 return LuaValue.TRUE;
             }
         });
-
-        globals.get("登录_判断一轮").checkfunction().call();
-        assertEquals("The translated role screen should tap the observed confirmation button",
-                Arrays.asList("@@汉化角色确认|1086|568"), clicks);
+        assertTrue(globals.get("登录_汉化角色确认").checkfunction().call().toboolean());
+        String[] fields = clicks.get(0).split("\\|");
+        assertEquals(Arrays.asList("@@汉化角色确认", "1085", "566"),
+                Arrays.asList(fields[0], fields[1], fields[2]));
+        assertTrue(Integer.parseInt(fields[3]) >= 550 && Integer.parseInt(fields[3]) <= 1450);
     }
 
-    @Test public void localizedCharacterSelectRejectsUnrelatedConfirmAndIncompleteAnchors() throws Exception {
+    @Test public void localizedCharacterSelectRejectsMissingConfirmTemplate() throws Exception {
         Globals globals = JsePlatform.standardGlobals();
-        AtomicReference<LuaTable> rows = new AtomicReference<>(new LuaTable());
         List<String> clicks = new ArrayList<>();
         globals.set("tickCount", new ZeroArgFunction() {
             @Override public LuaValue call() { return LuaValue.ZERO; }
@@ -734,9 +820,7 @@ public final class RecoveredLuaTaskTest {
         for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
             loadModule(globals, scriptRoot().resolve(module), module);
         }
-        globals.set("tomocrtexttable", new VarArgFunction() {
-            @Override public Varargs invoke(Varargs args) { return rows.get(); }
-        });
+        installLoginTemplateMatch(globals, "absent.png", -1, -1);
         globals.set("点击", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) {
                 clicks.add(args.arg(1).tojstring());
@@ -745,19 +829,9 @@ public final class RecoveredLuaTaskTest {
         });
         LuaFunction confirmRole = globals.get("登录_汉化角色确认").checkfunction();
 
-        LuaTable unrelated = new LuaTable();
-        unrelated.set(1, ocrRow("确认", 1086, 568));
-        rows.set(unrelated);
-        assertFalse("A confirmation button alone must never select a character",
+        assertFalse("A text label without the saved localized confirm image cannot trigger a tap",
                 confirmRole.call().toboolean());
-
-        LuaTable missingReturn = new LuaTable();
-        missingReturn.set(1, ocrRow("创建角色", 189, 569));
-        missingReturn.set(2, ocrRow("确认", 1086, 568));
-        rows.set(missingReturn);
-        assertFalse("The role page requires its lower-right return control as well",
-                confirmRole.call().toboolean());
-        assertTrue("Unrelated and incomplete pages must not receive a tap", clicks.isEmpty());
+        assertTrue("An unmatched template must never fall back to a guessed coordinate", clicks.isEmpty());
     }
 
     @Test public void localizedLoginTimeoutClosesBusyDialogAndWaitsBeforeRetry() throws Exception {
@@ -774,6 +848,7 @@ public final class RecoveredLuaTaskTest {
         globals.set("tomocrtexttable", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) { return rows.get(); }
         });
+        installLoginTemplateMatch(globals, "汉化登录返回按钮.png", 576, 463);
         globals.set("点击", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) {
                 clicks.add(args.arg(1).tojstring() + "|" + args.arg(2).toint()
@@ -792,22 +867,24 @@ public final class RecoveredLuaTaskTest {
                 handleTimeout.call().toboolean());
         assertTrue("The dialog must get a real timeout before the script backs out", clicks.isEmpty());
 
-        clock.set(10_999);
-        assertTrue("The busy dialog must stay open until the 10-second timeout",
+        clock.set(10_000);
+        assertTrue("The busy dialog must stay open before the ten-second watchdog expires",
                 handleTimeout.call().toboolean());
         assertTrue("The script must not back out before ten seconds of no progress", clicks.isEmpty());
 
-        clock.set(13_000); // The watchdog checks its OCR region at two-second intervals.
-        assertTrue("After ten seconds without progress the script must close the stuck login dialog",
+        clock.set(10_500);
+        assertTrue("At the next 500-ms scan the script must close the stuck login dialog",
                 handleTimeout.call().toboolean());
-        assertEquals(Arrays.asList("@@登录超时关闭提示|640|450"), clicks);
+        assertEquals(Arrays.asList("@@登录超时关闭提示|640|486"), clicks);
 
-        clock.set(14_000);
+        long retryAt = globals.get("登录_重试允许时间").tolong();
+        clock.set(retryAt - 1);
         assertTrue("The script must wait through the retry backoff", handleTimeout.call().toboolean());
         assertEquals("No duplicate login tap is allowed during backoff", 1, clicks.size());
 
         rows.set(new LuaTable());
-        clock.set(24_000);
+        installLoginTemplateMatch(globals, "absent.png", -1, -1);
+        clock.set(retryAt);
         assertTrue("When the busy dialog is gone, normal login detection may resume",
                 !handleTimeout.call().toboolean());
     }
@@ -832,6 +909,7 @@ public final class RecoveredLuaTaskTest {
                 return busyDialog;
             }
         });
+        installLoginTemplateMatch(globals, "汉化登录返回按钮.png", 576, 463);
         globals.set("点击", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) {
                 clicks.add(args.arg(1).tojstring() + "|" + args.arg(2).toint()
@@ -843,37 +921,34 @@ public final class RecoveredLuaTaskTest {
         LuaFunction handleTimeout = globals.get("登录_处理超时").checkfunction();
         assertTrue(handleTimeout.call().toboolean());
 
-        long[] timeoutAt = {13_000, 25_000, 39_000, 57_000, 75_000};
-        long[] retryAt = {15_000, 29_000, 47_000, 65_000, 83_000};
-        for (int i = 0; i < timeoutAt.length; i++) {
-            clock.set(timeoutAt[i]);
+        long nextTimeout = 10_500;
+        for (int i = 0; i < 3; i++) {
+            clock.set(nextTimeout);
             assertTrue(handleTimeout.call().toboolean());
             assertEquals("Each stalled dialog gets one close action", i + 1, clicks.size());
             assertEquals("Close must use the recognized return button",
-                    "@@登录超时关闭提示|640|450", clicks.get(i));
-            assertEquals("Retry delay must be 2, 4, then capped at 8 seconds",
-                    retryAt[i], globals.get("登录_重试允许时间").tolong());
-            int readsBeforeBackoff = ocrReads.get();
-            clock.set(retryAt[i] - 1);
-            assertTrue(handleTimeout.call().toboolean());
-            assertEquals("Backoff must suppress duplicate closes", i + 1, clicks.size());
-            assertEquals("Backoff must skip OCR and other login actions",
-                    readsBeforeBackoff, ocrReads.get());
-            clock.set(retryAt[i]);
-            assertTrue("OCR may retry when the bounded backoff expires",
-                    handleTimeout.call().toboolean());
-            assertTrue("A new dialog observation must occur after backoff",
-                    ocrReads.get() > readsBeforeBackoff);
-            assertEquals("Retry starts a fresh timeout instead of closing immediately",
-                    i + 1, clicks.size());
+                    "@@登录超时关闭提示|640|486", clicks.get(i));
+            if (i < 2) {
+                long allowedRetryAt = globals.get("登录_重试允许时间").tolong();
+                assertTrue("Retry should be quick and randomized between 0.5 and 1 second",
+                        allowedRetryAt >= nextTimeout + 500 && allowedRetryAt <= nextTimeout + 1000);
+                clock.set(allowedRetryAt);
+                assertTrue("The next visible dialog begins a fresh timeout window",
+                        handleTimeout.call().toboolean());
+                nextTimeout = allowedRetryAt + 9_500;
+            }
         }
+        assertTrue("After three failed login rounds the script must stop auto-retrying",
+                globals.get("登录_自动重试终止").toboolean());
+        clock.addAndGet(20_000);
+        assertTrue(handleTimeout.call().toboolean());
+        assertEquals("No fourth return tap is allowed", 3, clicks.size());
     }
 
-    @Test public void stalledLoginWithoutReadableReturnNeverUsesGuessedCoordinate() throws Exception {
+    @Test public void stalledLoginWithoutReturnTemplateNeverUsesGuessedCoordinate() throws Exception {
         Globals globals = JsePlatform.standardGlobals();
         AtomicLong clock = new AtomicLong(1_000);
         AtomicReference<LuaTable> rows = new AtomicReference<>(new LuaTable());
-        AtomicBoolean unreadable = new AtomicBoolean();
         List<String> clicks = new ArrayList<>();
         globals.set("tickCount", new ZeroArgFunction() {
             @Override public LuaValue call() { return LuaValue.valueOf(clock.get()); }
@@ -882,11 +957,9 @@ public final class RecoveredLuaTaskTest {
             loadModule(globals, scriptRoot().resolve(module), module);
         }
         globals.set("tomocrtexttable", new VarArgFunction() {
-            @Override public Varargs invoke(Varargs args) {
-                if (unreadable.get()) throw new org.luaj.vm2.LuaError("OCR unavailable");
-                return rows.get();
-            }
+            @Override public Varargs invoke(Varargs args) { return rows.get(); }
         });
+        installLoginTemplateMatch(globals, "absent.png", -1, -1);
         globals.set("点击", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) {
                 clicks.add(args.arg(1).tojstring());
@@ -895,61 +968,45 @@ public final class RecoveredLuaTaskTest {
         });
         globals.set("toast", noOpFunction());
         LuaFunction handleTimeout = globals.get("登录_处理超时").checkfunction();
-        assertFalse("Absent modal OCR must not trigger a return tap", handleTimeout.call().toboolean());
-        unreadable.set(true);
+        assertFalse("An absent return template must not start the timeout watchdog",
+                handleTimeout.call().toboolean());
         clock.set(3_000);
-        assertFalse("Unreadable modal OCR must not trigger a return tap", handleTimeout.call().toboolean());
+        assertFalse("Text alone cannot authorize a tap without the saved return-button image",
+                handleTimeout.call().toboolean());
         assertTrue(clicks.isEmpty());
 
-        unreadable.set(false);
         LuaTable busyWithoutReturn = new LuaTable();
         busyWithoutReturn.set(1, ocrRow("正在登录游戏", 640, 300));
         rows.set(busyWithoutReturn);
         clock.set(5_000);
-        assertTrue(handleTimeout.call().toboolean());
+        assertFalse(handleTimeout.call().toboolean());
         clock.set(17_000);
-        assertTrue("A recognized busy modal still blocks other login actions",
+        assertFalse("OCR text without the real button image must not trigger a retry",
                 handleTimeout.call().toboolean());
         assertTrue("No guessed return coordinate may be tapped", clicks.isEmpty());
 
-        busyWithoutReturn.set(2, ocrRow("返回", 640, 450));
+        installLoginTemplateMatch(globals, "汉化登录返回按钮.png", 576, 463);
         clock.set(19_000);
+        assertTrue(handleTimeout.call().toboolean());
+        assertTrue("Seeing the real return template starts its own bounded wait",
+                clicks.isEmpty());
+        clock.set(29_000);
         assertTrue(handleTimeout.call().toboolean());
         assertEquals(Arrays.asList("@@登录超时关闭提示"), clicks);
     }
 
-    @Test public void localizedLoginMatchesObservedRapidOcrRowsFromCurrentLoginScreenshot() throws Exception {
+    @Test public void localizedLoginMaterialLibraryContainsAllThreeRealButtonTemplates() throws Exception {
         Globals globals = JsePlatform.standardGlobals();
-        LuaTable rows = new LuaTable();
-        List<String> clicks = new ArrayList<>();
-        globals.set("tickCount", new ZeroArgFunction() {
-            @Override public LuaValue call() { return LuaValue.ZERO; }
-        });
-        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
-            loadModule(globals, scriptRoot().resolve(module), module);
+        Path materials = scriptRoot().resolve("素材库");
+        for (String name : Arrays.asList("汉化登录按钮.png", "汉化角色确认按钮.png", "汉化登录返回按钮.png")) {
+            BufferedImage image = ImageIO.read(materials.resolve(name).toFile());
+            assertTrue("Each saved UI template must be a real, non-empty image: " + name,
+                    image != null && image.getWidth() > 50 && image.getHeight() > 20);
         }
-        // Transcript and centers from RapidOCR on the 1600x900 emulator login
-        // screenshot, converted into the script's 1280x720 reference coordinates.
-        rows.set(1, ocrRow("退出", 1169, 672));
-        rows.set(2, ocrRow("登录", 648, 533));
-        rows.set(3, ocrRow("sbs139502", 569, 298));
-        rows.set(4, ocrRow("注册账号", 1169, 241));
-        rows.set(5, ocrRow("忘记密码？", 1164, 132));
-        rows.set(6, ocrRow("保存账号", 604, 448));
-        globals.set("tomocrtexttable", new VarArgFunction() {
-            @Override public Varargs invoke(Varargs args) { return rows; }
-        });
-        globals.set("点击", new VarArgFunction() {
-            @Override public Varargs invoke(Varargs args) {
-                clicks.add(args.arg(1).tojstring() + "|" + args.arg(2).tojstring()
-                        + "|" + args.arg(3).tojstring());
-                return LuaValue.TRUE;
-            }
-        });
-
-        assertTrue("Observed localized login OCR should pass the Lua page classifier",
-                globals.get("登录_汉化账号确认").checkfunction().call().toboolean());
-        assertEquals(Arrays.asList("@@汉化账号密码登录|648|533"), clicks);
+        String lua = Files.readString(scriptRoot().resolve("挂机模式.lua"), StandardCharsets.UTF_8);
+        assertTrue(lua.contains("素材库/汉化登录按钮.png"));
+        assertTrue(lua.contains("素材库/汉化角色确认按钮.png"));
+        assertTrue(lua.contains("素材库/汉化登录返回按钮.png"));
     }
 
     @Test public void localizedMapPickerIsRecognizedByObservedChineseOcrAnchors() throws Exception {
@@ -1296,6 +1353,206 @@ public final class RecoveredLuaTaskTest {
                 LuaValue.valueOf("蓝")}));
         assertEquals("Blue potion detection must return its separate hotbar slot center", 1051, blueSlot.arg1().toint());
         assertEquals(310, blueSlot.arg(2).toint());
+    }
+
+    @Test public void medicineQuickslotSearchSelectsOnlyAPositivelyMatchedEmptyCell() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        AtomicInteger searches = new AtomicInteger();
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.ZERO; }
+        });
+        globals.set("findPic", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                searches.incrementAndGet();
+                assertEquals("Quickslot emptiness must use the captured Chinese quickslot circle, not the bag-cell template",
+                        "素材库/汉化空快捷栏槽位.png", args.arg(5).tojstring());
+                int left = args.arg(1).toint();
+                int top = args.arg(2).toint();
+                if (left == 212 && top == 194) {
+                    return LuaValue.varargsOf(new LuaValue[]{LuaValue.TRUE, LuaValue.valueOf(214), LuaValue.valueOf(196)});
+                }
+                return LuaValue.varargsOf(new LuaValue[]{LuaValue.FALSE, LuaValue.NIL, LuaValue.NIL});
+            }
+        });
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot().resolve(module), module);
+        }
+
+        Varargs candidate = globals.get("战斗_查找空快捷栏槽位").invoke();
+        assertEquals("The helper should skip occupied slot 1 and choose the positively matched empty slot 2",
+                234, candidate.arg1().toint());
+        assertEquals(216, candidate.arg(2).toint());
+        assertEquals("Only slots through the candidate should be probed", 2, searches.get());
+
+        globals.set("findPic", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                searches.incrementAndGet();
+                return LuaValue.varargsOf(new LuaValue[]{LuaValue.FALSE, LuaValue.NIL, LuaValue.NIL});
+            }
+        });
+        Varargs noEmptySlot = globals.get("战斗_查找空快捷栏槽位").invoke();
+        assertTrue("Unknown/occupied cells must never be guessed as empty", noEmptySlot.arg1().isnil()
+                && noEmptySlot.arg(2).isnil());
+    }
+
+    @Test public void quickslotEmptyTemplateMatchesCapturedEmptyCellsAndRejectsAssignedBluePotion() throws Exception {
+        BufferedImage template = ImageIO.read(scriptRoot().resolve("素材库/汉化空快捷栏槽位.png").toFile());
+        BufferedImage scaledTemplate = scaleTemplate(template, 50, 50);
+        BufferedImage emptyPage = readFixture("/game/quickbar-empty.png");
+        BufferedImage assignedPage = readFixture("/game/quickbar-blue-assigned.png");
+        int[][] slotCenters = {{175, 270}, {293, 270}, {412, 270}, {530, 270},
+                {173, 383}, {292, 383}, {411, 383}, {530, 383}};
+        for (int i = 0; i < slotCenters.length; i++) {
+            int x = slotCenters[i][0] - 100;
+            int y = slotCenters[i][1] - 210;
+            LegacyImageMatcher.Match emptyMatch = LegacyImageMatcher.find(imagePixels(emptyPage),
+                    imagePixels(scaledTemplate), x - 28, y - 28, x + 28, y + 28,
+                    0x00101010, 0.95, () -> { });
+            assertTrue("Captured empty quickslot " + (i + 1) + " must match the dedicated circle template",
+                    emptyMatch != null);
+
+            LegacyImageMatcher.Match assignedMatch = LegacyImageMatcher.find(imagePixels(assignedPage),
+                    imagePixels(scaledTemplate), x - 28, y - 28, x + 28, y + 28,
+                    0x00101010, 0.95, () -> { });
+            assertEquals("The visible blue potion must make quickslot 1 non-empty, while other circles remain empty",
+                    i != 0, assignedMatch != null);
+        }
+    }
+
+    @Test public void medicineQuickslotAssignmentUsesOnlyEmptyCellAndDoubleTapsSelectedPotion() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        AtomicReference<int[]> assignedSlot = new AtomicReference<>();
+        AtomicReference<int[]> itemTap = new AtomicReference<>();
+        AtomicInteger potionTapCount = new AtomicInteger();
+        AtomicInteger emptySlotProbes = new AtomicInteger();
+        AtomicInteger ocrReads = new AtomicInteger();
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.valueOf(10_000L); }
+        });
+        globals.set("sleep", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue millis) { return LuaValue.NONE; }
+        });
+        globals.set("tomocrtexttable", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                LuaTable rows = new LuaTable();
+                int read = ocrReads.getAndIncrement();
+                if (read == 0) {
+                    rows.set(1, ocrRow("背包", 640, 50));
+                    rows.set(2, ocrRow("整理", 1080, 470));
+                    rows.set(3, ocrRow("商铺", 1080, 570));
+                } else if (read == 1) {
+                    LuaTable action = new LuaTable();
+                    action.set("words", LuaValue.valueOf("快捷"));
+                    action.set("score", LuaValue.valueOf(0.98));
+                    action.set("x", LuaValue.valueOf(600));
+                    action.set("y", LuaValue.valueOf(300));
+                    rows.set(1, action);
+                } else {
+                    LuaTable title = new LuaTable();
+                    title.set("words", LuaValue.valueOf("自动设置"));
+                    title.set("score", LuaValue.valueOf(0.98));
+                    title.set("x", LuaValue.valueOf(640));
+                    title.set("y", LuaValue.valueOf(50));
+                    rows.set(1, title);
+                    LuaTable marker = new LuaTable();
+                    marker.set("words", LuaValue.valueOf("物品快捷键栏"));
+                    marker.set("score", LuaValue.valueOf(0.98));
+                    marker.set("x", LuaValue.valueOf(250));
+                    marker.set("y", LuaValue.valueOf(110));
+                    rows.set(2, marker);
+                }
+                return rows;
+            }
+        });
+        globals.set("findPic", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                if (args.narg() >= 5 && args.arg(5).tojstring().contains("空快捷栏槽位")) {
+                    emptySlotProbes.incrementAndGet();
+                }
+                int left = args.arg(1).toint();
+                int top = args.arg(2).toint();
+                if (left == 118 && top == 194) {
+                    return LuaValue.varargsOf(new LuaValue[]{LuaValue.TRUE, LuaValue.valueOf(120), LuaValue.valueOf(196)});
+                }
+                return LuaValue.varargsOf(new LuaValue[]{LuaValue.FALSE, LuaValue.NIL, LuaValue.NIL});
+            }
+        });
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot().resolve(module), module);
+        }
+        globals.set("在主页面", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.TRUE; }
+        });
+        globals.set("找到", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return LuaValue.TRUE; }
+        });
+        globals.set("通用关闭", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.NONE; }
+        });
+        globals.set("点击", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return LuaValue.TRUE; }
+        });
+        globals.set("检测背包_识别红蓝数量_识别红蓝", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                int x = args.arg(1).toint();
+                int y = args.arg(2).toint();
+                return LuaValue.valueOf((x == 670 && y == 220) || (x == 690 && y == 284) ? "小蓝" : "");
+            }
+        });
+        globals.set("战斗_查找快捷栏药品", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                if (potionTapCount.get() >= 2) {
+                    return LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(971), LuaValue.valueOf(310)});
+                }
+                return LuaValue.varargsOf(new LuaValue[]{LuaValue.NIL, LuaValue.NIL});
+            }
+        });
+        globals.set("tap", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                int x = args.arg(1).toint();
+                int y = args.arg(2).toint();
+                if (x == 704 && y == 264) {
+                    itemTap.set(new int[]{x, y});
+                }
+                if (x == 724 && y == 324) potionTapCount.incrementAndGet();
+                if (x == 140 && y == 216) assignedSlot.set(new int[]{x, y});
+                return LuaValue.TRUE;
+            }
+        });
+
+        assertTrue("A recognized medicine and empty slot should be assigned and verified",
+                globals.get("战斗_配置快捷栏药品").call(LuaValue.valueOf("蓝")).toboolean());
+        assertTrue(assignedSlot.get() != null);
+        assertEquals(140, assignedSlot.get()[0]);
+        assertEquals(216, assignedSlot.get()[1]);
+        assertTrue(itemTap.get() != null);
+        assertEquals(704, itemTap.get()[0]);
+        assertEquals(264, itemTap.get()[1]);
+        assertEquals("The config page medicine must be re-detected and double-tapped after selecting the empty cell",
+                2, potionTapCount.get());
+        assertEquals("The assignment path should stop after the first positively empty slot", 1, emptySlotProbes.get());
+
+        globals.set("战斗_查找快捷栏药品", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                return LuaValue.varargsOf(new LuaValue[]{LuaValue.NIL, LuaValue.NIL});
+            }
+        });
+        int emptySlotProbesBeforeRetry = emptySlotProbes.get();
+        ocrReads.set(0);
+        globals.set("findPic", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                if (args.narg() >= 5 && args.arg(5).tojstring().contains("空快捷栏槽位")) {
+                    emptySlotProbes.incrementAndGet();
+                }
+                return LuaValue.varargsOf(new LuaValue[]{LuaValue.FALSE, LuaValue.NIL, LuaValue.NIL});
+            }
+        });
+        assertFalse("With no positively matched empty cells, Lua must stop before selecting or assigning any slot",
+                globals.get("战斗_配置快捷栏药品").call(LuaValue.valueOf("蓝")).toboolean());
+        assertEquals("The no-empty-cell retry must not tap the item or overwrite slot 1",
+                2, potionTapCount.get());
+        assertEquals("The no-empty-cell case must inspect all eight candidates and stop",
+                emptySlotProbesBeforeRetry + 8, emptySlotProbes.get());
     }
 
     @Test public void recoveredBackpackWeightParserAcceptsOcrSpacingAndFullWidthSlash() throws Exception {
@@ -1719,6 +1976,46 @@ public final class RecoveredLuaTaskTest {
                 !tapArguments.contains("809|673|2000"));
     }
 
+    @Test public void pathfinderNeedsMovementBeforeStablePixelsMeanCompletion() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        AtomicInteger color = new AtomicInteger(123);
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.ZERO; }
+        });
+        OneArgFunction noSleep = new OneArgFunction() {
+            @Override public LuaValue call(LuaValue millis) { return LuaValue.NONE; }
+        };
+        globals.set("sleep", noSleep);
+        globals.set("sleep2", noSleep);
+        globals.set("keepCapture", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.NONE; }
+        });
+        globals.set("releaseCapture", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.NONE; }
+        });
+        globals.set("getPixelColor", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return LuaValue.valueOf(color.get()); }
+        });
+        VarArgFunction noOp = new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return LuaValue.NONE; }
+        };
+        globals.set("toast", noOp);
+        globals.set("print", noOp);
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot().resolve(module), module);
+        }
+
+        LuaFunction detect = globals.get("检测寻路完成").checkfunction();
+        for (int i = 0; i < 5; i++) {
+            assertTrue("Stationary pixels at submission are not arrival", !detect.call().toboolean());
+        }
+        color.set(124);
+        assertTrue(!detect.call().toboolean());
+        assertTrue(!detect.call().toboolean());
+        assertTrue(!detect.call().toboolean());
+        assertTrue("Only stability after observed change can complete the route", detect.call().toboolean());
+    }
+
     @Test public void recoveredPathfinderReturnsFailureAfterTimeout() throws Exception {
         Globals globals = JsePlatform.standardGlobals();
         AtomicInteger checks = new AtomicInteger();
@@ -1747,9 +2044,56 @@ public final class RecoveredLuaTaskTest {
         assertEquals("The legacy route wait should retain its bounded 300 checks", 300, checks.get());
     }
 
-    @Test public void recoveredShopRouteStopsWhenNpcPathfindingTimesOut() throws Exception {
+    @Test public void recoveredPathfinderStopsWhenMovementNeverStarts() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        AtomicInteger checks = new AtomicInteger();
+        AtomicInteger clock = new AtomicInteger();
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.valueOf(clock.get()); }
+        });
+        OneArgFunction simulatedSleep = new OneArgFunction() {
+            @Override public LuaValue call(LuaValue millis) {
+                clock.addAndGet((int) millis.optlong(0));
+                return LuaValue.NONE;
+            }
+        };
+        globals.set("sleep", simulatedSleep);
+        globals.set("sleep2", simulatedSleep);
+        globals.set("keepCapture", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.NONE; }
+        });
+        globals.set("releaseCapture", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.NONE; }
+        });
+        globals.set("getPixelColor", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return LuaValue.ZERO; }
+        });
+        VarArgFunction noOp = new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return LuaValue.NONE; }
+        };
+        globals.set("toast", noOp);
+        globals.set("print", noOp);
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot().resolve(module), module);
+        }
+        globals.set("检测寻路完成", new ZeroArgFunction() {
+            @Override public LuaValue call() { checks.incrementAndGet(); return LuaValue.FALSE; }
+        });
+
+        assertTrue("No movement signal should fail promptly instead of waiting five minutes",
+                !globals.get("寻路_等待完成").checkfunction().call().toboolean());
+        assertTrue("The no-movement guard should stop after about ten one-second checks",
+                checks.get() <= 11);
+        assertTrue("The pathfinder must actually sample movement before stopping", clock.get() >= 10_000);
+    }
+
+    @Test public void recoveredShopRouteAdvancesOpenMapDirectlyAndStopsWhenNpcPathfindingTimesOut() throws Exception {
         Globals globals = JsePlatform.standardGlobals();
         List<String> clicks = new ArrayList<>();
+        AtomicInteger generalCalls = new AtomicInteger();
+        AtomicInteger loginCalls = new AtomicInteger();
+        AtomicInteger hudCalls = new AtomicInteger();
+        AtomicInteger unrelatedFindCalls = new AtomicInteger();
         globals.set("tickCount", new ZeroArgFunction() {
             @Override public LuaValue call() { return LuaValue.ZERO; }
         });
@@ -1772,21 +2116,46 @@ public final class RecoveredLuaTaskTest {
         templates.set("大地图页面", mapPage);
         globals.set("tz", templates);
         globals.set("找到", new OneArgFunction() {
-            @Override public LuaValue call(LuaValue template) { return LuaValue.valueOf(template.raweq(mapPage)); }
+            @Override public LuaValue call(LuaValue template) {
+                if (!template.raweq(mapPage)) unrelatedFindCalls.incrementAndGet();
+                return LuaValue.valueOf(template.raweq(mapPage));
+            }
         });
         globals.set("点击", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) {
-                clicks.add(args.arg1().tojstring());
+                clicks.add(args.arg1().tojstring() + "|" + args.arg(2).tojstring()
+                        + "|" + args.arg(3).tojstring());
                 return LuaValue.NONE;
             }
         });
         globals.set("在主页面", new ZeroArgFunction() {
-            @Override public LuaValue call() { return LuaValue.FALSE; }
+            @Override public LuaValue call() { hudCalls.incrementAndGet(); return LuaValue.FALSE; }
         });
-        globals.set("通用处理", noOp);
-        globals.set("登录_判断一轮", noOp);
+        globals.set("通用处理", new ZeroArgFunction() {
+            @Override public LuaValue call() { generalCalls.incrementAndGet(); return LuaValue.NONE; }
+        });
+        globals.set("登录_判断一轮", new ZeroArgFunction() {
+            @Override public LuaValue call() { loginCalls.incrementAndGet(); return LuaValue.NONE; }
+        });
         globals.set("大地图_输入大地图", new VarArgFunction() {
-            @Override public Varargs invoke(Varargs args) { return LuaValue.TRUE; }
+            @Override public Varargs invoke(Varargs args) {
+                assertEquals("sùng thành", args.arg1().tojstring());
+                assertTrue("The existing map must advance to the NPC tab", args.arg(2).toboolean());
+                clicks.add("select map");
+                return LuaValue.TRUE;
+            }
+        });
+        globals.set("去卖货_准备背包", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                clicks.add("prepare backpack");
+                return LuaValue.TRUE;
+            }
+        });
+        globals.set("大地图_点击大夫", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                clicks.add("select 大夫 row");
+                return LuaValue.TRUE;
+            }
         });
         globals.set("寻路_等待完成", new ZeroArgFunction() {
             @Override public LuaValue call() { return LuaValue.FALSE; }
@@ -1795,8 +2164,193 @@ public final class RecoveredLuaTaskTest {
 
         assertTrue("Shop navigation must report failure when its route times out",
                 !globals.get("去卖货").checkfunction().call().toboolean());
-        assertEquals(Arrays.asList("@@前往卖货npc"), clicks);
+        assertEquals("The merchant route prepares the bag before selecting the NPC row",
+                Arrays.asList("prepare backpack", "select map", "select 大夫 row"), clicks);
+        assertEquals("Open map must skip unrelated general processing", 0, generalCalls.get());
+        assertEquals("Open map must skip login scanning", 0, loginCalls.get());
+        assertEquals("Open map must take precedence over HUD checks", 0, hudCalls.get());
+        assertEquals("Open map must skip unrelated modal lookups", 0, unrelatedFindCalls.get());
         assertEquals("去卖货寻路失败", globals.get("当前任务2").tojstring());
+
+        clicks.clear();
+        globals.set("去卖货_准备背包", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.FALSE; }
+        });
+        assertTrue("Failed backpack preparation must stop before selecting the NPC",
+                !globals.get("去卖货").checkfunction().call().toboolean());
+        assertTrue(clicks.isEmpty());
+        assertEquals("卖货前背包处理失败", globals.get("当前任务2").tojstring());
+    }
+
+    @Test public void failedMerchantRouteDoesNotStartCompetingReturnRoute() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        AtomicBoolean merchantSucceeded = new AtomicBoolean(false);
+        AtomicInteger returnToCombatPointCalls = new AtomicInteger();
+        OneArgFunction noOp = new OneArgFunction() {
+            @Override public LuaValue call(LuaValue value) { return LuaValue.NONE; }
+        };
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.valueOf(1_000L); }
+        });
+        globals.set("sleep", noOp);
+        globals.set("toast", noOp);
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot().resolve(module), module);
+        }
+        globals.set("去卖货", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.valueOf(merchantSucceeded.get()); }
+        });
+        globals.set("执行返回挂机点", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                returnToCombatPointCalls.incrementAndGet();
+                return LuaValue.TRUE;
+            }
+        });
+
+        assertTrue("A failed merchant route must remain a failure",
+                !globals.get("去卖货后返回挂机点").checkfunction().call().toboolean());
+        assertEquals("Failure must not overwrite the NPC route with a return-to-combat route",
+                0, returnToCombatPointCalls.get());
+        assertEquals("卖货失败，等待重试", globals.get("当前任务2").tojstring());
+
+        merchantSucceeded.set(true);
+        assertTrue("Only a completed merchant visit should return to the combat point",
+                globals.get("去卖货后返回挂机点").checkfunction().call().toboolean());
+        assertEquals(1, returnToCombatPointCalls.get());
+    }
+
+    @Test public void merchantRouteSortsFullBackpackBeforeNpcAndKeepsSalePolicySeparate() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        AtomicBoolean backpackOpen = new AtomicBoolean(true);
+        AtomicBoolean sortVisible = new AtomicBoolean(true);
+        AtomicBoolean sortFreesSlots = new AtomicBoolean(true);
+        AtomicBoolean stackPrompt = new AtomicBoolean(false);
+        AtomicInteger emptySlots = new AtomicInteger(0);
+        List<String> taps = new ArrayList<>();
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.valueOf(1_000L); }
+        });
+        globals.set("sleep", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue millis) { return LuaValue.NONE; }
+        });
+        globals.set("toast", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue message) { return LuaValue.NONE; }
+        });
+        globals.set("tomocrtexttable", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                LuaTable rows = new LuaTable();
+                if (sortVisible.get() && args.arg(1).toint() == 1040
+                        && args.arg(2).toint() == 430)
+                    rows.set(1, ocrRow("整理", 1121, 475));
+                if (stackPrompt.get() && args.arg(1).toint() == 350
+                        && args.arg(2).toint() == 220) {
+                    rows.set(1, ocrRow("是否使用物品堆叠功能？", 650, 310));
+                    rows.set(2, ocrRow("同意", 520, 470));
+                    rows.set(3, ocrRow("否", 760, 470));
+                }
+                return rows;
+            }
+        });
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua"))
+            loadModule(globals, scriptRoot().resolve(module), module);
+        globals.set("背包保留格子", LuaValue.valueOf(2));
+        globals.set("药品_识别背包页面", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.valueOf(backpackOpen.get()); }
+        });
+        globals.set("检测背包_识别空格子", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.valueOf(emptySlots.get()); }
+        });
+        globals.set("在主页面", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.valueOf(!backpackOpen.get()); }
+        });
+        globals.set("点击", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                String action = args.arg1().tojstring();
+                taps.add(action);
+                if ("@@整理背包".equals(action)) stackPrompt.set(true);
+                if ("@@确认物品堆叠".equals(action)) {
+                    stackPrompt.set(false);
+                    if (sortFreesSlots.get()) emptySlots.set(3);
+                }
+                if ("@@关闭背包".equals(action)) backpackOpen.set(false);
+                return LuaValue.TRUE;
+            }
+        });
+
+        assertTrue("Full backpack must be sorted and rechecked before leaving for the NPC",
+                globals.get("去卖货_准备背包").checkfunction().call().toboolean());
+        assertEquals(Arrays.asList("@@整理背包", "@@确认物品堆叠", "@@关闭背包"), taps);
+        assertEquals(3, globals.get("当前背包格子").toint());
+        assertTrue("Backpack preparation must not sell or discard any item",
+                taps.stream().noneMatch(tap -> tap.contains("卖") || tap.contains("丢")));
+
+        taps.clear();
+        backpackOpen.set(true);
+        emptySlots.set(0);
+        stackPrompt.set(true);
+        assertTrue("An already-open stack confirmation must be accepted once without issuing another sort",
+                globals.get("去卖货_准备背包").checkfunction().call().toboolean());
+        assertEquals(Arrays.asList("@@确认物品堆叠", "@@关闭背包"), taps);
+        assertEquals(3, globals.get("当前背包格子").toint());
+
+        taps.clear();
+        backpackOpen.set(true);
+        emptySlots.set(0);
+        stackPrompt.set(false);
+        sortFreesSlots.set(false);
+        assertTrue("If sorting leaves the bag full, merchant flow must continue to NPC routing",
+                globals.get("去卖货_准备背包").checkfunction().call().toboolean());
+        assertEquals(0, globals.get("当前背包格子").toint());
+        assertEquals(Arrays.asList("@@整理背包", "@@确认物品堆叠", "@@关闭背包"), taps);
+
+        taps.clear();
+        backpackOpen.set(true);
+        emptySlots.set(0);
+        sortFreesSlots.set(true);
+        sortVisible.set(false);
+        assertTrue("Unrecognized sort control must fail before NPC navigation",
+                !globals.get("去卖货_准备背包").checkfunction().call().toboolean());
+        assertTrue(taps.isEmpty());
+    }
+
+    @Test public void merchantRouteSelectsVisibleDoctorRowWithoutMapCheckmark() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        AtomicReference<String> npcName = new AtomicReference<>("大夫");
+        List<String> taps = new ArrayList<>();
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.valueOf(1_000L); }
+        });
+        globals.set("tomocrtexttable", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                LuaTable rows = new LuaTable();
+                if (args.arg(1).toint() == 0 && args.arg(2).toint() == 0)
+                    rows.set(1, ocrRow("输入NPC名", 67, 98));
+                if (args.arg(1).toint() == 0 && args.arg(2).toint() == 120)
+                    rows.set(1, ocrRow(npcName.get(), 35, 160));
+                return rows;
+            }
+        });
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua"))
+            loadModule(globals, scriptRoot().resolve(module), module);
+        globals.set("大地图页面已打开", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.TRUE; }
+        });
+        globals.set("点击", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                taps.add(args.arg1().tojstring() + "|" + args.arg(2).tojstring()
+                        + "|" + args.arg(3).tojstring());
+                return LuaValue.TRUE;
+            }
+        });
+
+        assertTrue(globals.get("大地图_点击大夫").checkfunction().call().toboolean());
+        assertEquals("Doctor selection must tap its OCR row, never the map checkmark",
+                Arrays.asList("@@前往卖货npc|35|160"), taps);
+        taps.clear();
+        npcName.set("商人");
+        assertTrue("A different NPC must not be selected for this route",
+                !globals.get("大地图_点击大夫").checkfunction().call().toboolean());
+        assertTrue(taps.isEmpty());
     }
 
     @Test public void recoveredRouteStartsFromTheRealGameHomeScreenshot() throws Exception {
@@ -3219,18 +3773,32 @@ public final class RecoveredLuaTaskTest {
                 clicks.contains("@@确定购买数量"));
         assertTrue("A blue purchase must never click the red supply tab", !clicks.contains("@@点红"));
 
+        globals.set("买了一次蓝", LuaValue.FALSE);
+        LuaValue bluePurchaseSucceeded = globals.get("去卖货_卖货_执行红蓝处理").checkfunction()
+                .call(LuaValue.valueOf("买蓝"));
+        assertTrue("The red/blue handler must return the purchase result", bluePurchaseSucceeded.toboolean());
+        assertTrue("A confirmed blue purchase must be recorded for the current replenishment pass",
+                globals.get("买了一次蓝").toboolean());
+
         clicks.clear();
+        globals.set("买了一次红", LuaValue.FALSE);
         config.set("购买红的数量", LuaValue.valueOf("0"));
-        globals.get("去卖货_卖货_执行红蓝处理").checkfunction().call(LuaValue.valueOf("买红"));
+        LuaValue zeroQuantityResult = globals.get("去卖货_卖货_执行红蓝处理").checkfunction()
+                .call(LuaValue.valueOf("买红"));
         assertTrue("A configured quantity of zero must never reach the game's default one-item purchase",
                 clicks.isEmpty());
+        assertTrue("A skipped zero-quantity purchase must report failure", !zeroQuantityResult.toboolean());
+        assertTrue("A skipped purchase must not be marked as completed", !globals.get("买了一次红").toboolean());
 
         config.set("购买红的数量", LuaValue.valueOf("2"));
-        globals.get("去卖货_卖货_执行红蓝处理").checkfunction().call(LuaValue.valueOf("买红"));
+        LuaValue redPurchaseSucceeded = globals.get("去卖货_卖货_执行红蓝处理").checkfunction()
+                .call(LuaValue.valueOf("买红"));
         assertTrue("A positive red purchase should choose the red supply tab", clicks.contains("@@点红"));
         assertEquals("The observed confirmation starts at zero, so quantity 2 requires two increments", 2,
                 java.util.Collections.frequency(clicks, "@@购买+1"));
         assertTrue("A valid red purchase should submit its selected quantity", clicks.contains("@@确定购买数量"));
+        assertTrue("A confirmed red purchase should return success and mark the current pass",
+                redPurchaseSucceeded.toboolean() && globals.get("买了一次红").toboolean());
     }
 
     @Test public void recoveredInventorySkipsTransactionsWhenQuickslotOcrIsInvalid() throws Exception {
@@ -3766,6 +4334,14 @@ public final class RecoveredLuaTaskTest {
         return image;
     }
 
+    private static void saveLiveEvidenceScreenshot(String name, BufferedImage image) throws IOException {
+        String evidenceDir = System.getenv("RYLUX_LIVE_EVIDENCE_DIR");
+        if (evidenceDir == null || evidenceDir.trim().isEmpty()) return;
+        Path directory = Paths.get(evidenceDir);
+        Files.createDirectories(directory);
+        ImageIO.write(image, "png", directory.resolve(name).toFile());
+    }
+
     private static long sampledDifference(BufferedImage left, BufferedImage right) {
         if (left.getWidth() != right.getWidth() || left.getHeight() != right.getHeight()) return Long.MAX_VALUE;
         long changed = 0;
@@ -3801,8 +4377,36 @@ public final class RecoveredLuaTaskTest {
     }
 
     private static void loadModule(Globals globals, Path path, String name) throws IOException {
+        if ("挂机模式.lua".equals(name)) {
+            LuaTable preload = globals.get("package").get("preload").checktable();
+            if (preload.get("网页路线").isnil()) {
+                Path routePath = path.resolveSibling("网页路线.lua");
+                String routeSource = Files.readString(routePath, StandardCharsets.UTF_8);
+                preload.set("网页路线", new ZeroArgFunction() {
+                    @Override public LuaValue call() {
+                        globals.load(routeSource, "网页路线.lua", globals).call();
+                        return LuaValue.TRUE;
+                    }
+                });
+            }
+        }
         String source = Files.readString(path, StandardCharsets.UTF_8);
-        globals.load(LuaSourceCompat.normalizeUnicodeIdentifiers(source), name, globals).call();
+        LuaValue result = globals.load(LuaSourceCompat.normalizeUnicodeIdentifiers(source), name, globals).call();
+        // Loading this module directly must mirror require("w") in the app entry point.
+        if ("w.lua".equals(name)) globals.set("w", result);
+    }
+
+    private static void installLoginTemplateMatch(Globals globals, String matchedName, int x, int y) {
+        globals.set("findPic", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                if (args.arg(5).tojstring().endsWith(matchedName)) {
+                    return LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(1),
+                            LuaValue.valueOf(x), LuaValue.valueOf(y)});
+                }
+                return LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(-1),
+                        LuaValue.valueOf(-1), LuaValue.valueOf(-1)});
+            }
+        });
     }
 
     private static LuaTable ocrRow(String words, int x, int y) {

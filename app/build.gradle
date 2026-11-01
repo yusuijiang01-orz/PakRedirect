@@ -48,6 +48,14 @@ android {
     }
 
     buildTypes {
+        debug {
+            if (project.findProperty('blackboxHookDiagnostics') == 'true') {
+                // Keep the throwaway hook-isolation build separate from the
+                // user's installed, release-signed RYLUX test APK.
+                applicationIdSuffix '.hookdiag'
+                versionNameSuffix '-hookdiag'
+            }
+        }
         release {
             signingConfig signingConfigs.release
             minifyEnabled true

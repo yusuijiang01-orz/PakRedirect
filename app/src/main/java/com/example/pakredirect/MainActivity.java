@@ -82,6 +82,9 @@ public class MainActivity extends Activity {
     public static String currentRole = "user";
     private boolean registerMode;
 
+    boolean homeMembershipActive() { return currentMembershipActive; }
+    String homeMembershipKind() { return currentMembershipKind; }
+
     private EditText usernameEdit;
     private EditText passwordEdit;
     private EditText confirmPasswordEdit;
@@ -178,6 +181,10 @@ public class MainActivity extends Activity {
 
     private void showAuthUi(boolean asRegister) {
         registerMode = asRegister;
+        MembershipAccess.clear(this);
+        LocalizationSettings.setEnabled(this, false);
+        stopInterceptModule();
+        stopScriptFeatures();
         currentMembershipActive = false;
         currentMembershipKind = "expired";
         currentExpiresAt = null;
@@ -446,13 +453,15 @@ public class MainActivity extends Activity {
     private void showHome(AuthClient.ProfileResult profile) {
         currentProfile = profile;
         currentRole = normalizeRole(profile.role);
-        currentMembershipActive = profile.membershipActive;
+        MembershipAccess.remember(this, profile);
+        currentMembershipActive = MembershipAccess.isAllowed(profile);
         currentMembershipKind = profile.membershipKind == null ? "expired" : profile.membershipKind;
         currentExpiresAt = profile.expiresAt;
         currentUsername = profile.username;
         if (!currentMembershipActive) {
             LocalizationSettings.setEnabled(this, false);
             stopInterceptModule();
+            stopScriptFeatures();
         }
         if (!isAdminRole(currentRole)) stopRelayVpn();
         clearTransientViews();
@@ -978,6 +987,16 @@ public class MainActivity extends Activity {
         featureControlsLp.topMargin = dp(10);
         panel.addView(featureControls, featureControlsLp);
 
+        Button openScripts = button("打开脚本工作台", PRIMARY, Color.WHITE);
+        openScripts.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        openScripts.setTag("rylux_script_workbench_button");
+        openScripts.setContentDescription("打开 RYLUX 脚本工作台");
+        openScripts.setBackground(RyluxDesignSystem.primaryButton(this, 9));
+        openScripts.setOnClickListener(v -> openScriptWorkbench());
+        LinearLayout.LayoutParams scriptsLp = new LinearLayout.LayoutParams(-1, dp(56));
+        scriptsLp.topMargin = dp(10);
+        panel.addView(openScripts, scriptsLp);
+
         boolean gameInstalled = getPackageManager().getLaunchIntentForPackage(TARGET_PACKAGE) != null;
         Button start = button(
                 !gameInstalled ? "请先安装游戏"
@@ -1047,8 +1066,12 @@ public class MainActivity extends Activity {
         toggle.setEnabled(membershipActive);
         toggle.setContentDescription("汉化开关");
         toggle.setOnCheckedChangeListener((button, checked) -> {
-            LocalizationSettings.setEnabled(this, checked);
-            toast(checked ? "汉化已开启，下次启动时生效" : "汉化已关闭，下次启动使用官方资源");
+            if (!checked) {
+                LocalizationSettings.setEnabled(this, false);
+                toast("汉化已关闭，下次启动使用官方资源");
+                return;
+            }
+            requestLocalizationAccess(toggle);
         });
         localizationSwitch = toggle;
         row.addView(toggle, new LinearLayout.LayoutParams(-2, dp(40)));
@@ -1056,7 +1079,7 @@ public class MainActivity extends Activity {
 
         String note = membershipActive ? "关闭后直接使用官方资源" : "会员已到期";
         control.addView(text(note, 10, MUTED, false), new LinearLayout.LayoutParams(-1, -2));
-        if (!membershipActive && !isAdminRole(currentRole)) {
+        if (!membershipActive) {
             Button activateVip = button("会员已过期 · 开通 VIP  ›", PRIMARY, Color.WHITE);
             activateVip.setOnClickListener(v -> startActivityForResult(
                     new Intent(this, PaymentActivity.class), 7071));
@@ -1073,7 +1096,8 @@ public class MainActivity extends Activity {
         controls.setTag("rylux_feature_controls");
 
         boolean admin = isAdminRole(profile.role);
-        LinearLayout localization = localizationControl(profile.membershipActive);
+        boolean membershipActive = MembershipAccess.isAllowed(profile);
+        LinearLayout localization = localizationControl(membershipActive);
         LinearLayout.LayoutParams localizationLp = admin
                 ? new LinearLayout.LayoutParams(0, -2, 1f)
                 : new LinearLayout.LayoutParams(-1, -2);
@@ -1087,6 +1111,64 @@ public class MainActivity extends Activity {
             controls.addView(acceleration, accelerationLp);
         }
         return controls;
+    }
+
+    private void requestLocalizationAccess(Switch toggle) {
+        toggle.setOnCheckedChangeListener(null);
+        toggle.setChecked(false);
+        toggle.setEnabled(false);
+        MembershipAccess.refresh(this, result -> runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed()) return;
+            applyMembershipCheck(result);
+            boolean allowed = result != null && result.allowed;
+            LocalizationSettings.setEnabled(this, allowed);
+            toggle.setChecked(allowed);
+            toggle.setEnabled(allowed || result == null || !result.success);
+            toggle.setOnCheckedChangeListener((view, isChecked) -> {
+                if (isChecked) requestLocalizationAccess(toggle);
+                else {
+                    LocalizationSettings.setEnabled(this, false);
+                    toast("汉化已关闭，下次启动使用官方资源");
+                }
+            });
+            toast(allowed ? "汉化已开启，下次启动时生效"
+                    : (result == null ? "无法验证会员状态，请重试" : result.message));
+        }));
+    }
+
+    private void applyMembershipCheck(MembershipAccess.CheckResult result) {
+        if (result == null || !result.success || result.profile == null) return;
+        AuthClient.ProfileResult profile = result.profile;
+        currentProfile = profile;
+        currentRole = normalizeRole(profile.role);
+        currentMembershipActive = MembershipAccess.isAllowed(profile);
+        currentMembershipKind = profile.membershipKind == null ? "expired" : profile.membershipKind;
+        currentExpiresAt = profile.expiresAt;
+        currentUsername = profile.username;
+        if (!currentMembershipActive) {
+            LocalizationSettings.setEnabled(this, false);
+            stopInterceptModule();
+            stopScriptFeatures();
+            if (localizationSwitch != null) {
+                localizationSwitch.setOnCheckedChangeListener(null);
+                localizationSwitch.setChecked(false);
+                localizationSwitch.setEnabled(false);
+            }
+        }
+    }
+
+    private void openScriptWorkbench() {
+        MembershipAccess.refresh(this, result -> runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed()) return;
+            applyMembershipCheck(result);
+            if (result != null && result.allowed) {
+                startActivity(new Intent(MainActivity.this, ScriptToolsActivity.class)
+                        .putExtra(ScriptToolsActivity.EXTRA_TARGET_MODE,
+                                ScriptToolsActivity.TARGET_MODE_DESKTOP));
+            } else {
+                toast(result == null ? "无法验证会员状态，请检查网络后重试" : result.message);
+            }
+        }));
     }
 
     private LinearLayout accelerationControl() {
@@ -1435,6 +1517,13 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void stopScriptFeatures() {
+        try { stopService(new Intent(this, ScriptRuntimeService.class)); }
+        catch (Throwable ignored) { }
+        try { stopService(new Intent(this, ScriptControlOverlayService.class)); }
+        catch (Throwable ignored) { }
+    }
+
     private void launchOfficialGame(Button button, boolean membershipExpired) {
         if (membershipExpired) LocalizationSettings.setEnabled(this, false);
         button.setEnabled(false);
@@ -1554,6 +1643,10 @@ public class MainActivity extends Activity {
         currentExpiresAt = null;
         currentProfile = null;
         authStorage.clearSession();
+        MembershipAccess.clear(this);
+        LocalizationSettings.setEnabled(this, false);
+        stopInterceptModule();
+        stopScriptFeatures();
         showAuthUi(false);
         if (token != null && !token.trim().isEmpty()) {
             new Thread(() -> AuthClient.logout(token), "RYLUX-Logout").start();

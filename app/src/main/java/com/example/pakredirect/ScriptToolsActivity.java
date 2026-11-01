@@ -9,6 +9,8 @@ import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -35,6 +37,7 @@ import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.provider.Settings;
+import android.content.pm.PackageManager;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -52,58 +55,70 @@ import top.niunaijun.blackbox.BlackBoxCore;
 public final class ScriptToolsActivity extends Activity {
     static final String EXTRA_SHOW_RUNTIME_DIAGNOSTIC = "show_runtime_diagnostic";
     static final String EXTRA_REQUEST_START = "request_confirmed_runtime_start";
+    static final String EXTRA_TARGET_MODE = "script_workbench_target_mode";
     private static final String RUNTIME_DIAGNOSTICS = "script_runtime_diagnostics";
     private static final String GAME = "com.tepaylink.tamgioiphantranhmobile";
     private static final String SCRIPT = "脚本/封神榜.lua";
     private static final String[] REQUIRED_ASSETS = {
-            SCRIPT, "脚本/挂机模式.lua", "脚本/通用数据.lua", "脚本/中控.lua",
+            SCRIPT, "脚本/挂机模式.lua", "脚本/网页路线.lua", "脚本/通用数据.lua", "脚本/中控.lua",
             "脚本/tomocr.lua", "脚本/TURING_VIP.lua", "脚本/w.lua",
-            "插件/opPlugin.lua", "插件/自定义库.lua", "脚本/空格子0.png"
+            "插件/opPlugin.lua", "插件/自定义库.lua", "脚本/空格子0.png",
+            "脚本/素材库/汉化条款同意按钮.png",
+            "脚本/素材库/汉化服务器确认按钮.png",
+            "脚本/素材库/汉化登录按钮.png", "脚本/素材库/汉化角色确认按钮.png",
+            "脚本/素材库/汉化登录返回按钮.png"
     };
-    // Recovered map order, shown using the Chinese names used by the localized client.
-    private static final String[] MAPS = {
-            "崇城野外", "北海", "燕山", "西昆仑", "昆仑山", "首阳山", "游魂关", "苗疆", "巨鹿",
-            "潼关", "孟津", "城塘关", "荒漠", "荒漠2", "荒漠3", "荒漠4", "荒漠5",
-            "海1", "海2", "海3", "海4", "海5", "火1", "火2", "火3", "火4", "火5",
-            "冰1", "冰2", "冰3", "冰4", "冰5", "捆仙宫1", "捆仙宫2", "捆仙宫3",
-            "捆仙宫4", "捆仙宫5", "碧游宫1"
-    };
-    private static final int BG = Color.rgb(17, 19, 24);
-    private static final int CARD = Color.rgb(28, 32, 40);
-    private static final int SOFT = Color.rgb(34, 39, 48);
-    private static final int TEXT = Color.rgb(245, 247, 250);
-    private static final int MUTED = Color.rgb(154, 163, 176);
-    private static final int BLUE = Color.rgb(72, 113, 255);
-    private static final int BORDER = Color.rgb(47, 53, 64);
+    // The same allowlisted set is used by the local Lua route bridge.
+    private static final String[] MAPS = ScriptMapCatalog.MAPS;
+    private static final int BG = RyluxDesignSystem.BACKGROUND;
+    private static final int CARD = RyluxDesignSystem.CARD;
+    private static final int SOFT = RyluxDesignSystem.SOFT;
+    private static final int TEXT = RyluxDesignSystem.TEXT;
+    private static final int MUTED = RyluxDesignSystem.MUTED;
+    private static final int BLUE = RyluxDesignSystem.ACCENT;
+    private static final int BORDER = RyluxDesignSystem.BORDER;
+    private static final String TARGET_MODE_KEY = "目标运行环境";
+    static final String TARGET_MODE_SANDBOX = "sandbox";
+    static final String TARGET_MODE_DESKTOP = "desktop";
 
     private SharedPreferences preferences;
     private JSONObject values;
     private String profileName;
+    private String entryTargetMode;
     private LinearLayout root;
     private TextView environment;
     private TextView accessibilityState;
+    private TextView targetSummary;
+    private boolean workbenchReady;
+    private boolean entitlementCheckPending;
+    private Intent entitlementPendingIntent;
+    private final Handler entitlementHandler = new Handler(Looper.getMainLooper());
+    private final Runnable entitlementWatchdog = new Runnable() {
+        @Override public void run() {
+            if (!workbenchReady) return;
+            if (!MembershipAccess.hasCachedAccess(ScriptToolsActivity.this)) {
+                closeWorkbenchForExpiredMembership();
+                return;
+            }
+            entitlementHandler.postDelayed(this, 5_000L);
+        }
+    };
     private int selectedTab;
     private final ArrayList<ScrollView> tabPages = new ArrayList<>();
     private final ArrayList<Button> tabButtons = new ArrayList<>();
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        preferences = getSharedPreferences("script_workbench_profiles_v1", MODE_PRIVATE);
-        profileName = preferences.getString("selected", "默认方案");
-        loadProfile();
-        buildUi();
-        if (getIntent().getBooleanExtra(EXTRA_SHOW_RUNTIME_DIAGNOSTIC, false)) showRuntimeDiagnostic();
-        else if (getIntent().getBooleanExtra(EXTRA_REQUEST_START, false)) confirmAndStart();
+        entryTargetMode = requestedTargetMode(getIntent());
+        showMembershipCheck();
+        verifyMembershipAndOpen(getIntent());
     }
 
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        if (intent.getBooleanExtra(EXTRA_SHOW_RUNTIME_DIAGNOSTIC, false)) showRuntimeDiagnostic();
-        else if (intent.getBooleanExtra(EXTRA_REQUEST_START, false)) {
-            selectTab(0);
-            confirmAndStart();
-        }
+        entryTargetMode = requestedTargetMode(intent);
+        verifyMembershipAndOpen(intent);
     }
 
     private void showRuntimeDiagnostic() {
@@ -115,7 +130,7 @@ public final class ScriptToolsActivity extends Activity {
         content.setPadding(dp(12), dp(8), dp(12), dp(8));
         ScrollView scroll = new ScrollView(this);
         scroll.addView(content, new ScrollView.LayoutParams(-1, -2));
-        new AlertDialog.Builder(this).setTitle("脚本运行诊断").setView(scroll)
+        alertDialog().setTitle("脚本运行诊断").setView(scroll)
                 .setPositiveButton("复制", (dialog, which) -> {
                     android.content.ClipboardManager clipboard = (android.content.ClipboardManager)
                             getSystemService(CLIPBOARD_SERVICE);
@@ -128,8 +143,112 @@ public final class ScriptToolsActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        if (workbenchReady && !MembershipAccess.hasCachedAccess(this)) {
+            closeWorkbenchForExpiredMembership();
+            return;
+        }
+        if (workbenchReady) entitlementHandler.postDelayed(entitlementWatchdog, 5_000L);
         if (environment != null) environment.setText(environmentText());
         if (accessibilityState != null) accessibilityState.setText(accessibilityStatus());
+        if (targetSummary != null) targetSummary.setText(targetSummaryText());
+    }
+
+    @Override protected void onPause() {
+        entitlementHandler.removeCallbacks(entitlementWatchdog);
+        super.onPause();
+    }
+
+    @Override protected void onDestroy() {
+        entitlementHandler.removeCallbacks(entitlementWatchdog);
+        super.onDestroy();
+    }
+
+    private void showMembershipCheck() {
+        FrameLayout host = new FrameLayout(this);
+        RyluxDesignSystem.installHomeBackdrop(this, host);
+        getWindow().setStatusBarColor(Color.rgb(8, 14, 23));
+        getWindow().setNavigationBarColor(Color.rgb(5, 8, 13));
+        TextView message = label("正在验证 VIP / 体验会员权限…", 15, TEXT, true);
+        message.setGravity(Gravity.CENTER);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(-1, -1);
+        lp.setMargins(dp(24), dp(24), dp(24), dp(24));
+        host.addView(message, lp);
+        setContentView(host);
+    }
+
+    private void verifyMembershipAndOpen(Intent intent) {
+        entitlementPendingIntent = intent;
+        if (entitlementCheckPending) return;
+        entitlementCheckPending = true;
+        MembershipAccess.refresh(this, result -> runOnUiThread(() -> {
+            entitlementCheckPending = false;
+            Intent requestedIntent = entitlementPendingIntent;
+            entitlementPendingIntent = null;
+            if (isFinishing() || isDestroyed()) return;
+            if (result == null || !result.allowed) {
+                showMembershipBlocked(result);
+                return;
+            }
+            if (!workbenchReady) {
+                preferences = getSharedPreferences("script_workbench_profiles_v1", MODE_PRIVATE);
+                profileName = preferences.getString("selected", "默认方案");
+                loadProfile();
+                buildUi();
+                workbenchReady = true;
+                entitlementHandler.postDelayed(entitlementWatchdog, 5_000L);
+            }
+            handleWorkbenchIntent(requestedIntent);
+        }));
+    }
+
+    private void handleWorkbenchIntent(Intent intent) {
+        if (intent == null) return;
+        if (intent.getBooleanExtra(EXTRA_SHOW_RUNTIME_DIAGNOSTIC, false)) showRuntimeDiagnostic();
+        else if (intent.getBooleanExtra(EXTRA_REQUEST_START, false)) {
+            selectTab(0);
+            confirmAndStart();
+        }
+    }
+
+    private void showMembershipBlocked(MembershipAccess.CheckResult result) {
+        String message = result == null ? "无法验证会员状态，请联网后重试。" : result.message;
+        boolean canRenew = result != null && result.requestOk && result.success && !result.allowed;
+        if (canRenew) {
+            workbenchReady = false;
+            LocalizationSettings.setEnabled(this, false);
+            stopService(new Intent(this, ScriptRuntimeService.class));
+            stopService(new Intent(this, ScriptControlOverlayService.class));
+            stopService(new Intent(this, InterceptService.class));
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(canRenew ? "需要有效会员" : "会员状态验证失败")
+                .setMessage(message + (canRenew ? "\n\n脚本工作台仅向有效 VIP 或体验会员开放。" : ""))
+                .setPositiveButton(canRenew ? "开通 VIP" : "知道了", (dialog, which) -> {
+                    if (canRenew) startActivity(new Intent(this, PaymentActivity.class));
+                    finish();
+                })
+                .setNegativeButton(canRenew ? "返回" : "重试", (dialog, which) -> {
+                    if (canRenew) finish();
+                    else {
+                        showMembershipCheck();
+                        verifyMembershipAndOpen(getIntent());
+                    }
+                })
+                .setOnCancelListener(dialog -> finish())
+                .show();
+    }
+
+    private void closeWorkbenchForExpiredMembership() {
+        if (isFinishing()) return;
+        workbenchReady = false;
+        Intent stop = new Intent(this, ScriptRuntimeService.class)
+                .setAction(ScriptRuntimeService.ACTION_STOP);
+        try { startService(stop); } catch (RuntimeException ignored) { }
+        stopService(new Intent(this, ScriptControlOverlayService.class));
+        LocalizationSettings.setEnabled(this, false);
+        stopService(new Intent(this, InterceptService.class));
+        Toast.makeText(this, "VIP / 体验会员已到期，脚本工作台和汉化已停用", Toast.LENGTH_LONG).show();
+        finish();
     }
 
     private void buildUi() {
@@ -137,13 +256,21 @@ public final class ScriptToolsActivity extends Activity {
         tabButtons.clear();
         LinearLayout screen = new LinearLayout(this);
         screen.setOrientation(LinearLayout.VERTICAL);
-        screen.setBackgroundColor(BG);
+        screen.setBackgroundColor(Color.TRANSPARENT);
+        screen.setClipChildren(false);
+        screen.setClipToPadding(false);
+
+        FrameLayout host = new FrameLayout(this);
+        RyluxDesignSystem.installHomeBackdrop(this, host);
+        getWindow().setStatusBarColor(Color.rgb(8, 14, 23));
+        getWindow().setNavigationBarColor(Color.rgb(5, 8, 13));
+        getWindow().getDecorView().setSystemUiVisibility(0);
 
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
         header.setPadding(dp(18), dp(12), dp(18), dp(8));
         screen.addView(header, new LinearLayout.LayoutParams(-1, -2));
-        Button back = button("‹  返回沙箱", SOFT);
+        Button back = button("‹  返回", SOFT);
         back.setOnClickListener(v -> finish());
         header.addView(back, new LinearLayout.LayoutParams(dp(112), dp(42)));
         TextView title = label("脚本工作台", 21, TEXT, true);
@@ -155,9 +282,9 @@ public final class ScriptToolsActivity extends Activity {
         settings.setOnClickListener(v -> showSettings());
         header.addView(settings, new LinearLayout.LayoutParams(dp(44), dp(42)));
 
-        TextView subtitle = label("封神榜配置 · 打开页面不会启动游戏或脚本", 12, MUTED, false);
-        subtitle.setPadding(dp(18), 0, dp(18), dp(8));
-        screen.addView(subtitle);
+        targetSummary = label(targetSummaryText(), 12, MUTED, false);
+        targetSummary.setPadding(dp(18), 0, dp(18), dp(8));
+        screen.addView(targetSummary);
 
         HorizontalScrollView tabs = new HorizontalScrollView(this);
         tabs.setHorizontalScrollBarEnabled(false);
@@ -202,7 +329,7 @@ public final class ScriptToolsActivity extends Activity {
         saveAs.setOnClickListener(v -> saveAsProfile());
         addButton(profiles, saveAs);
 
-        LinearLayout run = section("运行与状态", "先检查运行条件，再确认本次方案。开始后会启动沙箱中的封神榜并显示 RYLUX 悬浮控制面板。");
+        LinearLayout run = section("运行与状态", "先检查运行条件，再确认本次方案。开始后会启动设置中选定的封神榜客户端，并显示 RYLUX 悬浮控制面板。");
         Button preflight = button("查看配置与运行前检查", BLUE);
         preflight.setOnClickListener(v -> showPreflight());
         addButton(run, preflight);
@@ -223,7 +350,7 @@ public final class ScriptToolsActivity extends Activity {
         addNumber(route, "队员找不到队长组队就回家次数", "找不到队长后返回", "2", "次", 1, 999);
 
         root = (LinearLayout) tabPages.get(2).getChildAt(0);
-        LinearLayout supplies = section("战斗与补给", "开关和阈值仅写入本机方案；运行宿主接入前不会触发游戏操作。");
+        LinearLayout supplies = section("战斗与补给", "自动战斗与药品补给按方案交给 Lua；战斗技能和装备耐久阈值暂只保存在本机，当前 Lua 没有对应执行逻辑。");
         addSwitch(supplies, "自动战斗", "自动战斗", false);
         addNumber(supplies, "战斗技能阈值", "技能触发阈值", "15", "%", 0, 100);
         addNumber(supplies, "装备耐久阈值", "装备耐久低于此值时处理", "15", "%", 0, 100);
@@ -243,14 +370,18 @@ public final class ScriptToolsActivity extends Activity {
         addNumber(supplies, "购买蓝的数量", "每次购买蓝药", "10", "个", 1, 99999);
 
         root = (LinearLayout) tabPages.get(3).getChildAt(0);
-        LinearLayout inventory = section("背包与装备", "装备出售默认关闭；只有显式启用并设置出售品质后才进入旧脚本出售流程，设备端仍待校准。");
-        addSwitch(inventory, "保护装备不出售", "保护装备不出售（建议开启）", true);
+        LinearLayout inventory = section("背包与装备", "背包剩余负重达到阈值或可用空格达到阈值，任一条件满足就前往大夫。装备默认不出售；要清理装备需开启“出售装备”并关闭“保护装备不出售”，再勾选品质（默认白、蓝）。回红/回内或词条无法确认的装备始终保留。");
+        addSwitch(inventory, "保护装备不出售", "总保护开关；开启后不出售任何装备", true);
         addSwitch(inventory, "检测修理装备", "检测并修理装备", true);
-        addNumber(inventory, "背包保留重量", "保留背包重量", "3", "重量", 0, 99999);
-        addNumber(inventory, "背包保留格子", "保留空格", "2", "格", 0, 99999);
-        addNumber(inventory, "背包检测间隔秒", "背包检测间隔", "60", "秒", 1, 86400);
+        addNumber(inventory, "背包保留重量", "剩余负重达到此值时卖垃圾", "3", "重量", 0, 99999);
+        addNumber(inventory, "背包保留格子", "可用空格达到此值时卖垃圾（默认 2 格，即低于 3 格）", "2", "格", 0, 99999);
+        addNumber(inventory, "背包检测间隔秒", "药品按此间隔检测；负重和空格空闲时约 15 秒检测，接近阈值或识别失败约 5 秒后重试", "60", "秒", 1, 86400);
         addSwitch(inventory, "出售装备", "允许出售装备", false);
-        addChoice(inventory, "出售装备品质上限", "装备出售保护等级", new String[]{"不出售装备", "仅白色", "白色与绿色"}, 0);
+        addSwitch(inventory, "出售装备品质_白色", "清理白色装备", true);
+        addSwitch(inventory, "出售装备品质_蓝色", "清理蓝色装备", true);
+        addSwitch(inventory, "出售装备品质_绿色", "清理绿色装备", false);
+        addSwitch(inventory, "出售装备品质_黄色", "清理黄色装备", false);
+        addSwitch(inventory, "出售装备品质_橙色", "清理橙色装备", false);
         addSwitch(inventory, "出售装备二次确认", "每次出售装备前再次确认", true);
         addNumber(inventory, "保留蓝条数量", "保留蓝条数量", "4", "条", 0, 99999);
         addChoice(inventory, "蓝条筛选模式", "蓝条筛选条件（单选）",
@@ -278,7 +409,8 @@ public final class ScriptToolsActivity extends Activity {
         addNumber(trade, "购买物品数量阈值", "物品数量低于阈值才购买", "10", "个", 0, 99999);
         addNumber(trade, "每次购买数量", "每次购买数量", "10", "个", 1, 99999);
 
-        setContentView(screen);
+        host.addView(screen, new FrameLayout.LayoutParams(-1, -1));
+        setContentView(host);
         selectTab(Math.max(0, Math.min(tabPages.size() - 1, selectedTab)));
     }
 
@@ -288,7 +420,8 @@ public final class ScriptToolsActivity extends Activity {
             boolean active = i == index;
             tabPages.get(i).setVisibility(active ? View.VISIBLE : View.GONE);
             Button tab = tabButtons.get(i);
-            tab.setBackground(round(active ? BLUE : SOFT, 12));
+            tab.setBackground(active ? RyluxDesignSystem.primaryButton(this, 12)
+                    : RyluxDesignSystem.secondaryButton(this, 12));
             tab.setTextColor(active ? Color.WHITE : MUTED);
             tab.setTypeface(Typeface.DEFAULT, active ? Typeface.BOLD : Typeface.NORMAL);
             tab.setSelected(active);
@@ -298,22 +431,49 @@ public final class ScriptToolsActivity extends Activity {
     private void showSettings() {
         ScrollView page = new ScrollView(this);
         page.setFillViewport(true);
-        page.setBackgroundColor(BG);
+        page.setBackgroundColor(Color.TRANSPARENT);
         LinearLayout previousRoot = root;
         root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(18), dp(4), dp(18), dp(28));
         page.addView(root, new ScrollView.LayoutParams(-1, -2));
 
-        LinearLayout selection = section("目标游戏", "目前只有一个已识别的目标游戏。");
-        selection.addView(label("封神榜 · " + GAME, 13, TEXT, true));
-        selection.addView(label(gameStatus(), 12, MUTED, false));
-        Button gamePicker = button("选择目标游戏", SOFT);
-        gamePicker.setOnClickListener(v -> new AlertDialog.Builder(this)
-                .setTitle("目标游戏")
-                .setSingleChoiceItems(new String[]{"封神榜 · " + GAME}, 0, (dialog, which) -> dialog.dismiss())
-                .setNegativeButton("关闭", null).show());
-        addButton(selection, gamePicker);
+        String targetDescription = entryTargetMode == null
+                ? "脚本可以控制桌面安装版，也可以控制 RYLUX 沙箱副本；请选择实际要操作的那一个。"
+                : (TARGET_MODE_DESKTOP.equals(entryTargetMode)
+                        ? "此工作台由游戏详情页打开，运行目标固定为桌面安装版封神榜手游。"
+                        : "此工作台由沙箱页打开，运行目标固定为 RYLUX 沙箱中的游戏副本。");
+        LinearLayout selection = section("目标游戏", targetDescription
+                + " Android 不允许 RYLUX 可靠强制结束桌面客户端，桌面版重启时会退回桌面并尝试重新打开。");
+        RadioGroup targets = new RadioGroup(this);
+        targets.setOrientation(RadioGroup.VERTICAL);
+        RadioButton desktopTarget = targetModeOption("桌面客户端\n"
+                + (desktopGameAvailable()
+                        ? "已检测到封神榜手游 · 强制重启受 Android 限制" : "未检测到桌面安装版"));
+        RadioButton sandboxTarget = targetModeOption("RYLUX 沙箱副本\n"
+                + (sandboxGameAvailable() ? "已导入到沙箱" : "尚未导入到沙箱"));
+        desktopTarget.setId(View.generateViewId());
+        sandboxTarget.setId(View.generateViewId());
+        targets.addView(desktopTarget);
+        targets.addView(sandboxTarget);
+        String selectedMode = targetMode();
+        targets.check(TARGET_MODE_DESKTOP.equals(selectedMode)
+                ? desktopTarget.getId() : sandboxTarget.getId());
+        selection.addView(targets);
+        TextView availability = label(gameStatus(), 12, MUTED, false);
+        availability.setPadding(0, dp(8), 0, 0);
+        selection.addView(availability);
+        targets.setOnCheckedChangeListener((group, checkedId) -> {
+            if (entryTargetMode != null) return;
+            String mode = checkedId == desktopTarget.getId() ? TARGET_MODE_DESKTOP : TARGET_MODE_SANDBOX;
+            put(TARGET_MODE_KEY, mode);
+            availability.setText(gameStatus());
+        });
+        if (entryTargetMode != null) {
+            targets.setEnabled(false);
+            desktopTarget.setEnabled(false);
+            sandboxTarget.setEnabled(false);
+        }
 
         LinearLayout advanced = section("运行环境与诊断", "权限仍由你在系统页面手动开启；进入工作台不会启动游戏或脚本。");
         environment = label(environmentText(), 12, MUTED, false);
@@ -328,25 +488,76 @@ public final class ScriptToolsActivity extends Activity {
                 new String[]{"手动截图与无障碍", "Root", "无障碍服务"}, 0);
         advanced.addView(label("Android 11 及以上通过无障碍服务读取画面；此权限必须由你在系统设置中启用。", 12, MUTED, false));
 
-        LinearLayout options = section("高级设置", "调试与虚拟屏幕偏好仅供记录。");
+        LinearLayout options = section("高级设置", "虚拟屏幕 DPI 会提供给 Lua 的显示信息接口。运行状态与失败日志可自动保存到应用私有 files/logs，最多保留 3 个 512 KiB 文件。日志上下文包含时间、线程及可用的真实来源；远程调试只保存在本机。");
         addText(options, "远程调试主机", "远程调试主机", false);
         addNumber(options, "远程调试端口", "远程调试端口", "10192", "端口", 1, 65535);
         addSwitch(options, "自动保存调试日志", "自动保存调试日志", true);
-        addSwitch(options, "日志行号文件名", "日志包含行号和文件名", true);
+        addSwitch(options, "日志行号文件名", "日志附带时间、线程和可用文件行号", true);
         addNumber(options, "虚拟屏幕宽度", "虚拟屏幕宽度", "720", "像素", 1, 16384);
         addNumber(options, "虚拟屏幕高度", "虚拟屏幕高度", "1280", "像素", 1, 16384);
-        addNumber(options, "虚拟屏幕DPI", "虚拟屏幕 DPI", "320", "DPI", 1, 2000);
+        addNumber(options, "虚拟屏幕DPI", "虚拟屏幕 DPI", LegacyLuaConfig.defaults().get("虚拟屏幕DPI"), "DPI", 1, 2000);
         addText(options, "手机编号", "手机编号", false);
         addSwitch(options, "开启vpn", "原脚本 VPN 偏好", false);
 
         root = previousRoot;
-        new AlertDialog.Builder(this).setTitle("设置").setView(page)
-                .setPositiveButton("完成", null).show();
+        Dialog dialog = new Dialog(this);
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(14), dp(12), dp(14), dp(12));
+        panel.setBackground(RyluxDesignSystem.card(this, 22));
+        LinearLayout heading = new LinearLayout(this);
+        heading.setGravity(Gravity.CENTER_VERTICAL);
+        TextView title = label("脚本设置", 19, TEXT, true);
+        heading.addView(title, new LinearLayout.LayoutParams(0, dp(48), 1));
+        Button close = button("×", SOFT);
+        close.setTextSize(22);
+        heading.addView(close, new LinearLayout.LayoutParams(dp(46), dp(44)));
+        close.setOnClickListener(v -> dialog.dismiss());
+        panel.addView(heading);
+        panel.addView(page, new LinearLayout.LayoutParams(-1, 0, 1));
+        Button done = button("完成", BLUE);
+        LinearLayout.LayoutParams doneLp = new LinearLayout.LayoutParams(-1, dp(46));
+        doneLp.topMargin = dp(8);
+        panel.addView(done, doneLp);
+        done.setOnClickListener(v -> dialog.dismiss());
+        dialog.setContentView(panel);
+        dialog.setCanceledOnTouchOutside(true);
+        dialog.setOnDismissListener(ignored -> {
+            if (targetSummary != null) targetSummary.setText(targetSummaryText());
+            if (environment != null) environment.setText(environmentText());
+        });
+        dialog.show();
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            int screenWidth = getResources().getDisplayMetrics().widthPixels;
+            int screenHeight = getResources().getDisplayMetrics().heightPixels;
+            window.setLayout(Math.min(dp(560), screenWidth - dp(32)),
+                    Math.min(Math.round(screenHeight * 0.86f), screenHeight - dp(64)));
+            window.setGravity(Gravity.CENTER);
+        }
+    }
+
+    private RadioButton targetModeOption(String text) {
+        RadioButton option = new RadioButton(this);
+        option.setText(text);
+        option.setTextColor(TEXT);
+        option.setTextSize(13);
+        option.setLineSpacing(dp(2), 1f);
+        option.setPadding(dp(12), dp(6), dp(10), dp(6));
+        if (Build.VERSION.SDK_INT >= 21) {
+            option.setButtonTintList(android.content.res.ColorStateList.valueOf(BLUE));
+        }
+        option.setBackground(RyluxDesignSystem.secondaryButton(this, 14));
+        RadioGroup.LayoutParams lp = new RadioGroup.LayoutParams(-1, -2);
+        lp.topMargin = dp(6);
+        option.setLayoutParams(lp);
+        return option;
     }
 
     private void showOverlayPreview() {
         if (Build.VERSION.SDK_INT >= 23 && !Settings.canDrawOverlays(this)) {
-            new AlertDialog.Builder(this).setTitle("需要悬浮窗权限")
+            alertDialog().setTitle("需要悬浮窗权限")
                     .setMessage("启用权限后才能显示脚本控制悬浮窗。预览只显示界面，不会启动游戏或脚本。")
                     .setNegativeButton("取消", null)
                     .setPositiveButton("前往设置", (dialog, which) -> {
@@ -378,7 +589,7 @@ public final class ScriptToolsActivity extends Activity {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(dp(14), dp(14), dp(14), dp(14));
-        card.setBackground(round(CARD, 14));
+        card.setBackground(RyluxDesignSystem.card(this, 16));
         card.addView(label(title, 16, TEXT, true));
         TextView note = label(description, 12, MUTED, false);
         note.setPadding(0, dp(5), 0, dp(12));
@@ -411,7 +622,7 @@ public final class ScriptToolsActivity extends Activity {
         ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, visible);
         list.setAdapter(adapter);
         panel.addView(list, new LinearLayout.LayoutParams(-1, dp(380)));
-        AlertDialog dialog = new AlertDialog.Builder(this).setTitle(key).setView(panel)
+        AlertDialog dialog = alertDialog().setTitle(key).setView(panel)
                 .setNegativeButton("取消", null).create();
         Runnable filter = () -> {
             String query = search.getText().toString().trim().toLowerCase(Locale.ROOT);
@@ -479,8 +690,8 @@ public final class ScriptToolsActivity extends Activity {
         control.setChecked(values.optBoolean(key, fallback));
         control.setOnCheckedChangeListener((button, checked) -> {
             if ("保护装备不出售".equals(key) && !checked) {
-                new AlertDialog.Builder(this).setTitle("关闭装备保护？")
-                        .setMessage("这只会记录偏好。回收脚本和未来适配器尚未验证，关闭后可能增加误售风险。")
+                alertDialog().setTitle("关闭装备保护？")
+                        .setMessage("关闭后，脚本仍只出售已勾选品质；回红/回内及无法识别的词条会保留。请同时确认“允许出售装备”和品质勾选。")
                         .setNegativeButton("保持保护", (dialog, which) -> control.setChecked(true))
                         .setPositiveButton("仍要关闭", (dialog, which) -> put(key, false))
                         .setOnCancelListener(dialog -> control.setChecked(true)).show();
@@ -519,6 +730,54 @@ public final class ScriptToolsActivity extends Activity {
         return isAccessibilityServiceEnabled() ? "游戏输入服务：已启用" : "游戏输入服务：未启用";
     }
 
+    private String targetMode() {
+        if (entryTargetMode != null) return entryTargetMode;
+        return TARGET_MODE_DESKTOP.equals(values.optString(TARGET_MODE_KEY, TARGET_MODE_SANDBOX))
+                ? TARGET_MODE_DESKTOP : TARGET_MODE_SANDBOX;
+    }
+
+    private String runtimeConfigSnapshot() {
+        try {
+            JSONObject snapshot = new JSONObject(values.toString());
+            snapshot.put(TARGET_MODE_KEY, targetMode());
+            return snapshot.toString();
+        } catch (JSONException invalid) {
+            return values.toString();
+        }
+    }
+
+    private String requestedTargetMode(Intent intent) {
+        if (intent == null) return null;
+        String requested = intent.getStringExtra(EXTRA_TARGET_MODE);
+        return TARGET_MODE_DESKTOP.equals(requested) || TARGET_MODE_SANDBOX.equals(requested)
+                ? requested : null;
+    }
+
+    private boolean desktopGameAvailable() {
+        try {
+            getPackageManager().getApplicationInfo(GAME, 0);
+            return true;
+        } catch (PackageManager.NameNotFoundException | RuntimeException unavailable) {
+            return false;
+        }
+    }
+
+    private boolean sandboxGameAvailable() {
+        RyluxApplication app = (RyluxApplication) getApplication();
+        if (!app.isBlackBoxReady()) return false;
+        try {
+            for (ApplicationInfo info : BlackBoxCore.get().getInstalledApplications(0, 0)) {
+                if (info != null && GAME.equals(info.packageName)) return true;
+            }
+        } catch (Throwable ignored) { }
+        return false;
+    }
+
+    private boolean selectedTargetAvailable() {
+        return TARGET_MODE_DESKTOP.equals(targetMode())
+                ? desktopGameAvailable() : sandboxGameAvailable();
+    }
+
     private boolean isAccessibilityServiceEnabled() {
         if (Build.VERSION.SDK_INT < 30) return false;
         String enabled = Settings.Secure.getString(getContentResolver(),
@@ -537,22 +796,24 @@ public final class ScriptToolsActivity extends Activity {
     }
 
     private String gameStatus() {
-        RyluxApplication app = (RyluxApplication) getApplication();
-        if (!app.isBlackBoxReady()) return "沙箱未就绪";
-        try {
-            for (ApplicationInfo info : BlackBoxCore.get().getInstalledApplications(0, 0)) {
-                if (info != null && GAME.equals(info.packageName)) return "目标游戏已导入沙箱";
-            }
-            return "目标游戏尚未导入沙箱";
-        } catch (Throwable error) {
-            return "无法读取沙箱游戏状态";
-        }
+        String desktop = desktopGameAvailable() ? "已安装" : "未检测到";
+        String sandbox = sandboxGameAvailable() ? "已导入" : "未导入 / 沙箱未就绪";
+        String mode = TARGET_MODE_DESKTOP.equals(targetMode()) ? "桌面客户端" : "RYLUX 沙箱副本";
+        String selected = selectedTargetAvailable() ? "可用" : "不可用，请检查安装状态";
+        return "桌面客户端：" + desktop + "\n沙箱副本：" + sandbox
+                + "\n当前目标：" + mode + "（" + selected + "）";
     }
 
     private void showPreflight() {
         String[] roles = {"队长", "队员", "不组队"};
         String[] modes = {"不筛选", "回蓝 ≥", "魔法出招 ≥", "武器出招 ≥"};
-        String summary = "方案：" + profileName + "\n游戏：" + GAME + "\n脚本：封神榜"
+        boolean canOpenAccessibilitySettings = Build.VERSION.SDK_INT >= 30 && !isAccessibilityServiceEnabled();
+        boolean canStart = scriptCompatibilityBlockers().isEmpty()
+                && ScriptGameAdapter.isConnected()
+                && selectedTargetAvailable()
+                && (Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(this));
+        String summary = "方案：" + profileName + "\n游戏：" + GAME
+                + "\n运行来源：" + targetModeCaption() + "\n脚本：封神榜"
                 + "\n挂机点：" + mapName(values.optInt("挂机点地图", 0))
                 + " (" + values.optString("挂机点x", "100") + ", " + values.optString("挂机点y", "200") + ")"
                 + "\n卖货地图：" + mapName(values.optInt("卖货地图", 0))
@@ -579,44 +840,68 @@ public final class ScriptToolsActivity extends Activity {
                 + "\n兼容说明：OCR 使用 ML Kit 替代旧字库；系统命令仅开放 /proc/uptime；文本输入依赖游戏提供可访问输入框"
                 + "\n脚本兼容阻塞项：" + scriptCompatibilityBlockers()
                 + "\n悬浮窗权限：" + (Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(this) ? "已就绪" : "未开启")
-                + "\n\n检查通过后才会开放开始操作。";
-        boolean canOpenAccessibilitySettings = Build.VERSION.SDK_INT >= 30 && !isAccessibilityServiceEnabled();
-        showRyluxDialog("运行前检查", summary, null,
-                canOpenAccessibilitySettings ? "打开无障碍设置" : "知道了",
-                canOpenAccessibilitySettings ? this::openAccessibilitySettings : null);
+                + (canStart
+                        ? "\n\n检查已通过。点击下方按钮继续到启动确认。"
+                        : "\n\n请先完成未就绪项目，再返回启动脚本。点击下方按钮可前往开启游戏输入服务。" );
+        String actionLabel = canStart ? "继续到启动确认"
+                : canOpenAccessibilitySettings ? "开启游戏输入服务" : "返回工作台";
+        Runnable action = canStart ? this::confirmAndStart
+                : canOpenAccessibilitySettings ? this::openAccessibilitySettings : null;
+        showRyluxDialog("运行前检查", summary, null, actionLabel, action);
     }
 
     private void confirmAndStart() {
+        if (!MembershipAccess.hasCachedAccess(this)) {
+            closeWorkbenchForExpiredMembership();
+            return;
+        }
         String blockers = scriptCompatibilityBlockers();
         if (!blockers.isEmpty() || !ScriptGameAdapter.isConnected()
-                || gameStatus().contains("尚未导入") || gameStatus().contains("未就绪")
+                || !selectedTargetAvailable()
                 || (Build.VERSION.SDK_INT >= 23 && !Settings.canDrawOverlays(this))) {
             showPreflight();
             return;
         }
-        String summary = "方案：" + profileName + "\n目标：封神榜（汉化版）\n运行模式：无障碍截图与触控"
+        String summary = "方案：" + profileName + "\n目标：封神榜手游\n运行来源："
+                + targetModeCaption() + "\n运行模式：无障碍截图与触控"
                 + "\n路线：" + mapName(values.optInt("挂机点地图", 0))
                 + "（" + values.optString("挂机点x", "100") + ", " + values.optString("挂机点y", "200") + "）"
                 + "\n自动战斗：" + onOff("自动战斗")
                 + "\n装备出售：" + onOff("出售装备") + "；装备保护："
                 + (values.optBoolean("保护装备不出售", true) ? "开启" : "关闭")
-                + "\n启动目标：RYLUX 沙箱内的封神榜"
-                + "\n\n点击开始后会打开沙箱游戏并运行脚本，随后显示可暂停/停止的 RYLUX 悬浮控制面板。";
+                + "\n启动目标：" + targetModeCaption()
+                + "\n\n点击开始后会打开所选游戏并运行脚本，随后显示可暂停/停止的 RYLUX 悬浮控制面板。";
         showRyluxDialog("确认本次运行", summary, "返回检查", "开始", this::startRuntime);
     }
 
     private void startRuntime() {
-        String confirmedConfig = values.toString();
-        Toast.makeText(this, "正在准备汉化并启动沙箱游戏…", Toast.LENGTH_SHORT).show();
-        // Use the same localization readiness gate as the sandbox launch flow
-        // before starting the script host or routing this package to BlackBoxCore.
-        new Thread(() -> prepareLocalizationThenStartRuntime(confirmedConfig), "RYLUX-Script-Launch").start();
+        if (!MembershipAccess.hasCachedAccess(this)) {
+            closeWorkbenchForExpiredMembership();
+            return;
+        }
+        Toast.makeText(this, "正在重新验证会员权限…", Toast.LENGTH_SHORT).show();
+        MembershipAccess.refresh(this, result -> runOnUiThread(() -> {
+            if (isFinishing()) return;
+            if (result == null || !result.allowed) {
+                showMembershipBlocked(result);
+                return;
+            }
+            String confirmedConfig = runtimeConfigSnapshot();
+            Toast.makeText(this, "正在准备并启动" + targetModeCaption() + "…", Toast.LENGTH_SHORT).show();
+            new Thread(() -> prepareLocalizationThenStartRuntime(confirmedConfig),
+                    "RYLUX-Script-Launch").start();
+        }));
     }
 
     private void prepareLocalizationThenStartRuntime(String confirmedConfig) {
         try {
-            LocalizationLaunchPreparation.prepare(this, message -> runOnUiThread(
-                    () -> Toast.makeText(this, message, Toast.LENGTH_SHORT).show()));
+            String confirmedMode = targetModeFromConfig(confirmedConfig);
+            boolean sandbox = !TARGET_MODE_DESKTOP.equals(confirmedMode);
+            boolean localizationEnabled = LocalizationSettings.isEnabled(this);
+            if (sandbox || localizationEnabled) {
+                LocalizationLaunchPreparation.prepare(this, message -> runOnUiThread(
+                        () -> Toast.makeText(this, message, Toast.LENGTH_SHORT).show()));
+            }
             runOnUiThread(() -> startRuntimeServicesAndLaunchGame(confirmedConfig));
         } catch (Exception error) {
             failRuntimeLaunch(error.getMessage());
@@ -624,10 +909,8 @@ public final class ScriptToolsActivity extends Activity {
     }
 
     private void startRuntimeServicesAndLaunchGame(String confirmedConfig) {
-        // Start the host and overlay while this activity is still foreground. The
-        // sandbox game must be launched last: finishing this activity after
-        // launch returns Android to the launcher and moves BlackBox's proxy task
-        // behind it, which makes both the game and the foreground gate fail.
+        // Start the host and overlay while this activity is still foreground,
+        // then launch the selected game source last so its window wins focus.
         try {
             if (Build.VERSION.SDK_INT >= 23 && Settings.canDrawOverlays(this)) {
                 Intent overlay = new Intent(this, ScriptControlOverlayService.class)
@@ -641,9 +924,8 @@ public final class ScriptToolsActivity extends Activity {
             if (Build.VERSION.SDK_INT >= 26) startForegroundService(command);
             else startService(command);
 
-            // BlackBoxCore routes this launch to the virtualized package.
-            if (!BlackBoxCore.get().launchApk(GAME, 0)) {
-                failRuntimeLaunch("RYLUX 无法打开沙箱中的封神榜。请返回沙箱页检查应用状态。");
+            if (!launchSelectedGame(confirmedConfig)) {
+                failRuntimeLaunch("RYLUX 无法打开所选的封神榜客户端。请在脚本设置中检查目标来源和安装状态。");
                 return;
             }
             // Reuse exactly this confirmed snapshot when Start is pressed again
@@ -651,7 +933,7 @@ public final class ScriptToolsActivity extends Activity {
             // must not silently alter the running scheme.
             ScriptLastRunConfig.save(this, confirmedConfig);
             Toast.makeText(this,
-                    "汉化已就绪，沙箱游戏和脚本已启动；可用 RYLUX 悬浮面板控制",
+                    "所选游戏和脚本已启动；可用 RYLUX 悬浮面板控制",
                     Toast.LENGTH_SHORT).show();
         } catch (RuntimeException error) {
             failRuntimeLaunch(error.getMessage());
@@ -661,7 +943,7 @@ public final class ScriptToolsActivity extends Activity {
     private void failRuntimeLaunch(String message) {
         runOnUiThread(() -> {
             stopPendingRuntime();
-            showRyluxDialog("沙箱游戏启动失败", message == null ? "RYLUX 无法启动沙箱游戏。" : message,
+            showRyluxDialog("目标游戏启动失败", message == null ? "RYLUX 无法启动所选游戏。" : message,
                     null, "知道了", null);
         });
     }
@@ -671,6 +953,37 @@ public final class ScriptToolsActivity extends Activity {
                 .setAction(ScriptRuntimeService.ACTION_STOP);
         try { startService(stop); } catch (RuntimeException ignored) { }
         stopService(new Intent(this, ScriptControlOverlayService.class));
+    }
+
+    private boolean launchSelectedGame(String confirmedConfig) {
+        String mode = targetModeFromConfig(confirmedConfig);
+        if (!TARGET_MODE_DESKTOP.equals(mode)) return BlackBoxCore.get().launchApk(GAME, 0);
+        Intent launch = getPackageManager().getLaunchIntentForPackage(GAME);
+        if (launch == null) return false;
+        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            startActivity(launch);
+            return true;
+        } catch (RuntimeException unavailable) {
+            return false;
+        }
+    }
+
+    private String targetModeCaption() {
+        return TARGET_MODE_DESKTOP.equals(targetMode()) ? "桌面安装版封神榜手游" : "RYLUX 沙箱中的封神榜";
+    }
+
+    private String targetSummaryText() {
+        return "封神榜脚本 · 当前目标：" + targetModeCaption() + " · 打开页面不会自动启动游戏或脚本";
+    }
+
+    static String targetModeFromConfig(String config) {
+        try {
+            String mode = new JSONObject(config).optString(TARGET_MODE_KEY, TARGET_MODE_SANDBOX);
+            return TARGET_MODE_DESKTOP.equals(mode) ? TARGET_MODE_DESKTOP : TARGET_MODE_SANDBOX;
+        } catch (JSONException invalid) {
+            return TARGET_MODE_SANDBOX;
+        }
     }
 
     private void showRyluxDialog(String title, String message, String secondaryLabel,
@@ -683,7 +996,20 @@ public final class ScriptToolsActivity extends Activity {
         TextView heading = label(title, 18, TEXT, true);
         heading.setPadding(0, 0, 0, dp(10));
         card.addView(heading);
-        ScrollView scroll = new ScrollView(this);
+        ScrollView scroll = new ScrollView(this) {
+            @Override
+            protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+                int maxHeight = Math.max(dp(120), getResources().getDisplayMetrics().heightPixels - dp(180));
+                int parentMode = MeasureSpec.getMode(heightMeasureSpec);
+                if (parentMode != MeasureSpec.UNSPECIFIED) {
+                    maxHeight = Math.min(maxHeight, MeasureSpec.getSize(heightMeasureSpec));
+                }
+                super.onMeasure(widthMeasureSpec,
+                        MeasureSpec.makeMeasureSpec(maxHeight, MeasureSpec.AT_MOST));
+            }
+        };
+        scroll.setFillViewport(true);
+        scroll.setVerticalScrollBarEnabled(true);
         TextView details = label(message, 14, TEXT, false);
         details.setLineSpacing(dp(3), 1f);
         scroll.addView(details, new ScrollView.LayoutParams(-1, -2));
@@ -768,7 +1094,7 @@ public final class ScriptToolsActivity extends Activity {
         JSONArray names = profileNames();
         String[] items = new String[names.length()];
         for (int i = 0; i < items.length; i++) items[i] = names.optString(i);
-        new AlertDialog.Builder(this).setTitle("切换配置方案")
+        alertDialog().setTitle("切换配置方案")
                 .setItems(items, (dialog, which) -> {
                     profileName = items[which];
                     preferences.edit().putString("selected", profileName).apply();
@@ -784,7 +1110,7 @@ public final class ScriptToolsActivity extends Activity {
         LinearLayout container = new LinearLayout(this);
         container.setPadding(dp(20), 0, dp(20), 0);
         container.addView(input, new LinearLayout.LayoutParams(-1, dp(54)));
-        new AlertDialog.Builder(this).setTitle("另存为命名方案").setView(container)
+        alertDialog().setTitle("另存为命名方案").setView(container)
                 .setNegativeButton("取消", null)
                 .setPositiveButton("保存", (dialog, which) -> {
                     String name = input.getText().toString().trim();
@@ -818,6 +1144,28 @@ public final class ScriptToolsActivity extends Activity {
     private void loadProfile() {
         try { values = new JSONObject(preferences.getString("profile:" + profileName, "{}")); }
         catch (JSONException ignored) { values = new JSONObject(); }
+        if (!values.has("虚拟屏幕DPI")) put("虚拟屏幕DPI", LegacyLuaConfig.defaults().get("虚拟屏幕DPI"));
+        migrateGearQuality();
+    }
+
+    private void migrateGearQuality() {
+        String[] keys = {"出售装备品质_白色", "出售装备品质_蓝色", "出售装备品质_绿色",
+                "出售装备品质_黄色", "出售装备品质_橙色"};
+        for (String key : keys) if (values.has(key)) return;
+        if (!values.has("出售装备品质上限")) {
+            put(keys[0], true);
+            put(keys[1], true);
+            put(keys[2], false);
+            put(keys[3], false);
+            put(keys[4], false);
+            return;
+        }
+        int legacyLevel = Math.max(0, Math.min(2, values.optInt("出售装备品质上限", 0)));
+        put(keys[0], legacyLevel >= 1);
+        put(keys[1], false);
+        put(keys[2], legacyLevel >= 2);
+        put(keys[3], false);
+        put(keys[4], false);
     }
 
     private void put(String key, Object value) {
@@ -853,7 +1201,7 @@ public final class ScriptToolsActivity extends Activity {
         view.setHintTextColor(MUTED);
         view.setTextSize(14);
         view.setSingleLine(!multiline);
-        view.setBackground(round(SOFT, 10));
+        view.setBackground(RyluxDesignSystem.secondaryButton(this, 10));
         view.setPadding(dp(12), dp(8), dp(12), dp(8));
         return view;
     }
@@ -879,17 +1227,26 @@ public final class ScriptToolsActivity extends Activity {
         return view;
     }
 
+    private AlertDialog.Builder alertDialog() {
+        return new AlertDialog.Builder(this, R.style.RyluxAlertDialogTheme);
+    }
+
     private Button button(String text, int color) {
         Button view = new Button(this);
         view.setText(text);
         view.setTextColor(TEXT);
         view.setTextSize(13);
         view.setAllCaps(false);
-        view.setBackground(round(color, 12));
+        view.setBackground(color == BLUE ? RyluxDesignSystem.primaryButton(this, 12)
+                : RyluxDesignSystem.secondaryButton(this, 12));
+        view.setElevation(dp(2));
         return view;
     }
 
     private GradientDrawable round(int color, int radiusDp) {
+        if (color == BLUE) return RyluxDesignSystem.primaryButton(this, radiusDp);
+        if (color == SOFT) return RyluxDesignSystem.secondaryButton(this, radiusDp);
+        if (color == CARD) return RyluxDesignSystem.card(this, radiusDp);
         GradientDrawable shape = new GradientDrawable();
         shape.setColor(color);
         shape.setCornerRadius(dp(radiusDp));

@@ -19,6 +19,10 @@ public final class LocalizationLaunchPreparation {
         if (!LocalizationSettings.isEnabled(appContext)) {
             throw new IllegalStateException("RYLUX 汉化开关已关闭，请在首页开启后重试");
         }
+        if (!MembershipAccess.hasCachedAccess(appContext)) {
+            LocalizationSettings.setEnabled(appContext, false);
+            throw new IllegalStateException("VIP / 体验会员已到期，汉化功能不可用");
+        }
         if (InterceptService.isRunning()) return;
 
         LaunchProgress.begin("正在准备 RYLUX 汉化资源…");

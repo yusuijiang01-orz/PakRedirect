@@ -65,7 +65,11 @@ public final class GameInstallAndMirrorHelper {
         LinearLayout.LayoutParams lp =
                 new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(activity, 56));
         lp.topMargin = dp(activity, 10);
-        parent.addView(installButton, Math.max(0, parent.indexOfChild(startButton)), lp);
+        View workbenchButton = findTagged(activity.getWindow().getDecorView(),
+                "rylux_script_workbench_button");
+        int anchor = workbenchButton != null && workbenchButton.getParent() == parent
+                ? parent.indexOfChild(workbenchButton) : parent.indexOfChild(startButton);
+        parent.addView(installButton, Math.max(0, anchor), lp);
     }
 
     private static boolean hasInstallButton(LinearLayout parent) {

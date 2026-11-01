@@ -302,7 +302,7 @@ public final class RyluxUiPolish {
         LinearLayout panel = findPanel(heading);
         if (panel == null || !PANEL_STYLED.add(panel)) return;
 
-        panel.setBackground(verticalGradient(PANEL_TOP, PANEL_BOTTOM, dp(activity, 22)));
+        panel.setBackground(RyluxDesignSystem.card(activity, 22));
         panel.setPadding(dp(activity, 20), dp(activity, 16), dp(activity, 20), dp(activity, 20));
         if (Build.VERSION.SDK_INT >= 21) panel.setElevation(dp(activity, 24));
 
@@ -370,7 +370,7 @@ public final class RyluxUiPolish {
         LinearLayout profileCard = new LinearLayout(activity);
         profileCard.setOrientation(LinearLayout.VERTICAL);
         profileCard.setPadding(dp(activity, 14), dp(activity, 13), dp(activity, 14), dp(activity, 14));
-        profileCard.setBackground(round(activity, SURFACE, 15, BORDER_SOFT, 1));
+        profileCard.setBackground(RyluxDesignSystem.card(activity, 15));
 
         LinearLayout identity = new LinearLayout(activity);
         identity.setOrientation(LinearLayout.HORIZONTAL);
@@ -380,7 +380,7 @@ public final class RyluxUiPolish {
         avatar.setImageResource(R.drawable.default_avatar);
         avatar.setScaleType(ImageView.ScaleType.FIT_CENTER);
         avatar.setPadding(dp(activity, 3), dp(activity, 3), dp(activity, 3), dp(activity, 3));
-        avatar.setBackground(oval(SURFACE, BORDER_SOFT, dp(activity, 1)));
+        avatar.setBackground(oval(RyluxDesignSystem.SOFT, RyluxDesignSystem.BORDER, dp(activity, 1)));
         if (Build.VERSION.SDK_INT >= 21) {
             avatar.setOutlineProvider(new ViewOutlineProvider() {
                 @Override
@@ -398,7 +398,7 @@ public final class RyluxUiPolish {
         LinearLayout userText = new LinearLayout(activity);
         userText.setOrientation(LinearLayout.VERTICAL);
         username.setTextSize(17);
-        username.setTextColor(TEXT);
+        username.setTextColor(RyluxDesignSystem.TEXT);
         username.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         username.setSingleLine(true);
         username.setEllipsize(TextUtils.TruncateAt.END);
@@ -411,8 +411,8 @@ public final class RyluxUiPolish {
         state.setEllipsize(TextUtils.TruncateAt.END);
         state.setTextColor(stateText.contains("Admin") ? ADMIN_GREEN
                 : stateText.contains("体验") ? YELLOW
-                : stateText.contains("VIP") ? Color.rgb(255, 102, 112)
-                : MUTED);
+                : stateText.contains("VIP") ? YELLOW
+                : RyluxDesignSystem.MUTED);
         LinearLayout.LayoutParams stateLp = new LinearLayout.LayoutParams(-1, -2);
         stateLp.topMargin = dp(activity, 4);
         userText.addView(state, stateLp);
@@ -448,7 +448,7 @@ public final class RyluxUiPolish {
         redeemTitle.setPadding(0, 0, 0, 0);
         redeemTitle.setGravity(Gravity.CENTER);
         redeemTitle.setTextSize(16);
-        redeemTitle.setTextColor(TEXT);
+        redeemTitle.setTextColor(RyluxDesignSystem.TEXT);
         redeemTitle.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         LinearLayout.LayoutParams redeemTitleLp =
                 new LinearLayout.LayoutParams(-1, dp(activity, 52));
@@ -495,15 +495,23 @@ public final class RyluxUiPolish {
         }
 
         ArrayList<View> children = snapshot(panel);
+        View scriptWorkbenchButton = children.size() > 9
+                && "rylux_script_workbench_button".equals(children.get(6).getTag())
+                ? children.get(6) : null;
+        int startIndex = scriptWorkbenchButton == null ? 6 : 7;
+        if (children.size() <= startIndex + 2) {
+            styleFallbackPanel(activity, panel);
+            return;
+        }
         View header = children.get(0);
         View gameHeadRaw = children.get(1);
         TextView description = asText(children.get(2));
         View updateRow = children.get(3);
         View progressRow = children.get(4);
         View localizationControl = children.get(5);
-        Button startButton = asButton(children.get(6));
-        TextView moduleProgressText = asText(children.get(7));
-        View moduleProgress = children.get(8);
+        Button startButton = asButton(children.get(startIndex));
+        TextView moduleProgressText = asText(children.get(startIndex + 1));
+        View moduleProgress = children.get(startIndex + 2);
 
         panel.removeAllViews();
 
@@ -548,7 +556,7 @@ public final class RyluxUiPolish {
                 if (gameText.getChildCount() > 0 && gameText.getChildAt(0) instanceof TextView) {
                     TextView title = (TextView) gameText.getChildAt(0);
                     title.setTextSize(20);
-                    title.setTextColor(TEXT);
+                    title.setTextColor(RyluxDesignSystem.TEXT);
                     title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
                 }
                 if (gameText.getChildCount() > 1 && gameText.getChildAt(1) instanceof TextView) {
@@ -575,7 +583,7 @@ public final class RyluxUiPolish {
 
                 removeFromParent(description);
                 description.setTextSize(12.5f);
-                description.setTextColor(Color.rgb(173, 184, 199));
+                description.setTextColor(RyluxDesignSystem.MUTED);
                 description.setLineSpacing(0f, 1.18f);
                 description.setPadding(0, dp(activity, 10), 0, 0);
                 gameText.addView(description, new LinearLayout.LayoutParams(-1, -2));
@@ -590,7 +598,7 @@ public final class RyluxUiPolish {
         LinearLayout infoCard = new LinearLayout(activity);
         infoCard.setOrientation(LinearLayout.VERTICAL);
         infoCard.setPadding(dp(activity, 13), dp(activity, 5), dp(activity, 13), dp(activity, 5));
-        infoCard.setBackground(round(activity, SURFACE, 14, BORDER_SOFT, 1));
+        infoCard.setBackground(RyluxDesignSystem.card(activity, 14));
 
         styleInfoRow(activity, updateRow, true);
         styleInfoRow(activity, progressRow, true);
@@ -604,24 +612,35 @@ public final class RyluxUiPolish {
 
         if (localizationControl instanceof LinearLayout) {
             LinearLayout control = (LinearLayout) localizationControl;
-            control.setBackground(round(activity, SURFACE_2, 12, BORDER_SOFT, 1));
+            control.setBackground(round(activity, RyluxDesignSystem.SOFT, 12,
+                    RyluxDesignSystem.BORDER, 1));
             if (control.getChildCount() > 0 && control.getChildAt(0) instanceof LinearLayout) {
                 LinearLayout row = (LinearLayout) control.getChildAt(0);
                 if (row.getChildCount() > 0 && row.getChildAt(0) instanceof TextView) {
                     TextView title = (TextView) row.getChildAt(0);
-                    title.setTextColor(TEXT);
+                    title.setTextColor(RyluxDesignSystem.TEXT);
                     title.setTextSize(13);
                     title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
                 }
             }
             if (control.getChildCount() > 1 && control.getChildAt(1) instanceof TextView) {
                 TextView note = (TextView) control.getChildAt(1);
-                note.setTextColor(MUTED);
+                note.setTextColor(RyluxDesignSystem.MUTED);
                 note.setTextSize(10);
             }
             LinearLayout.LayoutParams localizationLp = new LinearLayout.LayoutParams(-1, -2);
             localizationLp.topMargin = dp(activity, 10);
             panel.addView(localizationControl, localizationLp);
+        }
+
+        if (scriptWorkbenchButton instanceof Button) {
+            Button scriptButton = (Button) scriptWorkbenchButton;
+            scriptButton.setText("打开脚本工作台");
+            stylePrimaryButton(activity, scriptButton);
+            LinearLayout.LayoutParams scriptLp =
+                    new LinearLayout.LayoutParams(-1, dp(activity, 56));
+            scriptLp.topMargin = dp(activity, 10);
+            panel.addView(scriptButton, scriptLp);
         }
 
         stylePrimaryButton(activity, startButton);
@@ -631,7 +650,7 @@ public final class RyluxUiPolish {
         startLp.topMargin = dp(activity, 10);
         panel.addView(startButton, startLp);
 
-        moduleProgressText.setTextColor(MUTED);
+        moduleProgressText.setTextColor(RyluxDesignSystem.MUTED);
         moduleProgressText.setTextSize(12);
         moduleProgressText.setGravity(Gravity.CENTER);
         moduleProgressText.setPadding(0, dp(activity, 8), 0, dp(activity, 5));
@@ -640,8 +659,8 @@ public final class RyluxUiPolish {
         if (moduleProgress instanceof ProgressBar) {
             ProgressBar progressBar = (ProgressBar) moduleProgress;
             if (Build.VERSION.SDK_INT >= 21) {
-                progressBar.setProgressTintList(android.content.res.ColorStateList.valueOf(BLUE_LIGHT));
-                progressBar.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(BLUE_LIGHT));
+                progressBar.setProgressTintList(android.content.res.ColorStateList.valueOf(RyluxDesignSystem.ACCENT));
+                progressBar.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(RyluxDesignSystem.ACCENT));
             }
         }
         LinearLayout.LayoutParams progressLp =
@@ -690,7 +709,7 @@ public final class RyluxUiPolish {
         if (heading != null) {
             heading.setText(gamePanel ? "✦  游戏详情  ✦" : "账号中心");
             heading.setTextSize(gamePanel ? 18 : 20);
-            heading.setTextColor(TEXT);
+            heading.setTextColor(RyluxDesignSystem.TEXT);
             heading.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
             heading.setGravity(Gravity.CENTER);
             if (gamePanel) heading.setTextColor(Color.rgb(240, 229, 207));
@@ -705,7 +724,7 @@ public final class RyluxUiPolish {
             else if (v instanceof Button) styleOutlineButton(activity, (Button) v, false);
             else if (v instanceof TextView) {
                 TextView t = (TextView) v;
-                if (!"×".equals(value(t))) t.setTextColor(TEXT);
+                if (!"×".equals(value(t))) t.setTextColor(RyluxDesignSystem.TEXT);
             }
         }
     }
@@ -722,21 +741,21 @@ public final class RyluxUiPolish {
             if (!(child instanceof TextView)) continue;
             TextView t = (TextView) child;
             t.setTextSize(compact ? 12.5f : 12.5f);
-            t.setTextColor(i == 0 ? MUTED : TEXT);
+            t.setTextColor(i == 0 ? RyluxDesignSystem.MUTED : RyluxDesignSystem.TEXT);
             if (i > 0) t.setTypeface(Typeface.DEFAULT, Typeface.NORMAL);
         }
     }
 
     private static void styleInput(Activity activity, EditText edit) {
-        edit.setTextColor(TEXT);
-        edit.setHintTextColor(MUTED_2);
+        edit.setTextColor(RyluxDesignSystem.TEXT);
+        edit.setHintTextColor(RyluxDesignSystem.MUTED);
         edit.setTextSize(14.5f);
         edit.setPadding(dp(activity, 14), 0, dp(activity, 14), 0);
         edit.setBackground(round(
                 activity,
-                Color.rgb(10, 16, 25),
+                RyluxDesignSystem.SOFT,
                 10,
-                Color.rgb(42, 61, 88),
+                RyluxDesignSystem.BORDER,
                 1
         ));
     }
@@ -745,14 +764,10 @@ public final class RyluxUiPolish {
         button.setAllCaps(false);
         button.setTextSize(14);
         button.setTypeface(Typeface.DEFAULT, Typeface.NORMAL);
-        button.setTextColor(emphasized ? Color.rgb(218, 232, 255) : Color.rgb(221, 229, 240));
-        button.setBackground(round(
-                activity,
-                emphasized ? Color.rgb(24, 47, 87) : Color.rgb(17, 26, 39),
-                8,
-                emphasized ? Color.rgb(64, 123, 219) : Color.rgb(55, 83, 121),
-                1
-        ));
+        button.setTextColor(RyluxDesignSystem.TEXT);
+        button.setBackground(emphasized
+                ? RyluxDesignSystem.emphasizedButton(activity, 8)
+                : RyluxDesignSystem.secondaryButton(activity, 8));
         if (Build.VERSION.SDK_INT >= 21) {
             button.setStateListAnimator(null);
             button.setElevation(0);
@@ -763,22 +778,16 @@ public final class RyluxUiPolish {
         button.setAllCaps(false);
         button.setTextSize(18);
         button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        button.setTextColor(button.isEnabled() ? Color.WHITE : Color.rgb(142, 157, 177));
+        button.setTextColor(button.isEnabled() ? Color.WHITE : RyluxDesignSystem.MUTED);
 
         if (button.isEnabled()) {
-            GradientDrawable bg = new GradientDrawable(
-                    GradientDrawable.Orientation.TOP_BOTTOM,
-                    new int[]{BLUE_LIGHT, BLUE, BLUE_DARK}
-            );
-            bg.setCornerRadius(dp(activity, 9));
-            bg.setStroke(dp(activity, 1), Color.rgb(104, 173, 255));
-            button.setBackground(bg);
+            button.setBackground(RyluxDesignSystem.primaryButton(activity, 9));
         } else {
             button.setBackground(round(
                     activity,
-                    Color.rgb(38, 48, 62),
+                    RyluxDesignSystem.SOFT,
                     9,
-                    Color.rgb(62, 75, 92),
+                    RyluxDesignSystem.BORDER,
                     1
             ));
         }
@@ -854,7 +863,7 @@ public final class RyluxUiPolish {
 
     private static View separator(Activity activity) {
         View line = new View(activity);
-        line.setBackgroundColor(Color.rgb(37, 51, 71));
+        line.setBackgroundColor(RyluxDesignSystem.BORDER);
         return line;
     }
 

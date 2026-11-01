@@ -5,13 +5,13 @@ import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.graphics.Color;
 import android.graphics.Typeface;
-import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
@@ -34,13 +34,6 @@ import java.util.concurrent.Executors;
 public final class BlackBoxSandboxActivity extends Activity {
     private static final int PICK_APK = 6017;
     private static final String LOCALIZED_GAME_PACKAGE = "com.tepaylink.tamgioiphantranhmobile";
-    private static final int BG = Color.rgb(17, 19, 24);
-    private static final int CARD = Color.rgb(28, 32, 40);
-    private static final int SOFT = Color.rgb(34, 39, 48);
-    private static final int TEXT = Color.rgb(245, 247, 250);
-    private static final int MUTED = Color.rgb(154, 163, 176);
-    private static final int BLUE = Color.rgb(72, 113, 255);
-    private static final int BORDER = Color.rgb(47, 53, 64);
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private LinearLayout appList;
@@ -79,25 +72,36 @@ public final class BlackBoxSandboxActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        if (localizationToggle != null) {
-            localizationToggle.setChecked(LocalizationSettings.isEnabled(this));
+        boolean cached = MembershipAccess.hasCachedAccess(this);
+        if (!cached && LocalizationSettings.isEnabled(this)) {
+            LocalizationSettings.setEnabled(this, false);
+            stopInterceptModule();
         }
+        if (localizationToggle != null) {
+            localizationToggle.setOnCheckedChangeListener(null);
+            localizationToggle.setChecked(cached && LocalizationSettings.isEnabled(this));
+            localizationToggle.setEnabled(true);
+            bindLocalizationToggle();
+        }
+        MembershipAccess.refresh(this, result -> runOnUiThread(() -> {
+            if (!isFinishing() && !isDestroyed()) applyMembershipCheck(result);
+        }));
     }
 
     private void buildUi() {
         ScrollView page = new ScrollView(this);
         page.setFillViewport(true);
-        page.setBackgroundColor(BG);
+        page.setBackgroundColor(Color.TRANSPARENT);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(18), dp(14), dp(18), dp(20));
         page.addView(root, new ScrollView.LayoutParams(-1, -2));
 
-        Button back = button("‹  返回 RYLUX", SOFT);
+        Button back = button("‹  返回 RYLUX", false);
         back.setOnClickListener(v -> finish());
         root.addView(back, new LinearLayout.LayoutParams(-1, dp(44)));
 
-        TextView title = label("BlackBox 游戏沙箱", 23, TEXT, true);
+        TextView title = label("BlackBox 游戏沙箱", 23, RyluxDesignSystem.TEXT, true);
         LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(-1, -2);
         titleLp.topMargin = dp(18);
         root.addView(title, titleLp);
@@ -105,7 +109,7 @@ public final class BlackBoxSandboxActivity extends Activity {
         TextView note = label(
                 "测试版：导入单个 APK 并尝试在虚拟环境运行。无需 Root；暂不支持 XAPK/APKS，游戏与模拟器兼容性需逐个验证。",
                 13,
-                MUTED,
+                RyluxDesignSystem.MUTED,
                 false
         );
         note.setLineSpacing(dp(3), 1.08f);
@@ -114,27 +118,27 @@ public final class BlackBoxSandboxActivity extends Activity {
         noteLp.bottomMargin = dp(16);
         root.addView(note, noteLp);
 
-        Button importButton = button("选择游戏 APK 导入沙箱", BLUE);
+        Button importButton = button("选择游戏 APK 导入沙箱", true);
         importButton.setOnClickListener(v -> pickApk());
         root.addView(importButton, new LinearLayout.LayoutParams(-1, dp(50)));
 
         LinearLayout statusCard = new LinearLayout(this);
         statusCard.setGravity(Gravity.CENTER_VERTICAL);
         statusCard.setPadding(dp(12), dp(10), dp(12), dp(10));
-        statusCard.setBackground(round(CARD, 14, BORDER));
+        statusCard.setBackground(RyluxDesignSystem.card(this, 14));
         progress = new ProgressBar(this);
         progress.setIndeterminate(true);
         progress.setVisibility(View.GONE);
         LinearLayout.LayoutParams progressLp = new LinearLayout.LayoutParams(dp(20), dp(20));
         progressLp.rightMargin = dp(10);
         statusCard.addView(progress, progressLp);
-        status = label("正在检查虚拟环境…", 13, MUTED, false);
+        status = label("正在检查虚拟环境…", 13, RyluxDesignSystem.MUTED, false);
         statusCard.addView(status, new LinearLayout.LayoutParams(0, -2, 1));
         LinearLayout.LayoutParams statusLp = new LinearLayout.LayoutParams(-1, -2);
         statusLp.topMargin = dp(14);
         root.addView(statusCard, statusLp);
 
-        TextView section = label("沙箱中的应用", 16, TEXT, true);
+        TextView section = label("沙箱中的应用", 16, RyluxDesignSystem.TEXT, true);
         LinearLayout.LayoutParams sectionLp = new LinearLayout.LayoutParams(-1, -2);
         sectionLp.topMargin = dp(20);
         sectionLp.bottomMargin = dp(8);
@@ -144,14 +148,14 @@ public final class BlackBoxSandboxActivity extends Activity {
         appList.setOrientation(LinearLayout.VERTICAL);
         root.addView(appList, new LinearLayout.LayoutParams(-1, -2));
 
-        Button refresh = button("刷新列表", SOFT);
+        Button refresh = button("刷新列表", false);
         refresh.setOnClickListener(v -> refreshApps());
         LinearLayout.LayoutParams refreshLp = new LinearLayout.LayoutParams(-1, dp(44));
         refreshLp.topMargin = dp(10);
         root.addView(refresh, refreshLp);
 
         View divider = new View(this);
-        divider.setBackgroundColor(BORDER);
+        divider.setBackgroundColor(RyluxDesignSystem.BORDER);
         LinearLayout.LayoutParams dividerLp = new LinearLayout.LayoutParams(-1, dp(1));
         dividerLp.topMargin = dp(24);
         dividerLp.bottomMargin = dp(20);
@@ -160,16 +164,19 @@ public final class BlackBoxSandboxActivity extends Activity {
         LinearLayout scriptsCard = new LinearLayout(this);
         scriptsCard.setOrientation(LinearLayout.VERTICAL);
         scriptsCard.setPadding(dp(14), dp(14), dp(14), dp(14));
-        scriptsCard.setBackground(round(CARD, 14, BORDER));
-        scriptsCard.addView(label("脚本工具", 16, TEXT, true));
-        TextView scriptNote = label("Lua 执行宿主已接入 · 配置方案并确认后运行", 13, MUTED, false);
+        scriptsCard.setBackground(RyluxDesignSystem.card(this, 14));
+        scriptsCard.addView(label("脚本工具", 16, RyluxDesignSystem.TEXT, true));
+        TextView scriptNote = label("Lua 执行宿主已接入 · 配置方案并确认后运行", 13, RyluxDesignSystem.MUTED, false);
         scriptNote.setPadding(0, dp(7), 0, dp(12));
         scriptsCard.addView(scriptNote);
-        Button openScripts = button("打开脚本工作台", SOFT);
-        openScripts.setOnClickListener(v -> startActivity(new Intent(this, ScriptToolsActivity.class)));
+        Button openScripts = button("打开脚本工作台", false);
+        openScripts.setOnClickListener(v -> openScriptWorkbench());
         scriptsCard.addView(openScripts, new LinearLayout.LayoutParams(-1, dp(46)));
         root.addView(scriptsCard, new LinearLayout.LayoutParams(-1, -2));
-        setContentView(page);
+        FrameLayout host = new FrameLayout(this);
+        RyluxDesignSystem.installHomeBackdrop(this, host);
+        host.addView(page, new FrameLayout.LayoutParams(-1, -1));
+        setContentView(host);
     }
 
     private void pickApk() {
@@ -267,7 +274,7 @@ public final class BlackBoxSandboxActivity extends Activity {
             LinearLayout card = new LinearLayout(this);
             card.setOrientation(LinearLayout.VERTICAL);
             card.setPadding(dp(12), dp(10), dp(12), dp(10));
-            card.setBackground(round(CARD, 14, BORDER));
+            card.setBackground(RyluxDesignSystem.card(this, 14));
 
             CharSequence appName;
             try {
@@ -275,8 +282,8 @@ public final class BlackBoxSandboxActivity extends Activity {
             } catch (Throwable ignored) {
                 appName = app.packageName;
             }
-            card.addView(label(String.valueOf(appName), 15, TEXT, true));
-            TextView packageName = label(app.packageName, 11, MUTED, false);
+            card.addView(label(String.valueOf(appName), 15, RyluxDesignSystem.TEXT, true));
+            TextView packageName = label(app.packageName, 11, RyluxDesignSystem.MUTED, false);
             packageName.setPadding(0, dp(3), 0, dp(8));
             card.addView(packageName);
 
@@ -284,24 +291,23 @@ public final class BlackBoxSandboxActivity extends Activity {
             if (LOCALIZED_GAME_PACKAGE.equals(packageToLaunch)) {
                 LinearLayout toggleRow = new LinearLayout(this);
                 toggleRow.setGravity(Gravity.CENTER_VERTICAL);
-                toggleRow.addView(label("RYLUX 汉化", 13, TEXT, true),
+                toggleRow.addView(label("RYLUX 汉化", 13, RyluxDesignSystem.TEXT, true),
                         new LinearLayout.LayoutParams(0, -2, 1));
                 localizationToggle = new Switch(this);
                 localizationToggle.setContentDescription("RYLUX 汉化");
                 localizationToggle.setChecked(LocalizationSettings.isEnabled(this));
-                localizationToggle.setOnCheckedChangeListener((view, enabled) ->
-                        LocalizationSettings.setEnabled(this, enabled));
+                bindLocalizationToggle();
                 toggleRow.addView(localizationToggle);
                 LinearLayout.LayoutParams toggleLp = new LinearLayout.LayoutParams(-1, dp(44));
                 toggleLp.bottomMargin = dp(6);
                 card.addView(toggleRow, toggleLp);
 
-                Button launch = button("启动游戏", BLUE);
+                Button launch = button("启动游戏", true);
                 launch.setOnClickListener(v -> launch(packageToLaunch,
                         LocalizationSettings.isEnabled(this)));
                 card.addView(launch, new LinearLayout.LayoutParams(-1, dp(40)));
             } else {
-                Button launch = button("启动", BLUE);
+                Button launch = button("启动", true);
                 launch.setOnClickListener(v -> launch(packageToLaunch, false));
                 card.addView(launch, new LinearLayout.LayoutParams(-1, dp(40)));
             }
@@ -310,11 +316,38 @@ public final class BlackBoxSandboxActivity extends Activity {
             cardLp.bottomMargin = dp(8);
             appList.addView(card, cardLp);
         }
-        if (count == 0) appList.addView(label("还没有导入应用。选择一个 APK 开始测试。", 13, MUTED, false));
+        if (count == 0) appList.addView(label("还没有导入应用。选择一个 APK 开始测试。", 13, RyluxDesignSystem.MUTED, false));
         setBusy(false, "虚拟环境就绪 · " + count + " 个应用");
     }
 
     private void launch(String packageName, boolean withLocalization) {
+        if (withLocalization && LOCALIZED_GAME_PACKAGE.equals(packageName)) {
+            setBusy(true, "正在验证会员状态…");
+            MembershipAccess.refresh(this, result -> runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                applyMembershipCheck(result);
+                if (result != null && result.allowed) {
+                    launchAuthorized(packageName, true);
+                } else {
+                    LocalizationSettings.setEnabled(this, false);
+                    if (localizationToggle != null) {
+                        localizationToggle.setOnCheckedChangeListener(null);
+                        localizationToggle.setChecked(false);
+                        localizationToggle.setEnabled(true);
+                        bindLocalizationToggle();
+                    }
+                    stopInterceptModule();
+                    setBusy(false, result == null ? "会员状态验证失败，无法使用汉化" : result.message);
+                    Toast.makeText(this, result == null ? "会员状态验证失败" : result.message,
+                            Toast.LENGTH_LONG).show();
+                }
+            }));
+            return;
+        }
+        launchAuthorized(packageName, false);
+    }
+
+    private void launchAuthorized(String packageName, boolean withLocalization) {
         setBusy(true, withLocalization ? "正在准备 RYLUX 汉化…" : "正在启动 " + packageName + "…");
         worker.execute(() -> {
             try {
@@ -334,20 +367,85 @@ public final class BlackBoxSandboxActivity extends Activity {
         });
     }
 
+    private void bindLocalizationToggle() {
+        if (localizationToggle == null) return;
+        localizationToggle.setOnCheckedChangeListener((view, enabled) -> {
+            if (!enabled) {
+                LocalizationSettings.setEnabled(this, false);
+                return;
+            }
+            localizationToggle.setOnCheckedChangeListener(null);
+            localizationToggle.setChecked(false);
+            localizationToggle.setEnabled(false);
+            MembershipAccess.refresh(this, result -> runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                applyMembershipCheck(result);
+                boolean allowed = result != null && result.allowed;
+                LocalizationSettings.setEnabled(this, allowed);
+                localizationToggle.setChecked(allowed);
+                localizationToggle.setEnabled(true);
+                bindLocalizationToggle();
+                if (!allowed) {
+                    stopInterceptModule();
+                    Toast.makeText(this, result == null ? "无法验证会员状态，请检查网络后重试"
+                            : result.message, Toast.LENGTH_LONG).show();
+                }
+            }));
+        });
+    }
+
+    private void applyMembershipCheck(MembershipAccess.CheckResult result) {
+        if (result == null || !result.success || result.profile == null) return;
+        if (!MembershipAccess.isAllowed(result.profile)) {
+            LocalizationSettings.setEnabled(this, false);
+            stopInterceptModule();
+            stopService(new Intent(this, ScriptRuntimeService.class));
+            stopService(new Intent(this, ScriptControlOverlayService.class));
+            if (localizationToggle != null) {
+                localizationToggle.setOnCheckedChangeListener(null);
+                localizationToggle.setChecked(false);
+                localizationToggle.setEnabled(true);
+                bindLocalizationToggle();
+            }
+        }
+    }
+
+    private void openScriptWorkbench() {
+        MembershipAccess.refresh(this, result -> runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed()) return;
+            applyMembershipCheck(result);
+            if (result != null && result.allowed) {
+                startActivity(new Intent(this, ScriptToolsActivity.class)
+                        .putExtra(ScriptToolsActivity.EXTRA_TARGET_MODE,
+                                ScriptToolsActivity.TARGET_MODE_SANDBOX));
+            } else {
+                Toast.makeText(this, result == null ? "无法验证会员状态，请检查网络后重试"
+                        : result.message, Toast.LENGTH_LONG).show();
+            }
+        }));
+    }
+
+    private void stopInterceptModule() {
+        try { stopService(new Intent(this, InterceptService.class)); }
+        catch (Throwable ignored) { }
+    }
+
     private void setBusy(boolean busy, String message) {
         if (isFinishing() || isDestroyed() || status == null) return;
         status.setText(message);
         progress.setVisibility(busy ? View.VISIBLE : View.GONE);
     }
 
-    private Button button(String text, int color) {
+    private Button button(String text, boolean primary) {
         Button button = new Button(this);
         button.setText(text);
-        button.setTextColor(TEXT);
+        button.setTextColor(RyluxDesignSystem.TEXT);
         button.setTextSize(14);
         button.setAllCaps(false);
         button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        button.setBackground(round(color, 13, color == BLUE ? BLUE : BORDER));
+        button.setBackground(primary
+                ? RyluxDesignSystem.primaryButton(this, 13)
+                : RyluxDesignSystem.secondaryButton(this, 13));
         return button;
     }
 
@@ -358,14 +456,6 @@ public final class BlackBoxSandboxActivity extends Activity {
         view.setTextSize(size);
         if (bold) view.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         return view;
-    }
-
-    private GradientDrawable round(int color, int radiusDp, int strokeColor) {
-        GradientDrawable shape = new GradientDrawable();
-        shape.setColor(color);
-        shape.setCornerRadius(dp(radiusDp));
-        shape.setStroke(dp(1), strokeColor);
-        return shape;
     }
 
     private int dp(float value) {

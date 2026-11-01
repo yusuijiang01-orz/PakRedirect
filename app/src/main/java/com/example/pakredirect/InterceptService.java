@@ -8,7 +8,9 @@ import android.app.Service;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.util.Log;
 
 public class InterceptService extends Service implements BundledPakServer.Listener {
@@ -27,15 +29,51 @@ public class InterceptService extends Service implements BundledPakServer.Listen
     private final Object lifecycleLock = new Object();
     private BundledPakServer server;
     private volatile boolean starting;
+    private volatile int startGeneration;
+    private volatile long lastMembershipRefreshAt;
+    private volatile boolean serviceDestroyed;
+    private final Handler entitlementHandler = new Handler(Looper.getMainLooper());
+    private final Runnable entitlementWatchdog = new Runnable() {
+        @Override public void run() {
+            if (currentRunning && !MembershipAccess.hasCachedAccess(InterceptService.this)) {
+                LocalizationSettings.setEnabled(InterceptService.this, false);
+                synchronized (lifecycleLock) {
+                    stopServerLocked("VIP / 体验会员已到期，汉化服务已停用");
+                }
+                stopForeground(true);
+                stopSelf();
+                return;
+            }
+            if (currentRunning && System.currentTimeMillis() - lastMembershipRefreshAt >= 60_000L) {
+                lastMembershipRefreshAt = System.currentTimeMillis();
+                MembershipAccess.refresh(InterceptService.this, result -> {
+                    if (serviceDestroyed) return;
+                    if (result != null && result.requestOk
+                            && (!result.success || !result.allowed)) {
+                        LocalizationSettings.setEnabled(InterceptService.this, false);
+                        synchronized (lifecycleLock) {
+                            stopServerLocked(result.message + "，汉化服务已停用");
+                        }
+                        stopForeground(true);
+                        stopSelf();
+                    }
+                });
+            }
+            entitlementHandler.postDelayed(this, 10_000L);
+        }
+    };
 
     @Override public void onCreate() {
         super.onCreate();
         createChannel();
+        entitlementHandler.postDelayed(entitlementWatchdog, 10_000L);
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent == null ? null : intent.getAction();
         if (ACTION_STOP.equals(action)) {
+            startGeneration++;
+            starting = false;
             new Thread(() -> {
                 synchronized (lifecycleLock) { stopServerLocked("已停止本地模块服务"); }
                 stopSelf();
@@ -67,11 +105,31 @@ public class InterceptService extends Service implements BundledPakServer.Listen
         }
 
         starting = true;
-        LaunchProgress.begin("正在验证加密汉化资源…");
+        LaunchProgress.begin("正在验证 VIP / 体验会员权限…");
+        final int requestStartId = startId;
+        final int requestGeneration = ++startGeneration;
         new Thread(() -> {
+            MembershipAccess.CheckResult membership = MembershipAccess.refreshNow(this);
+            lastMembershipRefreshAt = System.currentTimeMillis();
             synchronized (lifecycleLock) {
-                try { startServerLocked(); }
-                finally { starting = false; }
+                try {
+                    if (requestGeneration != startGeneration) return;
+                    if (membership == null || !membership.allowed) {
+                        LocalizationSettings.setEnabled(this, false);
+                        stopServerLocked(null);
+                        String message = membership == null
+                                ? "无法验证会员状态，汉化服务未启动"
+                                : membership.message + "，汉化服务未启动";
+                        LaunchProgress.fail(message);
+                        broadcast(message, 0, false, -1);
+                        stopForeground(true);
+                        stopSelf(requestStartId);
+                    } else {
+                        startServerLocked();
+                    }
+                } finally {
+                    if (requestGeneration == startGeneration) starting = false;
+                }
             }
         }, "RYLUX-Local-Module").start();
         return START_STICKY;
@@ -138,6 +196,9 @@ public class InterceptService extends Service implements BundledPakServer.Listen
     }
 
     @Override public void onDestroy() {
+        serviceDestroyed = true;
+        startGeneration++;
+        entitlementHandler.removeCallbacks(entitlementWatchdog);
         synchronized (lifecycleLock) { stopServerLocked(null); }
         super.onDestroy();
     }

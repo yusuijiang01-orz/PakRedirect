@@ -5,6 +5,10 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import org.luaj.vm2.Globals;
 import org.luaj.vm2.lib.jse.JsePlatform;
 import org.junit.Test;
@@ -31,6 +35,7 @@ public final class LegacyLuaConfigTest {
     }
 
     @Test public void recoveredScriptFieldsHaveSafeDefaultsWhenWorkbenchValuesAreOmitted() {
+        assertEquals("320", LegacyLuaConfig.defaults().get("虚拟屏幕DPI"));
         assertEquals("60", LegacyLuaConfig.defaults().get("挂机不移动秒"));
         assertEquals("2", LegacyLuaConfig.defaults().get("队员找不到队长组队就回家次数"));
         assertEquals("true", LegacyLuaConfig.defaults().get("保护装备不出售"));
@@ -48,5 +53,25 @@ public final class LegacyLuaConfigTest {
         assertEquals("false", LegacyLuaConfig.defaults().get("自动使用蓝药"));
         assertArrayEquals(new String[]{"true", "false", "false"}, LegacyLuaConfig.blueFilterFlags(
                 LegacyLuaConfig.defaults().get("蓝条筛选模式")));
+    }
+
+    @Test public void virtualDpiIsSeededAndReadFromTheLiveHostConfig() throws Exception {
+        Path root = Paths.get(System.getProperty("user.dir"));
+        if (!Files.isDirectory(root.resolve("app/src/main/java"))) root = root.resolve("..");
+        Path sources = root.resolve("app/src/main/java/com/example/pakredirect");
+        String activity = Files.readString(sources.resolve("ScriptToolsActivity.java"), StandardCharsets.UTF_8);
+        String loadProfile = activity.substring(activity.indexOf("private void loadProfile()"),
+                activity.indexOf("private void put("));
+        assertTrue(loadProfile.contains("if (!values.has(\"虚拟屏幕DPI\")) put(\"虚拟屏幕DPI\", LegacyLuaConfig.defaults().get(\"虚拟屏幕DPI\"))"));
+
+        String runtime = Files.readString(sources.resolve("LegacyLuaRuntime.java"), StandardCharsets.UTF_8);
+        String getDpi = runtime.substring(runtime.indexOf("globals.set(\"getDisplayDpi\""),
+                runtime.indexOf("globals.set(\"exitScript\""));
+        assertTrue(getDpi.contains("config.optInt(\"虚拟屏幕DPI\","));
+        assertTrue(getDpi.contains("context.getResources().getDisplayMetrics().densityDpi"));
+        String pollProfile = runtime.substring(runtime.indexOf("globals.set(\"pollWebProfileRequest\""),
+                runtime.indexOf("globals.set(\"updateWebRouteRequest\""));
+        String updateDpi = pollProfile.substring(pollProfile.indexOf("if (\"虚拟屏幕DPI\".equals(entry.getKey()))"));
+        assertTrue(updateDpi.contains("config.put(entry.getKey(), Integer.parseInt(entry.getValue()))"));
     }
 }

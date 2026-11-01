@@ -22,15 +22,18 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.List;
+import java.util.ArrayDeque;
 
 import top.niunaijun.blackbox.fake.frameworks.BActivityManager;
 
 /** Display-level screenshot and touch adapter. The user must enable its accessibility service. */
 public final class ScriptGameAdapter extends AccessibilityService {
     private static final String TAG = "ScriptGameAdapter";
+    private static final String SEMANTIC_NODE_PREFIX = "rylux.game.";
     private static final long RECONNECT_WAIT_MS = 10_000L;
     static final String TARGET_GAME_PACKAGE = "com.tepaylink.tamgioiphantranhmobile";
     private static volatile ScriptGameAdapter instance;
+    private static volatile String targetMode = ScriptToolsActivity.TARGET_MODE_SANDBOX;
     private volatile ForegroundEvent foregroundEvent = ForegroundEvent.EMPTY;
     private volatile String targetGameLabel = "";
 
@@ -48,6 +51,11 @@ public final class ScriptGameAdapter extends AccessibilityService {
     }
 
     public static boolean isConnected() { return instance != null; }
+
+    static void setTargetMode(String mode) {
+        targetMode = ScriptToolsActivity.TARGET_MODE_DESKTOP.equals(mode)
+                ? ScriptToolsActivity.TARGET_MODE_DESKTOP : ScriptToolsActivity.TARGET_MODE_SANDBOX;
+    }
 
     public static ScriptGameAdapter requireConnected() {
         ScriptGameAdapter current = instance;
@@ -97,8 +105,11 @@ public final class ScriptGameAdapter extends AccessibilityService {
         ScriptGameAdapter current = instance;
         if (current == null) return "";
         // Legacy game scripts expect the guest package name, not BlackBox's Android host package.
-        return current.hasTargetGameForeground()
-                ? TARGET_GAME_PACKAGE : current.foregroundEvent.packageName;
+        if (current.hasTargetGameForeground()) return TARGET_GAME_PACKAGE;
+        // A desktop copy and a sandbox copy share one Android package name. Do not
+        // report the desktop event as a match when the selected target is the sandbox.
+        if (TARGET_GAME_PACKAGE.equals(current.foregroundEvent.packageName)) return "";
+        return current.foregroundEvent.packageName;
     }
 
     public static boolean isTargetGameForeground() {
@@ -114,6 +125,7 @@ public final class ScriptGameAdapter extends AccessibilityService {
     private boolean hasTargetGameForeground() {
         ForegroundEvent event = foregroundEvent;
         boolean currentWindow = false;
+        int activeWindowId = -1;
         String activeWindowPackage = null;
         String activeWindowTitle = null;
         List<AccessibilityWindowInfo> windows;
@@ -128,6 +140,7 @@ public final class ScriptGameAdapter extends AccessibilityService {
                     if (window == null || !window.isActive()
                             || window.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
                     currentWindow = true;
+                    activeWindowId = window.getId();
                     CharSequence title = window.getTitle();
                     activeWindowTitle = title == null ? null : title.toString();
                     // In BlackBox the Android window belongs to the host app even though
@@ -176,6 +189,18 @@ public final class ScriptGameAdapter extends AccessibilityService {
                 // This is only a fallback for host windows whose title is generic.
             }
         }
+        if (ScriptToolsActivity.TARGET_MODE_DESKTOP.equals(targetMode)) {
+            boolean directPackageWindow = currentWindow
+                    && TARGET_GAME_PACKAGE.equals(activeWindowPackage);
+            boolean directEventForActiveWindow = currentWindow
+                    && ScriptForegroundTarget.isUnavailableWindowPackage(activeWindowPackage)
+                    && activeWindowId == event.windowId
+                    && TARGET_GAME_PACKAGE.equals(event.packageName);
+            return directPackageWindow || directEventForActiveWindow;
+        }
+        // Android and BlackBox can contain the same package simultaneously. A desktop
+        // copy must not satisfy a run explicitly configured for the sandbox copy.
+        if (TARGET_GAME_PACKAGE.equals(activeWindowPackage)) return false;
         return ScriptForegroundTarget.isTargetForeground(
                 currentWindow, activeWindowPackage, activeWindowTitle, targetGameLabel,
                 event.packageName, event.className, hostTopActivityClass,
@@ -247,7 +272,8 @@ public final class ScriptGameAdapter extends AccessibilityService {
         } catch (RuntimeException failure) {
             hostTopActivity = "读取失败:" + failure.getClass().getSimpleName();
         }
-        return "activeWindow=" + activePackage + "/" + activeTitle
+        return "targetMode=" + (ScriptToolsActivity.TARGET_MODE_DESKTOP.equals(targetMode) ? "desktop" : "sandbox")
+                + ", activeWindow=" + activePackage + "/" + activeTitle
                 + ", event=" + event.packageName + "/" + event.className + "#" + event.windowId
                 + ", hostTop=" + hostTopActivity + ", virtualTop=" + virtualTop
                 + ", gameLabel=" + targetGameLabel
@@ -256,7 +282,7 @@ public final class ScriptGameAdapter extends AccessibilityService {
 
     private void requireTargetGameForeground() {
         if (!hasTargetGameForeground()) {
-            throw new TargetGameNotForegroundException("沙箱中的汉化版封神榜不在前台，已阻止截图、输入和触控（"
+            throw new TargetGameNotForegroundException("所选的封神榜客户端不在前台，已阻止截图、输入和触控（"
                     + describeForegroundState() + "）");
         }
     }
@@ -294,6 +320,112 @@ public final class ScriptGameAdapter extends AccessibilityService {
     }
 
     public boolean clearFocusedText() { return setFocusedText(""); }
+
+    /**
+     * Read a state node published by the guest game's accessibility bridge.
+     * The game-side provider must expose exactly one visible node whose content
+     * description is rylux.game.state.{login,role,connecting,world}. No pixels,
+     * OCR, or generic host controls are used to infer the state.
+     */
+    public String semanticGameState() {
+        requireTargetGameForeground();
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null) return "unknown";
+        int windowId = root.getWindowId();
+        if (!isCurrentTargetWindow(windowId)) {
+            root.recycle();
+            return "unknown";
+        }
+        ArrayDeque<AccessibilityNodeInfo> pending = new ArrayDeque<>();
+        pending.add(root);
+        String state = null;
+        int visited = 0;
+        try {
+            while (!pending.isEmpty() && visited++ < 512) {
+                AccessibilityNodeInfo node = pending.removeFirst();
+                try {
+                    CharSequence description = node.getContentDescription();
+                    if (node.isVisibleToUser() && description != null) {
+                        String value = description.toString();
+                        if (value.startsWith(SEMANTIC_NODE_PREFIX + "state.")) {
+                            String candidate = value.substring((SEMANTIC_NODE_PREFIX + "state.").length());
+                            if (!isSemanticState(candidate) || state != null) return "unknown";
+                            state = candidate;
+                        }
+                    }
+                    for (int i = 0; i < node.getChildCount() && pending.size() < 512; i++) {
+                        AccessibilityNodeInfo child = node.getChild(i);
+                        if (child != null) pending.addLast(child);
+                    }
+                } finally {
+                    node.recycle();
+                }
+            }
+            return state == null ? "unknown" : state;
+        } finally {
+            while (!pending.isEmpty()) pending.removeFirst().recycle();
+        }
+    }
+
+    /** Activate only an explicitly published guest-game semantic action node. */
+    public boolean clickSemanticGameAction(String action) {
+        if (!("login".equals(action) || "confirm".equals(action) || "back".equals(action))) {
+            throw new IllegalArgumentException("不支持的游戏语义动作");
+        }
+        requireTargetGameForeground();
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null) return false;
+        int windowId = root.getWindowId();
+        if (!isCurrentTargetWindow(windowId)) {
+            root.recycle();
+            return false;
+        }
+        String expected = SEMANTIC_NODE_PREFIX + "action." + action;
+        ArrayDeque<AccessibilityNodeInfo> pending = new ArrayDeque<>();
+        pending.add(root);
+        AccessibilityNodeInfo match = null;
+        int visited = 0;
+        try {
+            while (!pending.isEmpty() && visited++ < 512) {
+                AccessibilityNodeInfo node = pending.removeFirst();
+                CharSequence description = node.getContentDescription();
+                if (node.isVisibleToUser() && node.isEnabled() && description != null
+                        && expected.contentEquals(description)) {
+                    if (match != null) {
+                        node.recycle();
+                        match.recycle();
+                        match = null;
+                        return false;
+                    }
+                    match = node;
+                    continue;
+                }
+                try {
+                    for (int i = 0; i < node.getChildCount() && pending.size() < 512; i++) {
+                        AccessibilityNodeInfo child = node.getChild(i);
+                        if (child != null) pending.addLast(child);
+                    }
+                } finally {
+                    if (node != match) node.recycle();
+                }
+            }
+            return match != null && match.isClickable() && isCurrentTargetWindow(windowId)
+                    && match.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+        } finally {
+            if (match != null) match.recycle();
+            while (!pending.isEmpty()) pending.removeFirst().recycle();
+        }
+    }
+
+    private static boolean isSemanticState(String state) {
+        return "login".equals(state) || "role".equals(state)
+                || "connecting".equals(state) || "world".equals(state);
+    }
+
+    private boolean isCurrentTargetWindow(int windowId) {
+        ForegroundEvent event = foregroundEvent;
+        return windowId == event.windowId && hasTargetGameForeground();
+    }
 
     @Override public void onDestroy() {
         if (instance == this) instance = null;
@@ -384,6 +516,41 @@ public final class ScriptGameAdapter extends AccessibilityService {
         Path path = new Path();
         path.moveTo(x, y);
         return dispatch(path, Math.max(1L, durationMs), timeoutMs);
+    }
+
+    public boolean doubleTap(float x, float y, long timeoutMs) throws Exception {
+        requireTargetGameForeground();
+        if (Build.VERSION.SDK_INT < 24) throw new UnsupportedOperationException("触控需要 Android 7 或更新版本");
+        if (!ScriptControlOverlayService.setGameInputPassthrough(true, 1_000L)) {
+            throw new IllegalStateException("无法暂时让 RYLUX 悬浮窗为游戏触控让路");
+        }
+        CountDownLatch done = new CountDownLatch(1);
+        AtomicBoolean completed = new AtomicBoolean(false);
+        try {
+            Path firstTap = new Path();
+            firstTap.moveTo(x, y);
+            Path secondTap = new Path();
+            secondTap.moveTo(x, y);
+            GestureDescription gesture = new GestureDescription.Builder()
+                    .addStroke(new GestureDescription.StrokeDescription(firstTap, 0, 55))
+                    .addStroke(new GestureDescription.StrokeDescription(secondTap, 155, 55))
+                    .build();
+            boolean accepted = dispatchGesture(gesture, new GestureResultCallback() {
+                @Override public void onCompleted(GestureDescription description) {
+                    completed.set(true);
+                    done.countDown();
+                }
+
+                @Override public void onCancelled(GestureDescription description) {
+                    done.countDown();
+                }
+            }, null);
+            return accepted && done.await(timeoutMs, TimeUnit.MILLISECONDS) && completed.get();
+        } finally {
+            if (!ScriptControlOverlayService.setGameInputPassthrough(false, 1_000L)) {
+                Log.e(TAG, "could not restore RYLUX overlay touch controls after a game double-tap");
+            }
+        }
     }
 
     public boolean swipe(float x1, float y1, float x2, float y2,

@@ -269,6 +269,8 @@ public final class RyluxResponsiveTuner {
 
         View install = findTagged(panel, "rylux_install_game_button");
         if (install != null) setHeight(install, dp(activity, Math.round(50 * scale)));
+        View workbench = findTagged(panel, "rylux_script_workbench_button");
+        if (workbench != null) setHeight(workbench, dp(activity, Math.round(50 * scale)));
         View localization = findTagged(panel, "rylux_localization_control");
         if (localization != null && (!(localization instanceof ViewGroup)
                 || ((ViewGroup) localization).getChildCount() <= 2)) {

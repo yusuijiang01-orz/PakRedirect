@@ -177,6 +177,11 @@ public final class ScriptControlOverlayService extends Service {
         actions.addView(actionCell("⚙", "设置", SOFT, v -> {
             noteInteraction();
             Intent open = new Intent(this, ScriptToolsActivity.class);
+            String config = ScriptLastRunConfig.load(this);
+            if (config != null) {
+                open.putExtra(ScriptToolsActivity.EXTRA_TARGET_MODE,
+                        ScriptToolsActivity.targetModeFromConfig(config));
+            }
             open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
             startActivity(open);
         }), actionCellParams(false));
@@ -309,16 +314,24 @@ public final class ScriptControlOverlayService extends Service {
             openStartConfirmation();
             return;
         }
+        boolean desktop = ScriptToolsActivity.TARGET_MODE_DESKTOP.equals(
+                ScriptToolsActivity.targetModeFromConfig(config));
+        String target = desktop ? "桌面客户端" : "沙箱游戏";
         restartRequested = true;
-        if (statusLabel != null) statusLabel.setText("正在切回沙箱游戏并启动上次方案…");
+        if (statusLabel != null) statusLabel.setText("正在切回" + target + "并启动上次方案…");
         mainHandler.postDelayed(() -> restartRequested = false, 10_000L);
-        // The workbench may still own Android's foreground task even though the
-        // guest game remains BlackBox's virtual top activity. Bring the same
-        // sandboxed game proxy to the foreground before the runtime gate checks
-        // the active window; never open ScriptToolsActivity for a restart.
+        // Restore the same game source as the confirmed configuration. The
+        // desktop and BlackBox copies have the same game package name, so
+        // always launching the proxy here would conflict with a desktop run.
         Thread launch = new Thread(() -> {
             try {
-                if (!BlackBoxCore.get().launchApk(ScriptGameAdapter.TARGET_GAME_PACKAGE, 0)) {
+                if (desktop) {
+                    Intent game = getPackageManager().getLaunchIntentForPackage(
+                            ScriptGameAdapter.TARGET_GAME_PACKAGE);
+                    if (game == null) throw new IllegalStateException("未找到桌面版封神榜");
+                    game.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(game);
+                } else if (!BlackBoxCore.get().launchApk(ScriptGameAdapter.TARGET_GAME_PACKAGE, 0)) {
                     throw new IllegalStateException("无法前置沙箱中的封神榜");
                 }
                 mainHandler.post(() -> {
@@ -330,9 +343,9 @@ public final class ScriptControlOverlayService extends Service {
                 mainHandler.post(() -> {
                     restartRequested = false;
                     String message = error.getMessage() == null
-                            ? "无法前置沙箱中的封神榜" : error.getMessage();
+                            ? "无法前置" + target : error.getMessage();
                     if (statusLabel != null) statusLabel.setText("重启失败 · " + message);
-                    Toast.makeText(this, "无法启动沙箱游戏：" + message, Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, "无法启动" + target + "：" + message, Toast.LENGTH_LONG).show();
                 });
             }
         }, "RYLUX-Overlay-Restart");

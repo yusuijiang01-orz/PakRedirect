@@ -1,6 +1,8 @@
 package com.example.pakredirect;
 
 import java.awt.image.BufferedImage;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -8,9 +10,12 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import javax.imageio.ImageIO;
 import org.junit.Test;
 import org.luaj.vm2.Globals;
 import org.luaj.vm2.LuaError;
@@ -27,6 +32,11 @@ import org.luaj.vm2.lib.jse.JsePlatform;
 public final class RecoveredLuaLiveLoginTest {
     private static final long RUN_LIMIT_NANOS = TimeUnit.MINUTES.toNanos(3);
     private static final long UNKNOWN_LIMIT_NANOS = TimeUnit.SECONDS.toNanos(35);
+    private static final Path LOGIN_ASSETS = Paths.get("app", "src", "main", "assets", "script_modules", "脚本")
+            .toAbsolutePath().normalize();
+    private static final String[] LOGIN_BUTTONS = {
+            "素材库/汉化登录返回按钮.png", "素材库/汉化角色确认按钮.png", "素材库/汉化登录按钮.png"
+    };
 
     @Test public void recoveredLuaLoginReachesObservedGameWorld() throws Exception {
         long deadline = System.nanoTime() + RUN_LIMIT_NANOS;
@@ -34,7 +44,8 @@ public final class RecoveredLuaLiveLoginTest {
             Globals globals = JsePlatform.standardGlobals();
             globals.set("_ENV", globals);
             AtomicReference<Throwable> callbackFailure = new AtomicReference<>();
-            installDeviceApis(globals, device, callbackFailure);
+            Map<String, BufferedImage> imageTemplates = new HashMap<>();
+            installDeviceApis(globals, device, callbackFailure, imageTemplates);
             Path scripts = Paths.get("app", "src", "main", "assets", "script_modules", "脚本");
             for (String name : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
                 String source = Files.readString(scripts.resolve(name), StandardCharsets.UTF_8);
@@ -50,13 +61,14 @@ public final class RecoveredLuaLiveLoginTest {
                     device.checkDeadline();
                     LiveLuaDeviceHost.Frame before = device.capture();
                     checkCallbackFailure(callbackFailure);
-                    if (worldVisible(globals, inMainPage, templates, device)) {
+                    boolean loginScreen = hasLoginButton(before, device, imageTemplates);
+                    if (!loginScreen && worldVisible(globals, inMainPage, templates, device)) {
                         checkCallbackFailure(callbackFailure);
                         device.event("result", "WORLD_RECOGNIZED rounds=" + rounds + " actions=" + device.actionCount());
                         return;
                     }
                     int actionsBeforeProbe = device.actionCount();
-                    if (knownLoginOrTransition(before, globals, templates, device)) unknownSince = 0;
+                    if (loginScreen || knownLoginOrTransition(before, globals, templates, device)) unknownSince = 0;
                     else if (unknownSince == 0) unknownSince = System.nanoTime();
                     else if (System.nanoTime() - unknownSince > UNKNOWN_LIMIT_NANOS)
                         throw new IOException("Unrecognized game screen persisted for 35 seconds; last capture="
@@ -91,8 +103,9 @@ public final class RecoveredLuaLiveLoginTest {
         if (cause != null) throw new IOException("Live Lua callback failed: " + safeDiagnostic(cause.getMessage()), cause);
     }
 
-    private static void installDeviceApis(Globals globals, LiveLuaDeviceHost device,
-                                          AtomicReference<Throwable> failure) {
+    static void installDeviceApis(Globals globals, LiveLuaDeviceHost device,
+                                  AtomicReference<Throwable> failure,
+                                  Map<String, BufferedImage> imageTemplates) {
         globals.set("utf8", LegacyLuaCompat.createUtf8Compat());
         globals.set("tickCount", new ZeroArgFunction() {
             @Override public LuaValue call() { return LuaValue.valueOf(TimeUnit.NANOSECONDS.toMillis(System.nanoTime())); }
@@ -101,6 +114,14 @@ public final class RecoveredLuaLiveLoginTest {
             @Override public Varargs invoke(Varargs args) {
                 try {
                     device.tap(args.arg(1).checkdouble(), args.arg(2).checkdouble(), "Lua tap");
+                    return LuaValue.TRUE;
+                } catch (Exception error) { return fail(failure, error); }
+            }
+        });
+        globals.set("doubleTap", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                try {
+                    device.doubleTap(args.arg(1).checkdouble(), args.arg(2).checkdouble(), "Lua double-tap");
                     return LuaValue.TRUE;
                 } catch (Exception error) { return fail(failure, error); }
             }
@@ -143,6 +164,12 @@ public final class RecoveredLuaLiveLoginTest {
                 catch (Exception error) { return fail(failure, error); }
             }
         });
+        globals.set("findPic", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                try { return findPic(device, args, imageTemplates); }
+                catch (Exception error) { return fail(failure, error); }
+            }
+        });
         globals.set("tomocrtexttable", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) {
                 try { return ocrRows(device, args); }
@@ -159,7 +186,7 @@ public final class RecoveredLuaLiveLoginTest {
             try { return ocrRows(device, args); }
             catch (Exception error) { return fail(failure, error).checktable(); }
         }));
-        for (String name : Arrays.asList("keepCapture", "findPic", "findStr", "findImage", "tomocr", "useDict",
+        for (String name : Arrays.asList("keepCapture", "findStr", "findImage", "tomocr", "useDict",
                 "findMultiColorAll", "touchDown", "touchMove", "touchUp", "touchMoveEx", "keyPress")) {
             globals.set(name, new VarArgFunction() {
                 @Override public Varargs invoke(Varargs args) {
@@ -181,7 +208,7 @@ public final class RecoveredLuaLiveLoginTest {
         if (right < left || bottom < top) throw new IOException("Invalid Lua OCR region");
         LuaTable rows = new LuaTable();
         int count = 0;
-        for (LiveLuaDeviceHost.Row line : frame.rows) {
+        for (LiveLuaDeviceHost.Row line : device.rows(frame)) {
             int x = frame.mapper.toReferenceX(line.x), y = frame.mapper.toReferenceY(line.y);
             if (x < left || x > right || y < top || y > bottom) continue;
             LuaTable row = new LuaTable();
@@ -203,6 +230,105 @@ public final class RecoveredLuaLiveLoginTest {
             if (row.get("score").todouble() >= minimumScore) result.append(row.get("words").tojstring());
         }
         return result.toString();
+    }
+
+    private static Varargs findPic(LiveLuaDeviceHost device, Varargs args,
+                                   Map<String, BufferedImage> imageTemplates) throws Exception {
+        LiveLuaDeviceHost.Frame frame = device.frame();
+        LegacyImageMatcher.Match match = findPicMatch(device, frame, imageTemplates,
+                args.arg(1).checkdouble(), args.arg(2).checkdouble(),
+                args.arg(3).checkdouble(), args.arg(4).checkdouble(),
+                args.arg(5).checkjstring(), args.narg() >= 6 ? args.arg(6).checkjstring() : "",
+                args.narg() >= 8 ? args.arg(8).optdouble(0.95) : 0.95);
+        int x = match == null ? -1 : frame.mapper.toReferenceX(match.x);
+        int y = match == null ? -1 : frame.mapper.toReferenceY(match.y);
+        return LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(match == null ? -1 : 1),
+                LuaValue.valueOf(x), LuaValue.valueOf(y)});
+    }
+
+    private static boolean hasLoginButton(LiveLuaDeviceHost.Frame frame, LiveLuaDeviceHost device,
+                                          Map<String, BufferedImage> imageTemplates) throws Exception {
+        // Probe only the three saved controls before any full-screen OCR. The
+        // centered return button takes precedence while its modal is visible.
+        return findPicMatch(device, frame, imageTemplates, 530, 420, 750, 520,
+                LOGIN_BUTTONS[0], "101010", 0.84) != null
+                || findPicMatch(device, frame, imageTemplates, 950, 510, 1210, 625,
+                LOGIN_BUTTONS[1], "101010", 0.84) != null
+                || findPicMatch(device, frame, imageTemplates, 480, 455, 820, 585,
+                LOGIN_BUTTONS[2], "101010", 0.84) != null;
+    }
+
+    private static LegacyImageMatcher.Match findPicMatch(LiveLuaDeviceHost device,
+            LiveLuaDeviceHost.Frame frame, Map<String, BufferedImage> imageTemplates,
+            double x1, double y1, double x2, double y2, String path, String mask, double threshold) throws Exception {
+        String relative = path.replace('\\', '/').trim();
+        if (relative.isEmpty() || relative.startsWith("/") || relative.matches("^[A-Za-z]:.*"))
+            throw new IOException("Invalid live image template path");
+        for (String segment : relative.split("/", -1))
+            if (segment.isEmpty() || segment.equals(".") || segment.equals(".."))
+                throw new IOException("Invalid live image template path");
+        Path templatePath = LOGIN_ASSETS.resolve(relative).normalize();
+        if (!templatePath.startsWith(LOGIN_ASSETS) || !Files.isRegularFile(templatePath))
+            throw new IOException("Live image template missing: " + relative);
+        String matchKey = relative + "|" + x1 + "," + y1 + "," + x2 + "," + y2
+                + "|" + mask + "|" + threshold;
+        if (frame.imageMatches.containsKey(matchKey)) return frame.imageMatches.get(matchKey);
+        BufferedImage source = imageTemplates.get(relative);
+        if (source == null) {
+            source = ImageIO.read(templatePath.toFile());
+            if (source == null) throw new IOException("Unreadable live image template: " + relative);
+            imageTemplates.put(relative, source);
+        }
+        LegacyCoordinateMapper mapper = frame.mapper;
+        BufferedImage scaled = source;
+        if (mapper.shouldScaleTemplate(false)) {
+            int width = Math.max(1, mapper.toScreenDeltaX(source.getWidth()));
+            int height = Math.max(1, mapper.toScreenDeltaY(source.getHeight()));
+            String scaledKey = relative + "@" + width + "x" + height;
+            scaled = imageTemplates.get(scaledKey);
+            if (scaled == null) {
+                scaled = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+                Graphics2D graphics = scaled.createGraphics();
+                try {
+                    graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
+                            RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+                    graphics.drawImage(source, 0, 0, width, height, null);
+                } finally { graphics.dispose(); }
+                imageTemplates.put(scaledKey, scaled);
+            }
+        }
+        BufferedImage matchedTemplate = scaled;
+        LegacyImageMatcher.Pixels screenPixels = pixels(frame.image);
+        LegacyImageMatcher.Pixels templatePixels = pixels(matchedTemplate);
+        int parsedMask;
+        try { parsedMask = mask.isEmpty() ? -1 : (int) Long.parseLong(mask.trim(), 16) & 0x00ffffff; }
+        catch (NumberFormatException invalid) { parsedMask = 0; }
+        int[] checks = {0};
+        LegacyImageMatcher.Match match = LegacyImageMatcher.find(screenPixels, templatePixels,
+                mapper.left(x1), mapper.top(y1), mapper.edgeRight(x2), mapper.edgeBottom(y2),
+                parsedMask, threshold, () -> {
+                    if ((++checks[0] & 1023) != 0) return;
+                    try { device.checkDeadline(); }
+                    catch (IOException deadline) { throw new IllegalStateException(deadline); }
+                });
+        frame.imageMatches.put(matchKey, match);
+        String detail = "capture=" + frame.number + " template=" + relative
+                + " region=" + x1 + "," + y1 + "-" + x2 + "," + y2
+                + " size=" + scaled.getWidth() + "x" + scaled.getHeight()
+                + " matched=" + (match != null);
+        if (match != null) {
+            detail += " score=" + match.score;
+        }
+        device.event("image_query", detail);
+        return match;
+    }
+
+    private static LegacyImageMatcher.Pixels pixels(BufferedImage image) {
+        return new LegacyImageMatcher.Pixels() {
+            @Override public int width() { return image.getWidth(); }
+            @Override public int height() { return image.getHeight(); }
+            @Override public int getPixel(int x, int y) { return image.getRGB(x, y); }
+        };
     }
 
     private static Varargs findMultiColor(LiveLuaDeviceHost device, Varargs args) throws Exception {
@@ -266,10 +392,16 @@ public final class RecoveredLuaLiveLoginTest {
         boolean main = inMainPage.call().toboolean();
         boolean settings = template(globals, templates, "设置按钮");
         boolean skills = template(globals, templates, "切换技能按钮");
+        // The skills icon is optional/skin-dependent. Requiring that template
+        // caused a confirmed world screen to fail before its HUD was checked.
+        if (!main || !settings) {
+            device.event("world_probe", "main=" + main + " settings=" + settings + " skills=" + skills);
+            return false;
+        }
         LiveLuaDeviceHost.Frame frame = device.frame();
         int hudRatios = 0;
         double lastY = -100;
-        for (LiveLuaDeviceHost.Row row : frame.rows) {
+        for (LiveLuaDeviceHost.Row row : device.rows(frame)) {
             if (row.confidence < 0.50 || row.x >= frame.image.getWidth() * 0.32
                     || row.y >= frame.image.getHeight() * 0.16
                     || !row.text.matches(".*\\d{1,5}\\s*[/／]\\s*\\d{1,5}.*")) continue;
@@ -277,14 +409,14 @@ public final class RecoveredLuaLiveLoginTest {
         }
         device.event("world_probe", "main=" + main + " settings=" + settings + " skills=" + skills
                 + " ocr_hud_ratios=" + hudRatios);
-        return main && settings && skills && hudRatios >= 2;
+        return main && settings && hudRatios >= 2;
     }
 
     private static boolean knownLoginOrTransition(LiveLuaDeviceHost.Frame frame, Globals globals,
                                                    LuaTable templates, LiveLuaDeviceHost device) throws Exception {
         List<ScriptStartupTerms.Line> lines = new ArrayList<>();
         StringBuilder all = new StringBuilder();
-        for (LiveLuaDeviceHost.Row row : frame.rows) {
+        for (LiveLuaDeviceHost.Row row : device.rows(frame)) {
             lines.add(new ScriptStartupTerms.Line(row.text, (int) Math.round(row.x), (int) Math.round(row.y)));
             all.append(row.text.replaceAll("\\s+", ""));
         }

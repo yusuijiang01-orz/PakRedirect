@@ -11,6 +11,7 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
     <!-- Do not inherit BlackBox's standalone app permission catalog into RYLUX. -->
     <uses-permission tools:node="removeAll" />
 

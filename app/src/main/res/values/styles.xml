@@ -8,4 +8,12 @@
         <item name="android:windowBackground">#111318</item>
         <item name="android:colorAccent">#4871FF</item>
     </style>
+
+    <style name="RyluxAlertDialogTheme" parent="android:style/Theme.Material.Dialog.Alert">
+        <item name="android:colorAccent">#46B8F5</item>
+        <item name="android:colorControlNormal">#9EB8D0</item>
+        <item name="android:textColorPrimary">#F4F8FF</item>
+        <item name="android:textColorSecondary">#9EB8D0</item>
+        <item name="android:windowBackground">@drawable/rylux_dialog_background</item>
+    </style>
 </resources>
