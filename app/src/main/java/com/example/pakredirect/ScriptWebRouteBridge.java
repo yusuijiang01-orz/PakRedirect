@@ -12,6 +12,7 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Iterator;
+import java.util.Locale;
 import java.util.Map;
 
 /** Local ADB-forwardable JSON-lines bridge to the active Lua route worker. */
@@ -25,12 +26,44 @@ final class ScriptWebRouteBridge implements AutoCloseable {
 
     synchronized void start() throws IOException {
         if (server != null) return;
-        LocalServerSocket opened = new LocalServerSocket(SOCKET_NAME);
-        server = opened;
-        Thread worker = new Thread(() -> serve(opened), "rylux-route-local-socket");
+        LocalServerSocket opened = null;
+        IOException lastFailure = null;
+        for (int attempt = 0; attempt < 4; attempt++) {
+            try {
+                opened = new LocalServerSocket(SOCKET_NAME);
+                break;
+            } catch (IOException failure) {
+                lastFailure = failure;
+                if (!isAddressAlreadyInUse(failure) || attempt == 3) throw failure;
+                try { Thread.sleep(250L); }
+                catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    IOException cancelled = new IOException("等待上一轮路线桥接释放时被中断");
+                    cancelled.initCause(interrupted);
+                    throw cancelled;
+                }
+            }
+        }
+        if (opened == null) throw lastFailure == null
+                ? new IOException("无法打开 Lua 路线桥接") : lastFailure;
+        final LocalServerSocket active = opened;
+        server = active;
+        Thread worker = new Thread(() -> serve(active), "rylux-route-local-socket");
         worker.setDaemon(true);
         thread = worker;
         worker.start();
+    }
+
+    private static boolean isAddressAlreadyInUse(IOException failure) {
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            String message = current.getMessage();
+            if (message == null) continue;
+            String normalized = message.toLowerCase(Locale.ROOT);
+            if (normalized.contains("address already in use") || normalized.contains("eaddrinuse")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     ScriptWebRouteQueue.Request poll() { return queue.poll(); }

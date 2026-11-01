@@ -323,7 +323,15 @@ public final class ScriptRuntimeService extends Service {
                 Bitmap frame = null;
                 try {
                     frame = captureStartupFrame(30_000, 5_000);
-                    ScriptOcr.Result result = ocr.recognize(frame, true, 5_000);
+                    ScriptOcr.Result result;
+                    try {
+                        result = ocr.recognize(frame, true, 15_000);
+                    } catch (IllegalStateException slowOcr) {
+                        if (!ScriptOcr.isTimeout(slowOcr)) throw slowOcr;
+                        publish("启动页 OCR 响应较慢，正在重试");
+                        control.sleep(1_000L);
+                        continue;
+                    }
                     JSONArray recognized = new JSONArray(result.json);
                     List<ScriptStartupTerms.Line> lines = new ArrayList<>();
                     for (int i = 0; i < recognized.length(); i++) {

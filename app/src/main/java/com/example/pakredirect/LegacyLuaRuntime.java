@@ -687,7 +687,7 @@ final class LegacyLuaRuntime {
                     filtered = Bitmap.createBitmap(binary, crop.getWidth(), crop.getHeight(), Bitmap.Config.ARGB_8888);
                 }
                 if (ocr == null) ocr = new ScriptOcr();
-                ScriptOcr.Result result = ocr.recognize(filtered, true, 10000);
+                ScriptOcr.Result result = ocr.recognize(filtered, true, ScriptOcr.LUA_TIMEOUT_MS);
                 org.json.JSONArray lines = new org.json.JSONArray(result.json);
                 StringBuilder acceptedText = new StringBuilder();
                 for (int index = 0; index < lines.length(); index++) {
@@ -699,6 +699,10 @@ final class LegacyLuaRuntime {
                 return acceptedText.toString();
             } catch (Exception error) {
                 rethrowIfStopped();
+                if (ScriptOcr.isTimeout(error)) {
+                    if (listener != null) listener.onStatus("OCR 暂时超时，本次按未识别处理，稍后重试");
+                    return "";
+                }
                 throw error;
             } finally {
                 if (filtered != crop) filtered.recycle();
@@ -795,7 +799,7 @@ final class LegacyLuaRuntime {
         Bitmap crop = Bitmap.createBitmap(screen, left, top, right - left, bottom - top);
         try {
             if (ocr == null) ocr = new ScriptOcr();
-            ScriptOcr.Result result = ocr.recognize(crop, true, 10000);
+            ScriptOcr.Result result = ocr.recognize(crop, true, ScriptOcr.LUA_TIMEOUT_MS);
             org.json.JSONArray lines = new org.json.JSONArray(result.json);
             for (int i = 0; i < lines.length(); i++) {
                 org.json.JSONObject line = lines.getJSONObject(i);
@@ -812,6 +816,10 @@ final class LegacyLuaRuntime {
             return table;
         } catch (Exception error) {
             rethrowIfStopped();
+            if (ScriptOcr.isTimeout(error)) {
+                if (listener != null) listener.onStatus("OCR 暂时超时，本次按未识别处理，稍后重试");
+                return table;
+            }
             throw new LuaError(errorLabel + "：" + error.getMessage());
         } finally { crop.recycle(); }
     }
