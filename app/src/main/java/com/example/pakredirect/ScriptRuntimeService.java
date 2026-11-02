@@ -513,8 +513,9 @@ public final class ScriptRuntimeService extends Service {
                             STARTUP_OCR_MAX_EDGE);
                 } catch (Exception slowOcr) {
                     if (!ScriptOcr.isUnavailable(slowOcr)) throw slowOcr;
-                    publish("启动页小区域 OCR 超时；跳过非必要条款预检，交由 Lua 流程继续");
-                    return;
+                    throw new IllegalStateException(
+                            "启动页 OCR 无响应，无法确认是否需要处理使用条款；脚本已安全停止",
+                            slowOcr);
                 }
                 if (!ScriptStartupTerms.isTermsTitle(titleResult.text)) {
                     publish("未检测到首次使用条款，交由 Lua 流程继续");
@@ -541,6 +542,11 @@ public final class ScriptRuntimeService extends Service {
                     } catch (ScriptExecutionControl.StopRequestedException stopped) {
                         throw stopped;
                     } catch (Exception retryOcr) {
+                        if (ScriptOcr.isUnavailable(retryOcr)) {
+                            throw new IllegalStateException(
+                                    "使用条款页 OCR 无响应，已安全停止等待；请手动处理条款后重新启动脚本",
+                                    retryOcr);
+                        }
                         publish("仍在等待首次使用条款处理；若页面未变化，请在游戏内手动确认");
                     } finally {
                         if (nextTitleCrop != null && !nextTitleCrop.isRecycled()) nextTitleCrop.recycle();
@@ -692,3 +698,4 @@ public final class ScriptRuntimeService extends Service {
 
     @Override public IBinder onBind(Intent intent) { return null; }
 }
+
