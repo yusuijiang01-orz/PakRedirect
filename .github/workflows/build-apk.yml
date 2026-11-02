@@ -37,8 +37,8 @@ jobs:
       contents: write
 
     env:
-      RYLUX_VERSION_NAME: ${{ inputs.version_name || '2.4.95-test' }}
-      RYLUX_VERSION_CODE: ${{ inputs.version_code || '123' }}
+      RYLUX_VERSION_NAME: ${{ inputs.version_name || '2.4.96-test' }}
+      RYLUX_VERSION_CODE: ${{ inputs.version_code || '124' }}
       RYLUX_KEYSTORE_B64: ${{ secrets.RYLUX_KEYSTORE_B64 }}
       RYLUX_KEYSTORE_PASSWORD: ${{ secrets.RYLUX_KEYSTORE_PASSWORD }}
       RYLUX_KEY_ALIAS: ${{ secrets.RYLUX_KEY_ALIAS }}

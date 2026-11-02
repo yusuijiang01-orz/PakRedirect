@@ -713,10 +713,8 @@ final class LegacyLuaRuntime {
                 return acceptedText.toString();
             } catch (Exception error) {
                 rethrowIfStopped();
-                if (ScriptOcr.isTimeout(error)) {
-                    if (listener != null) listener.onStatus("OCR 暂时超时，本次按未识别处理，稍后重试");
-                    return "";
-                }
+                String ocrFailure = failForOcrUnavailable(error);
+                if (ocrFailure != null) throw new LuaError(ocrFailure);
                 throw error;
             } finally {
                 if (filtered != crop) filtered.recycle();
@@ -830,15 +828,16 @@ final class LegacyLuaRuntime {
             return table;
         } catch (Exception error) {
             rethrowIfStopped();
-            if (ScriptOcr.isCircuitOpen(error)) {
-                throw new LuaError("OCR 连续无响应；为避免角色停在满包状态，脚本已停止：" + error.getMessage());
-            }
-            if (ScriptOcr.isTimeout(error)) {
-                if (listener != null) listener.onStatus("OCR 暂时超时，本次按未识别处理，稍后重试");
-                return table;
-            }
+            String ocrFailure = failForOcrUnavailable(error);
+            if (ocrFailure != null) throw new LuaError(errorLabel + "：" + ocrFailure);
             throw new LuaError(errorLabel + "：" + error.getMessage());
         } finally { crop.recycle(); }
+    }
+
+    private String failForOcrUnavailable(Throwable error) {
+        String message = ScriptOcrFailurePolicy.failRuntimeIfUnavailable(control, error);
+        if (message != null && listener != null) listener.onStatus(message);
+        return message;
     }
 
     private void installUiApi() {
