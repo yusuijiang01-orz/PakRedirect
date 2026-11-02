@@ -1564,10 +1564,10 @@ require("网页路线")
 -- stacks, but does not grant permission to sell items; the shop's existing
 -- equipment protection and explicit item allowlist still decide every sale.
 function L0_1()
-  if not _ENV["药品_识别背包页面"]() then
+  if not (_ENV["找到"](tz["背包页面"]) or _ENV["药品_识别背包页面"]()) then
     if not _ENV["在主页面"]() then return false end
-    _ENV["点击"]("@@打开背包", 902, 663, 1000)
-    if not _ENV["药品_识别背包页面"]() then return false end
+    _ENV["点击"]("@@打开背包", 902, 693, 1000)
+    if not (_ENV["找到"](tz["背包页面"]) or _ENV["药品_识别背包页面"]()) then return false end
   end
   local function 确认物品堆叠()
     local ok, rows = pcall(tomocrtexttable, 350, 220, 950, 530)
@@ -1609,15 +1609,19 @@ function L0_1()
         end
       end
     end
-    return _ENV["药品_识别背包页面"](), true
+    return _ENV["找到"](tz["背包页面"]) or _ENV["药品_识别背包页面"](), true
   end
   local stackConfirmed, pendingStackWasConfirmed = 确认物品堆叠()
   if not stackConfirmed then return false end
-  local empty = _ENV["检测背包_识别空格子"]()
+  local 空格文本 = tomocrtextall(1045, 604, 1215, 655)
+  local empty = _ENV["检测背包_解析空格子"](空格文本)
+  if empty == nil then
+    empty = _ENV["检测背包_识别空格子"]()
+  end
   if type(empty) ~= "number" then return false end
   _ENV["当前背包格子"] = empty
   if empty <= (tonumber(_ENV["背包保留格子"]) or 0) and not pendingStackWasConfirmed then
-    local ok, rows = pcall(tomocrtexttable, 1040, 430, 1210, 520)
+    local ok, rows = pcall(tomocrtexttable, 1040, 320, 1210, 390)
     if not ok or type(rows) ~= "table" then return false end
     local sortX, sortY, matches = nil, nil, 0
     for _, row in pairs(rows) do
@@ -1625,23 +1629,32 @@ function L0_1()
         local label = tostring(row.words or row.text or ""):gsub("%s", ""):gsub("　", "")
         local x, y = tonumber(row.x), tonumber(row.y)
         if label == "整理" and (tonumber(row.score) or 0) >= 0.82
-            and x and y and x >= 1040 and x <= 1210 and y >= 430 and y <= 520 then
+            and x and y and x >= 1040 and x <= 1210 and y >= 320 and y <= 390 then
           sortX, sortY, matches = x, y, matches + 1
         end
       end
     end
-    if matches ~= 1 then return false end
-    _ENV["点击"]("@@整理背包", math.floor(sortX), math.floor(sortY), 1000)
-    sleep(500)
-    local sortConfirmed = 确认物品堆叠()
-    if not sortConfirmed then return false end
-    if not _ENV["药品_识别背包页面"]() then return false end
-    empty = _ENV["检测背包_识别空格子"]()
-    if type(empty) ~= "number" then return false end
-    _ENV["当前背包格子"] = empty
-    _ENV["卖货前整理后空格"] = empty
-    if empty <= (tonumber(_ENV["背包保留格子"]) or 0) then
-      toast("整理后空格仍不足，将前往大夫按出售清单处理")
+    if matches == 1 then
+      _ENV["点击"]("@@整理背包", math.floor(sortX), math.floor(sortY), 1000)
+      sleep(500)
+      local sortConfirmed = 确认物品堆叠()
+      if not sortConfirmed then return false end
+      if not (_ENV["找到"](tz["背包页面"]) or _ENV["药品_识别背包页面"]()) then return false end
+      local 整理后空格文本 = tomocrtextall(1045, 604, 1215, 655)
+      empty = _ENV["检测背包_解析空格子"](整理后空格文本)
+      if empty == nil then
+        empty = _ENV["检测背包_识别空格子"]()
+      end
+      if type(empty) ~= "number" then return false end
+      _ENV["当前背包格子"] = empty
+      _ENV["卖货前整理后空格"] = empty
+      if empty <= (tonumber(_ENV["背包保留格子"]) or 0) then
+        toast("整理后空格仍不足，将前往大夫按出售清单处理")
+      end
+    else
+      -- Sorting is optional. If its button text cannot be read, keep the
+      -- configured sell list flow moving instead of abandoning the doctor trip.
+      toast("未识别整理按钮，跳过整理，前往大夫清理")
     end
   elseif empty <= (tonumber(_ENV["背包保留格子"]) or 0) then
     toast("已确认堆叠整理，仍无空格，将前往大夫按出售清单处理")
@@ -2259,13 +2272,41 @@ function L0_1(识别文本)
   end
   local 当前重量 = tonumber(当前重量文本)
   local 总重量 = tonumber(总重量文本)
-  if 总重量 <= 0 or 当前重量 > 总重量 then
+  -- The game allows current load to exceed capacity (for example 361/200);
+  -- that is a valid reading and must trigger the merchant trip.
+  if 总重量 <= 0 then
     return nil, nil
   end
   return 当前重量, 总重量
 end
 
 _ENV["检测背包_解析重量"] = L0_1
+
+-- The backpack footer displays the number of free cells as "0/35". Prefer
+-- that explicit counter; template scanning remains a fallback for OCR misses.
+function L0_1(识别文本)
+  识别文本 = tostring(识别文本 or "")
+  识别文本 = string.gsub(识别文本, "%s+", "")
+  识别文本 = string.gsub(识别文本, "Ｏ", "0")
+  识别文本 = string.gsub(识别文本, "ｏ", "0")
+  识别文本 = string.gsub(识别文本, "[Oo]", "0")
+  识别文本 = string.gsub(识别文本, "｜", "/")
+  识别文本 = string.gsub(识别文本, "|", "/")
+  识别文本 = string.gsub(识别文本, "[lI]", "/")
+  识别文本 = string.gsub(识别文本, "／", "/")
+  local 空格文本, 总格文本 = string.match(识别文本, "(%d+)%/(%d+)")
+  if 空格文本 == nil then
+    return nil, nil
+  end
+  local 空格 = tonumber(空格文本)
+  local 总格 = tonumber(总格文本)
+  if 总格 <= 0 or 空格 > 总格 then
+    return nil, nil
+  end
+  return 空格, 总格
+end
+
+_ENV["检测背包_解析空格子"] = L0_1
 
 function L0_1()
   if _ENV["检测修理装备"] and _ENV["找到"](tz["提示装备需要修理"]) then
@@ -2318,7 +2359,7 @@ function L0_1()
       -- Record attempts too, so a page that cannot be identified does not
       -- cause the backpack to be opened again on every main-loop iteration.
       _ENV["上次检测背包"] = tickCount()
-      _ENV["点击"]("@@打开背包", 902, 663, 1000)
+      _ENV["点击"]("@@打开背包", 902, 693, 1000)
     end
     local 背包页面 = _ENV["找到"](tz["背包页面"])
     if not 背包页面 and _ENV["药品_识别背包页面"] ~= nil then
@@ -2337,9 +2378,18 @@ function L0_1()
     end
     _ENV["上次检测背包"] = tickCount()
     local 是否要去商店 = false
-    local 当前空格子 = _ENV["检测背包_识别空格子"]()
+    -- In the 610 UI, both counters sit in the lower/right footer of the
+    -- backpack. Read the explicit free-slot counter first so a full bag is
+    -- not dependent on matching every empty-cell image template.
+    local 空格文本 = tomocrtextall(1045, 604, 1215, 655)
+    local 当前空格子 = _ENV["检测背包_解析空格子"](空格文本)
+    if 当前空格子 == nil then
+      当前空格子 = _ENV["检测背包_识别空格子"]()
+    end
     _ENV["当前背包格子"] = 当前空格子
-    local 识别结果 = tomocrtextall(1057, 346, 1187, 373)
+    -- 361/200 is in the upper portion of the right-hand backpack panel
+    -- (reference coordinates for the 1280x720 game canvas).
+    local 识别结果 = tomocrtextall(1100, 225, 1210, 260)
     print("背包重量识别结果", 识别结果)
     local 重量, 总重量 = _ENV["检测背包_解析重量"](识别结果)
     local 重量已识别 = 重量 ~= nil and 总重量 ~= nil
@@ -2730,7 +2780,7 @@ function L0_1(药品颜色)
   end
 
   -- Open and positively identify the backpack before scanning its item grid.
-  tap(902, 663)
+  tap(902, 693)
   sleep(350)
   if not _ENV["药品_识别背包页面"]() then
     return false
@@ -3197,7 +3247,7 @@ function L0_1()
       end
     end
     _ENV["通用关闭"]()
-    if _ENV["在主页面"]() and _ENV["检测背包"]() == false then
+    if _ENV["检测背包"]() == false then
       toast("前往卖货")
       _ENV["去卖货后返回挂机点"]()
     end

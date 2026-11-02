@@ -1555,7 +1555,7 @@ public final class RecoveredLuaTaskTest {
                 emptySlotProbesBeforeRetry + 8, emptySlotProbes.get());
     }
 
-    @Test public void recoveredBackpackWeightParserAcceptsOcrSpacingAndFullWidthSlash() throws Exception {
+    @Test public void recoveredBackpackParsersAcceptOverCapacityAndFreeSlotOcr() throws Exception {
         Globals globals = JsePlatform.standardGlobals();
         globals.set("tickCount", new ZeroArgFunction() {
             @Override public LuaValue call() { return LuaValue.ZERO; }
@@ -1574,9 +1574,82 @@ public final class RecoveredLuaTaskTest {
         Varargs fullWidthSlash = parser.invoke(LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf("12／200")}));
         assertEquals(12, fullWidthSlash.arg(1).toint());
         assertEquals(200, fullWidthSlash.arg(2).toint());
-        Varargs impossible = parser.invoke(LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf("201/200")}));
-        assertTrue("Impossible or unreadable weights must be rejected instead of influencing the shop decision",
-                impossible.arg1().isnil() && impossible.arg(2).isnil());
+        Varargs overloaded = parser.invoke(LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf("201/200")}));
+        assertEquals("An over-capacity reading is valid and should trigger the shop decision",
+                201, overloaded.arg(1).toint());
+        assertEquals(200, overloaded.arg(2).toint());
+        Varargs veryOverloaded = parser.invoke(LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf("361/200")}));
+        assertEquals(361, veryOverloaded.arg(1).toint());
+        assertEquals(200, veryOverloaded.arg(2).toint());
+        Varargs unreadable = parser.invoke(LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf("?/200")}));
+        assertTrue("Unreadable weights must still be rejected",
+                unreadable.arg1().isnil() && unreadable.arg(2).isnil());
+
+        LuaFunction emptyParser = globals.get("检测背包_解析空格子").checkfunction();
+        Varargs full = emptyParser.invoke(LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf("0/35")}));
+        assertEquals(0, full.arg(1).toint());
+        assertEquals(35, full.arg(2).toint());
+        Varargs spacedEmpty = emptyParser.invoke(LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf("0 trống 0／35")}));
+        assertEquals(0, spacedEmpty.arg(1).toint());
+        assertEquals(35, spacedEmpty.arg(2).toint());
+    }
+
+    @Test public void recoveredBackpackDetectionTripsOnFullBagAndOverCapacity() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        List<String> taps = new ArrayList<>();
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.valueOf(1_000_000L); }
+        });
+        OneArgFunction noSleep = new OneArgFunction() {
+            @Override public LuaValue call(LuaValue millis) { return LuaValue.NONE; }
+        };
+        VarArgFunction noOp = new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return LuaValue.NONE; }
+        };
+        globals.set("sleep", noSleep);
+        globals.set("toast", noOp);
+        globals.set("print", noOp);
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot().resolve(module), module);
+        }
+        // 中控.lua installs the production database writer while loading. Replace
+        // it afterwards so this parser/decision test does not need a device id.
+        globals.set("修改数据库", noOp);
+        LuaTable config = new LuaTable();
+        for (String key : Arrays.asList("购买小红", "购买小蓝", "出售全部红", "出售全部蓝"))
+            config.set(key, "false");
+        globals.set("界面数据", config);
+        globals.set("背包检测间隔秒", LuaValue.valueOf(60));
+        globals.set("背包保留重量", LuaValue.valueOf(3));
+        globals.set("背包保留格子", LuaValue.valueOf(2));
+        globals.set("在主页面", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.TRUE; }
+        });
+        globals.set("找到", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue template) { return LuaValue.TRUE; }
+        });
+        globals.set("点击", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                taps.add(args.arg1().tojstring());
+                return LuaValue.TRUE;
+            }
+        });
+        globals.set("tomocrtextall", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                if (args.arg(1).toint() == 1045) return LuaValue.valueOf("0/35");
+                if (args.arg(1).toint() == 1100) return LuaValue.valueOf("361/200");
+                return LuaValue.valueOf("0");
+            }
+        });
+        globals.set("检测背包_识别空格子", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.valueOf(35); }
+        });
+
+        assertFalse("Full slots and a load above capacity must trigger the merchant trip",
+                globals.get("检测背包").checkfunction().call().toboolean());
+        assertEquals(0, globals.get("当前背包格子").toint());
+        assertEquals("361/200", globals.get("当前背包重量").tojstring());
+        assertEquals(Arrays.asList("@@打开背包"), taps);
     }
 
     @Test public void stuckDetectorUsesRealGameScreenshotsAndTripsAfterTenUnchangedFrames() throws Exception {
@@ -1600,9 +1673,6 @@ public final class RecoveredLuaTaskTest {
 
         globals.set("tickCount", new ZeroArgFunction() {
             @Override public LuaValue call() { return LuaValue.valueOf(clock.get()); }
-        });
-        globals.set("sleep", new OneArgFunction() {
-            @Override public LuaValue call(LuaValue millis) { return LuaValue.NONE; }
         });
         globals.set("sleep2", globals.get("sleep"));
         globals.set("keepCapture", new ZeroArgFunction() {
@@ -1851,6 +1921,9 @@ public final class RecoveredLuaTaskTest {
         };
         globals.set("tickCount", new ZeroArgFunction() {
             @Override public LuaValue call() { return LuaValue.valueOf(1_000L); }
+        });
+        globals.set("sleep", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue millis) { return LuaValue.NONE; }
         });
         globals.set("sleep", new OneArgFunction() {
             @Override public LuaValue call(LuaValue millis) { return LuaValue.NONE; }
@@ -2240,8 +2313,8 @@ public final class RecoveredLuaTaskTest {
             @Override public Varargs invoke(Varargs args) {
                 LuaTable rows = new LuaTable();
                 if (sortVisible.get() && args.arg(1).toint() == 1040
-                        && args.arg(2).toint() == 430)
-                    rows.set(1, ocrRow("整理", 1121, 475));
+                        && args.arg(2).toint() == 320)
+                    rows.set(1, ocrRow("整理", 1121, 355));
                 if (stackPrompt.get() && args.arg(1).toint() == 350
                         && args.arg(2).toint() == 220) {
                     rows.set(1, ocrRow("是否使用物品堆叠功能？", 650, 310));
@@ -2256,6 +2329,14 @@ public final class RecoveredLuaTaskTest {
         globals.set("背包保留格子", LuaValue.valueOf(2));
         globals.set("药品_识别背包页面", new ZeroArgFunction() {
             @Override public LuaValue call() { return LuaValue.valueOf(backpackOpen.get()); }
+        });
+        globals.set("找到", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue template) { return LuaValue.FALSE; }
+        });
+        globals.set("tomocrtextall", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                return LuaValue.valueOf(emptySlots.get() + "/35");
+            }
         });
         globals.set("检测背包_识别空格子", new ZeroArgFunction() {
             @Override public LuaValue call() { return LuaValue.valueOf(emptySlots.get()); }
@@ -2308,9 +2389,9 @@ public final class RecoveredLuaTaskTest {
         emptySlots.set(0);
         sortFreesSlots.set(true);
         sortVisible.set(false);
-        assertTrue("Unrecognized sort control must fail before NPC navigation",
-                !globals.get("去卖货_准备背包").checkfunction().call().toboolean());
-        assertTrue(taps.isEmpty());
+        assertTrue("Unrecognized optional sort control must not cancel the doctor trip",
+                globals.get("去卖货_准备背包").checkfunction().call().toboolean());
+        assertEquals(Arrays.asList("@@关闭背包"), taps);
     }
 
     @Test public void merchantRouteSelectsVisibleDoctorRowWithoutMapCheckmark() throws Exception {
@@ -2319,6 +2400,9 @@ public final class RecoveredLuaTaskTest {
         List<String> taps = new ArrayList<>();
         globals.set("tickCount", new ZeroArgFunction() {
             @Override public LuaValue call() { return LuaValue.valueOf(1_000L); }
+        });
+        globals.set("sleep", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue millis) { return LuaValue.NONE; }
         });
         globals.set("tomocrtexttable", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) {
@@ -2332,21 +2416,24 @@ public final class RecoveredLuaTaskTest {
         });
         for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua"))
             loadModule(globals, scriptRoot().resolve(module), module);
+        AtomicBoolean mapPageOpen = new AtomicBoolean(true);
         globals.set("大地图页面已打开", new ZeroArgFunction() {
-            @Override public LuaValue call() { return LuaValue.TRUE; }
+            @Override public LuaValue call() { return LuaValue.valueOf(mapPageOpen.get()); }
         });
         globals.set("点击", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) {
                 taps.add(args.arg1().tojstring() + "|" + args.arg(2).tojstring()
                         + "|" + args.arg(3).tojstring());
+                if ("@@确认前往大夫".equals(args.arg1().tojstring())) mapPageOpen.set(false);
                 return LuaValue.TRUE;
             }
         });
 
         assertTrue(globals.get("大地图_点击大夫").checkfunction().call().toboolean());
-        assertEquals("Doctor selection must tap its OCR row, never the map checkmark",
-                Arrays.asList("@@前往卖货npc|35|160"), taps);
+        assertEquals("Doctor selection must tap the OCR row and confirm travel, never the map checkmark",
+                Arrays.asList("@@前往卖货npc|35|160", "@@确认前往大夫|857|651"), taps);
         taps.clear();
+        mapPageOpen.set(true);
         npcName.set("商人");
         assertTrue("A different NPC must not be selected for this route",
                 !globals.get("大地图_点击大夫").checkfunction().call().toboolean());
@@ -3947,8 +4034,10 @@ public final class RecoveredLuaTaskTest {
         });
         globals.set("tomocrtextall", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) {
-                // The real screenshot visibly shows 2/200 in the backpack weight field.
-                return LuaValue.valueOf("2/200");
+                // Slot and weight counters occupy separate regions on the 610 bag UI.
+                if (args.arg(1).toint() == 1045) return LuaValue.valueOf("31/35");
+                if (args.arg(1).toint() == 1100) return LuaValue.valueOf("2/200");
+                return LuaValue.valueOf("0");
             }
         });
         globals.set("修改数据库", noOp);
