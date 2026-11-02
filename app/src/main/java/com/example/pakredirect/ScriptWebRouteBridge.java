@@ -17,7 +17,10 @@ import java.util.Map;
 
 /** Local ADB-forwardable JSON-lines bridge to the active Lua route worker. */
 final class ScriptWebRouteBridge implements AutoCloseable {
-    static final String SOCKET_NAME = "rylux_script_route_v1";
+    // Use a fresh endpoint name after v1 can be left bound by an older runtime
+    // during rapid app/script restarts. Abstract sockets are process-wide, so
+    // the stale v1 listener must not prevent the current Lua host from starting.
+    static final String SOCKET_NAME = "rylux_script_route_v2";
     private static final int MAX_LINE_BYTES = 16 * 1024;
     private final ScriptWebRouteQueue queue = new ScriptWebRouteQueue();
     private final ScriptWebProfileQueue profileQueue = new ScriptWebProfileQueue();
