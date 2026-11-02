@@ -67,7 +67,8 @@ public final class ScriptToolsActivity extends Activity {
             "脚本/素材库/汉化服务器确认按钮.png",
             "脚本/素材库/汉化登录按钮.png", "脚本/素材库/汉化角色确认按钮.png",
             "脚本/素材库/汉化登录返回按钮.png",
-            "脚本/素材库/服务器进入游戏按钮.png"
+            "脚本/素材库/服务器进入游戏按钮.png",
+            "脚本/素材库/活动页面标题.png"
     };
     // The same allowlisted set is used by the local Lua route bridge.
     private static final String[] MAPS = ScriptMapCatalog.MAPS;

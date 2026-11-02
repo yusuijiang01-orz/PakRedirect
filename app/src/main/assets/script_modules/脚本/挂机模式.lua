@@ -145,36 +145,15 @@ end
 _ENV["组队_关闭页面"] = L0_1
 
 -- The localized activity window has the same close-button position as the
--- party window. Require both its centered title and the right-hand menu so
--- the activity shortcut on the unobstructed game screen cannot trigger it.
+-- party window. Match its centered title image instead of OCR: this check runs
+-- in the shared foreground loop, and a wedged OCR call would stop all gameplay.
 function L0_1()
-  -- OCR can split the title or join it to nearby HUD text. A missing/zero
-  -- confidence is also possible on the runtime OCR bridge; require the title
-  -- and two separate menu labels before using the fixed close button.
-  local function recognizedText(rows)
-    local result = ""
-    for i = 1, #rows do
-      local row = rows[i]
-      if type(row) == "table" then
-        local score = tonumber(row.score or row.confidence)
-        if score == nil or score <= 0 or score >= 0.6 then
-          result = result .. tostring(row.words or row.text or "")
-        end
-      end
-    end
-    return result:gsub("%s+", ""):gsub("　", "")
-  end
-  local titleOk, titleRows = pcall(tomocrtexttable, 270, 35, 445, 105)
-  if not titleOk or type(titleRows) ~= "table" then return false end
-  if not string.find(recognizedText(titleRows), "活动", 1, true) then return false end
-  local menuOk, rows = pcall(tomocrtexttable, 1050, 170, 1190, 540)
-  if not menuOk or type(rows) ~= "table" then return false end
-  local menu = recognizedText(rows)
-  local menuMatches = 0
-  for _, label in ipairs({"报到", "签到", "幸运转轮", "每日", "GiftCode", "活力"}) do
-    if string.find(menu, label, 1, true) then menuMatches = menuMatches + 1 end
-  end
-  return menuMatches >= 2
+  local ok, matched, x, y = pcall(function()
+    return findPic(330, 20, 455, 82,
+        "素材库/活动页面标题.png", "101010", 0, 0.78)
+  end)
+  return ok and (matched == true or tonumber(matched) ~= nil and tonumber(matched) > 0)
+      and tonumber(x) ~= nil and tonumber(y) ~= nil
 end
 _ENV["活动_页面已打开"] = L0_1
 
