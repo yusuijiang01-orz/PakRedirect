@@ -117,23 +117,11 @@ end
 
 _ENV["检测挂机长时间不移动"] = L0_1
 
--- The recovered color templates do not cover every localized rendering of the
--- party panel. Confirm the distinctive title and nearby-player tab with OCR so
--- the shared recovery handler can close the modal instead of leaving the game
--- trapped behind it.
+-- Only use the recovered image templates in the foreground loop. OCR here
+-- used to run on every pass and could wedge the shared Lua runtime on idle HUD.
 function L0_1()
-  if _ENV["找到"](tz["组队_附近玩家页面"]) or _ENV["找到"](tz["组队_附近队伍页面"]) then
-    return true
-  end
-  local titleOk, title = pcall(tomocrtext, 330, 35, 410, 100)
-  if not titleOk or string.find(tostring(title or ""), "队伍", 1, true) == nil then
-    return false
-  end
-  local tabOk, tab = pcall(tomocrtext, 1035, 185, 1190, 260)
-  if not tabOk then return false end
-  tab = tostring(tab or "")
-  return string.find(tab, "附近玩家", 1, true) ~= nil
-      or string.find(tab, "附近队伍", 1, true) ~= nil
+  return _ENV["找到"](tz["组队_附近玩家页面"])
+      or _ENV["找到"](tz["组队_附近队伍页面"])
 end
 _ENV["组队_页面已打开"] = L0_1
 
@@ -149,7 +137,7 @@ _ENV["组队_关闭页面"] = L0_1
 -- in the shared foreground loop, and a wedged OCR call would stop all gameplay.
 function L0_1()
   local ok, matched, x, y = pcall(function()
-    return findPic(330, 20, 455, 82,
+    return findPic(270, 20, 430, 90,
         "素材库/活动页面标题.png", "101010", 0, 0.78)
   end)
   return ok and (matched == true or tonumber(matched) ~= nil and tonumber(matched) > 0)
@@ -159,7 +147,7 @@ _ENV["活动_页面已打开"] = L0_1
 
 function L0_1()
   if not _ENV["活动_页面已打开"]() then return false end
-  _ENV["点击"]("@@关闭活动页面", 1203, 130, 1000)
+  _ENV["点击"]("@@关闭活动页面右侧X", 1203, 130, 1000)
   return true
 end
 _ENV["活动_关闭页面"] = L0_1
