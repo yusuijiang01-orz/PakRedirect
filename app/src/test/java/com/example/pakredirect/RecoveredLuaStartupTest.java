@@ -295,6 +295,20 @@ public final class RecoveredLuaStartupTest {
         globals.set("getPackageName", new ZeroArgFunction() {
             @Override public LuaValue call() { return LuaValue.valueOf("com.example.pakredirect"); }
         });
+        globals.set("getSandboxBagSnapshot", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                LuaTable snapshot = new LuaTable();
+                snapshot.set("supported", LuaValue.TRUE);
+                snapshot.set("status", LuaValue.valueOf("OK"));
+                snapshot.set("freeSlots", LuaValue.valueOf(10));
+                snapshot.set("currentWeight", LuaValue.valueOf(100));
+                snapshot.set("maxWeight", LuaValue.valueOf(200));
+                snapshot.set("ageMs", LuaValue.ZERO);
+                snapshot.set("shouldVisitDoctor", LuaValue.FALSE);
+                snapshot.set("buildId", LuaValue.valueOf(SandboxBagMemoryProfile.GAME_610_BUILD_ID));
+                return snapshot;
+            }
+        });
         globals.set("exec", new OneArgFunction() {
             @Override public LuaValue call(LuaValue command) { return LuaValue.valueOf("123.4 0.00"); }
         });
