@@ -14,14 +14,20 @@ import java.util.LinkedHashMap;
 import java.util.Iterator;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /** Local ADB-forwardable JSON-lines bridge to the active Lua route worker. */
 final class ScriptWebRouteBridge implements AutoCloseable {
-    // Use a fresh endpoint name after v1 can be left bound by an older runtime
-    // during rapid app/script restarts. Abstract sockets are process-wide, so
-    // the stale v1 listener must not prevent the current Lua host from starting.
-    static final String SOCKET_NAME = "rylux_script_route_v2";
+    // Abstract local sockets share a device-wide namespace. A fixed name can
+    // remain bound by a stale runtime instance after its Service has stopped,
+    // which prevents a new script run from starting. Give each bridge instance
+    // its own endpoint; the ADB test panel discovers the newest endpoint for
+    // the main RYLUX process from /proc/net/unix.
+    static final String SOCKET_NAME_PREFIX = "rylux_script_route_v2_";
+    private static final AtomicInteger NEXT_INSTANCE = new AtomicInteger();
     private static final int MAX_LINE_BYTES = 16 * 1024;
+    private final String socketName = SOCKET_NAME_PREFIX + android.os.Process.myPid()
+            + "_" + NEXT_INSTANCE.incrementAndGet();
     private final ScriptWebRouteQueue queue = new ScriptWebRouteQueue();
     private final ScriptWebProfileQueue profileQueue = new ScriptWebProfileQueue();
     private volatile LocalServerSocket server;
@@ -33,7 +39,7 @@ final class ScriptWebRouteBridge implements AutoCloseable {
         IOException lastFailure = null;
         for (int attempt = 0; attempt < 4; attempt++) {
             try {
-                opened = new LocalServerSocket(SOCKET_NAME);
+                opened = new LocalServerSocket(socketName);
                 break;
             } catch (IOException failure) {
                 lastFailure = failure;

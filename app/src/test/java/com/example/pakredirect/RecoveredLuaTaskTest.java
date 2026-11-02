@@ -1652,6 +1652,58 @@ public final class RecoveredLuaTaskTest {
         assertEquals(Arrays.asList("@@打开背包"), taps);
     }
 
+    @Test public void backpackDetectionRetriesWhenBothSlotReadersFailInsteadOfCrashing() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.valueOf(1_000_000L); }
+        });
+        OneArgFunction noSleep = new OneArgFunction() {
+            @Override public LuaValue call(LuaValue millis) { return LuaValue.NONE; }
+        };
+        VarArgFunction noOp = new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return LuaValue.NONE; }
+        };
+        globals.set("sleep", noSleep);
+        globals.set("toast", noOp);
+        globals.set("print", noOp);
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua")) {
+            loadModule(globals, scriptRoot().resolve(module), module);
+        }
+        globals.set("修改数据库", noOp);
+        LuaTable config = new LuaTable();
+        for (String key : Arrays.asList("购买小红", "购买小蓝", "出售全部红", "出售全部蓝"))
+            config.set(key, "false");
+        globals.set("界面数据", config);
+        globals.set("背包检测间隔秒", LuaValue.valueOf(60));
+        globals.set("背包保留重量", LuaValue.valueOf(3));
+        globals.set("背包保留格子", LuaValue.valueOf(2));
+        globals.set("上次检测元宝", LuaValue.valueOf(1_000_000L));
+        globals.set("在主页面", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.FALSE; }
+        });
+        globals.set("找到", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue template) { return LuaValue.TRUE; }
+        });
+        globals.set("tomocrtextall", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                if (args.arg(1).toint() == 1045) return LuaValue.valueOf("unreadable");
+                if (args.arg(1).toint() == 1100) return LuaValue.valueOf("146/200");
+                return LuaValue.valueOf("0");
+            }
+        });
+        globals.set("检测背包_识别空格子", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.NIL; }
+        });
+
+        LuaValue decision = globals.get("检测背包").checkfunction().call();
+
+        assertTrue("Unrecognized slot count must defer safely rather than trigger an unsafe sale",
+                decision.isnil());
+        assertTrue("A failed slot read should be exposed for the retry interval/status",
+                globals.get("背包格子识别失败").toboolean());
+        assertEquals("146/200", globals.get("当前背包重量").tojstring());
+    }
+
     @Test public void stuckDetectorUsesRealGameScreenshotsAndTripsAfterTenUnchangedFrames() throws Exception {
         Path scriptRoot = scriptRoot();
         Globals globals = JsePlatform.standardGlobals();

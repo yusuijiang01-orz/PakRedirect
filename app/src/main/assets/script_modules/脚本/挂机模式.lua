@@ -2323,7 +2323,8 @@ function L0_1()
   -- unchecked for a whole minute. Near-full and failed reads retry sooner.
   local 设置间隔秒 = math.max(1, tonumber(_ENV["背包检测间隔秒"]) or 60)
   local 背包间隔秒 = math.min(设置间隔秒, 15)
-  if _ENV["背包重量识别失败"] or _ENV["背包接近负重阈值"] then
+  if _ENV["背包重量识别失败"] or _ENV["背包格子识别失败"]
+      or _ENV["背包接近负重阈值"] then
     背包间隔秒 = math.min(背包间隔秒, 5)
   end
   if _ENV["上次检测背包"] == nil or tickCount() - _ENV["上次检测背包"] >= 1000 * 背包间隔秒 then
@@ -2391,6 +2392,12 @@ function L0_1()
       当前空格子 = _ENV["检测背包_识别空格子"]()
     end
     _ENV["当前背包格子"] = 当前空格子
+    local 空格子已识别 = type(当前空格子) == "number" and 当前空格子 >= 0
+    _ENV["背包格子识别失败"] = not 空格子已识别
+    if not 空格子已识别 then
+      _ENV["当前任务2"] = "背包空格识别失败，稍后重试"
+      toast("背包空格识别失败，稍后重试")
+    end
     -- 361/200 is in the upper portion of the right-hand backpack panel
     -- (reference coordinates for the 1280x720 game canvas).
     local 识别结果 = tomocrtextall(1100, 225, 1210, 260)
@@ -2414,7 +2421,7 @@ function L0_1()
       toast("背包重量未识别，稍后重试")
     end
     local 保留格子 = tonumber(_ENV["背包保留格子"]) or 2
-    if 当前空格子 <= 保留格子 then
+    if 空格子已识别 and 当前空格子 <= 保留格子 then
       toast("空格子不足" .. 当前空格子 .. "/" .. 保留格子)
       sleep(1000)
       是否要去商店 = true
@@ -2430,7 +2437,7 @@ function L0_1()
       _ENV["上次检测元宝"] = tickCount()
     end
     if 是否要去商店 then return false end
-    if not 重量已识别 then return nil end
+    if not 重量已识别 or not 空格子已识别 then return nil end
     return true
   end
   return true
