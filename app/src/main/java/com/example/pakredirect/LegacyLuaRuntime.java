@@ -808,6 +808,10 @@ final class LegacyLuaRuntime {
         int bottom = mapper.edgeBottom(args.arg(4).todouble());
         LuaTable table = new LuaTable();
         if (right <= left || bottom <= top) return table;
+        android.util.Log.d("RYLUX-ScriptOcr", "Lua OCR region ref="
+                + args.arg(1).tojstring() + "," + args.arg(2).tojstring() + ".."
+                + args.arg(3).tojstring() + "," + args.arg(4).tojstring()
+                + " px=" + left + "," + top + ".." + right + "," + bottom);
         Bitmap crop = Bitmap.createBitmap(screen, left, top, right - left, bottom - top);
         try {
             if (ocr == null) ocr = new ScriptOcr();

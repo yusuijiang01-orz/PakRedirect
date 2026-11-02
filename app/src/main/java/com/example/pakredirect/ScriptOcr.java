@@ -24,12 +24,20 @@ public final class ScriptOcr implements AutoCloseable {
     private static final Executor CALLBACK_EXECUTOR = Runnable::run;
     private static final ScriptOcrGate PROCESS_GATE = new ScriptOcrGate();
     private static final AtomicInteger REQUEST_SEQUENCE = new AtomicInteger();
-    private final TextRecognizer chinese = TextRecognition.getClient(
-            new ChineseTextRecognizerOptions.Builder().build());
-    private final TextRecognizer latin = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
-    private final AtomicInteger pendingTasks = new AtomicInteger();
+    // Keep ML Kit's native recognizers warm for the lifetime of the app process.
+    // ScriptRuntimeService performs a startup terms check before LegacyLuaRuntime
+    // begins. Closing that short-lived wrapper used to tear down ML Kit, then the
+    // first in-game OCR immediately recreated both native pipelines. On LDPlayer
+    // this second cold initialization could never complete and wedged the script.
+    private static final class SharedRecognizers {
+        private static final TextRecognizer CHINESE = TextRecognition.getClient(
+                new ChineseTextRecognizerOptions.Builder().build());
+        private static final TextRecognizer LATIN = TextRecognition.getClient(
+                TextRecognizerOptions.DEFAULT_OPTIONS);
+    }
+    private final TextRecognizer chinese = SharedRecognizers.CHINESE;
+    private final TextRecognizer latin = SharedRecognizers.LATIN;
     private final AtomicBoolean closeRequested = new AtomicBoolean();
-    private final AtomicBoolean recognizersClosed = new AtomicBoolean();
 
     public Result recognize(Bitmap bitmap, boolean chineseText, long timeoutMs) throws Exception {
         return recognize(bitmap, chineseText, timeoutMs, 960);
@@ -73,7 +81,6 @@ public final class ScriptOcr implements AutoCloseable {
             Log.d(TAG, "OCR #" + requestId + " started; source=" + bitmap.getWidth() + "x"
                     + bitmap.getHeight() + ", input=" + inputWidth + "x" + inputHeight
                     + ", maxEdge=" + maxInputEdge);
-            markTaskStarted();
             Runnable finishTask = () -> {
                 if (!taskFinished.compareAndSet(false, true)) return;
                 long elapsed = android.os.SystemClock.elapsedRealtime() - taskStart;
@@ -82,7 +89,6 @@ public final class ScriptOcr implements AutoCloseable {
                             + inputWidth + "x" + inputHeight);
                 }
                 if (!taskInput.isRecycled()) taskInput.recycle();
-                markTaskFinished();
                 done.countDown();
                 PROCESS_GATE.complete(gateLease);
             };
@@ -130,7 +136,8 @@ public final class ScriptOcr implements AutoCloseable {
 
     @Override public synchronized void close() {
         closeRequested.set(true);
-        closeRecognizersIfReady();
+        // The wrapper is per script run; the native recognizers are process-wide
+        // so the next run reuses the initialized ML Kit pipelines.
     }
 
     static boolean isTimeout(Throwable error) {
@@ -152,24 +159,6 @@ public final class ScriptOcr implements AutoCloseable {
     static boolean isUnavailable(Throwable error) {
         return isTimeout(error) || isCircuitOpen(error);
     }
-
-    private synchronized void markTaskStarted() {
-        if (closeRequested.get()) throw new IllegalStateException("OCR 识别器已关闭");
-        pendingTasks.incrementAndGet();
-    }
-
-    private synchronized void markTaskFinished() {
-        pendingTasks.decrementAndGet();
-        closeRecognizersIfReady();
-    }
-
-    private synchronized void closeRecognizersIfReady() {
-        if (!closeRequested.get() || pendingTasks.get() != 0
-                || !recognizersClosed.compareAndSet(false, true)) return;
-        try { chinese.close(); } catch (RuntimeException ignored) { }
-        try { latin.close(); } catch (RuntimeException ignored) { }
-    }
-
 
     public static final class Result {
         public final String text;
