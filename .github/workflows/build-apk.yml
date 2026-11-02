@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       version_name:
-        description: 'Version name, for example 2.4.26-test'
+        description: 'Version name for this test build'
         required: true
-        default: '2.4.95-test'
+        default: '2.5.1-test'
       version_code:
         description: 'Monotonically increasing Android versionCode'
         required: true
-        default: '123'
+        default: '125'
       publish_release:
         description: 'Publish GitHub and Gitee releases after building (leave off for a test build)'
         required: true
@@ -37,8 +37,8 @@ jobs:
       contents: write
 
     env:
-      RYLUX_VERSION_NAME: ${{ inputs.version_name || '2.4.96-test' }}
-      RYLUX_VERSION_CODE: ${{ inputs.version_code || '124' }}
+      RYLUX_VERSION_NAME: ${{ inputs.version_name || '2.5.1-test' }}
+      RYLUX_VERSION_CODE: ${{ inputs.version_code || '125' }}
       RYLUX_KEYSTORE_B64: ${{ secrets.RYLUX_KEYSTORE_B64 }}
       RYLUX_KEYSTORE_PASSWORD: ${{ secrets.RYLUX_KEYSTORE_PASSWORD }}
       RYLUX_KEY_ALIAS: ${{ secrets.RYLUX_KEY_ALIAS }}
