@@ -1922,15 +1922,11 @@ end
 _ENV["执行返回挂机点"] = L0_1
 
 function L0_1()
-  local titleOk, title = pcall(tomocrtext, 45, 25, 280, 100)
-  if not titleOk or string.find(tostring(title or ""), "服务器", 1, true) == nil then
-    return false
-  end
-  local confirmOk, confirm = pcall(tomocrtext, 680, 630, 840, 705)
-  if not confirmOk or string.find(tostring(confirm or ""), "确认", 1, true) == nil then
-    return false
-  end
-  _ENV["点击"]("@@汉化服务器集群确认", 749, 664, 1000)
+  local matched, x, y = findPic(650, 600, 870, 720,
+      "素材库/汉化服务器确认按钮.png", "101010", 0, 0.84)
+  if tonumber(matched) == nil or tonumber(matched) <= 0
+      or tonumber(x) == nil or tonumber(y) == nil then return false end
+  _ENV["登录_快速点击"]("@@汉化服务器集群确认", x + 102, y + 43)
   return true
 end
 _ENV["登录_汉化选区确认"] = L0_1
@@ -1938,6 +1934,7 @@ _ENV["登录_汉化选区确认"] = L0_1
 -- Localized login controls captured from the Chinese client. These image
 -- templates live in script_modules/脚本/素材库 and are searched in small ROIs.
 local 登录素材 = {
+  ["进入游戏"] = {"素材库/服务器进入游戏按钮.png", 470, 310, 810, 410, 300, 72},
   ["登录"] = {"素材库/汉化登录按钮.png", 480, 455, 820, 585, 306, 75},
   ["确认"] = {"素材库/汉化角色确认按钮.png", 950, 510, 1210, 625, 203, 57},
   ["返回"] = {"素材库/汉化登录返回按钮.png", 530, 420, 750, 520, 128, 46}
@@ -1959,6 +1956,22 @@ function L0_1(key)
   return math.floor(tonumber(x) + item[6] / 2), math.floor(tonumber(y) + item[7] / 2)
 end
 _ENV["登录_找素材按钮"] = L0_1
+
+-- Match the selected-server entry button by its captured image. OCRing this
+-- tiny title crop on every login-loop pass can wedge ML Kit on emulator builds.
+function L0_1()
+  if _ENV["界面数据"]["自动登录"] == "false" or _ENV["登录_自动重试终止"] then
+    return false
+  end
+  local x, y = _ENV["登录_找素材按钮"]("进入游戏")
+  if x == nil or y == nil then return false end
+  _ENV["登录_快速点击"]("@@进入已选服务器", x, y)
+  _ENV["登录_动作阶段"] = "进入游戏中"
+  _ENV["登录_动作开始时间"] = tickCount()
+  _ENV["当前任务2"] = "进入已选服务器"
+  return true
+end
+_ENV["登录_汉化服务器进入"] = L0_1
 
 function L0_1(name, x, y)
   -- w.tap adds +/-50 ms jitter; passing [550,1450] keeps the final delay
@@ -2094,7 +2107,25 @@ function L0_1()
   end
   if _ENV["登录_动作阶段"] ~= nil then
     local stageAge = tickCount() - (tonumber(_ENV["登录_动作开始时间"]) or tickCount())
-    if stageAge < 8000 then return true end
+    if _ENV["登录_动作阶段"] == "进入游戏中" then
+      local loginX = _ENV["登录_找素材按钮"]("登录")
+      local confirmX = _ENV["登录_找素材按钮"]("确认")
+      if loginX ~= nil or confirmX ~= nil then
+        _ENV["登录_动作阶段"] = nil
+        _ENV["登录_动作开始时间"] = nil
+      elseif _ENV["登录_汉化选区确认"]() then
+        _ENV["登录_动作阶段"] = nil
+        _ENV["登录_动作开始时间"] = nil
+        return true
+      elseif stageAge < 20000 then
+        return true
+      else
+        _ENV["登录_记录失败"]()
+        return true
+      end
+    elseif stageAge < 8000 then
+      return true
+    end
     if _ENV["登录_动作阶段"] == "登录中" or _ENV["登录_动作阶段"] == "等待主画面" then
       _ENV["登录_记录失败"]()
       return true
@@ -2104,6 +2135,7 @@ function L0_1()
   -- fallback; this keeps startup actions on the foreground hot path.
   if _ENV["登录_汉化账号确认"]() then return true end
   if _ENV["登录_汉化角色确认"]() then return true end
+  if _ENV["登录_汉化服务器进入"]() then return true end
   _ENV["找到点击"]("@@选区失败页面_关闭按钮", tz["选区失败页面_关闭按钮"])
   if _ENV["找到"](tz["选区页面"]) then
     _ENV["点击"]("@@选区确定", 749, 664, 1000)
