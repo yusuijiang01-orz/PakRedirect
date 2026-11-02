@@ -64,8 +64,14 @@ final class LegacyTuringCompat {
 
     /** ML Kit rejects source images with either dimension below 32 pixels. */
     static int[] ocrInputDimensions(int width, int height) {
+        return ocrInputDimensions(width, height, OCR_MAX_INPUT_EDGE);
+    }
+
+    /** Allows startup checks to bound CPU work on low-power emulators. */
+    static int[] ocrInputDimensions(int width, int height, int maxInputEdge) {
         if (width <= 0 || height <= 0) throw new IllegalArgumentException("OCR 图片尺寸无效");
-        double scale = Math.min(1d, (double) OCR_MAX_INPUT_EDGE / Math.max(width, height));
+        int maxEdge = Math.max(32, maxInputEdge);
+        double scale = Math.min(1d, (double) maxEdge / Math.max(width, height));
         scale = Math.max(scale, Math.max(32d / width, 32d / height));
         return new int[]{
                 Math.max(32, (int) Math.round(width * scale)),

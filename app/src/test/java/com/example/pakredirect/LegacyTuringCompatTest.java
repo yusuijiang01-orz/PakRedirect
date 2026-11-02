@@ -19,6 +19,12 @@ public class LegacyTuringCompatTest {
         assertArrayEquals(new int[]{960, 540}, LegacyTuringCompat.ocrInputDimensions(1600, 900));
     }
 
+    @Test
+    public void allowsStartupOcrToUseSmallerBoundedImages() {
+        assertArrayEquals(new int[]{640, 360}, LegacyTuringCompat.ocrInputDimensions(1600, 900, 640));
+        assertArrayEquals(new int[]{576, 130}, LegacyTuringCompat.ocrInputDimensions(576, 130, 640));
+    }
+
     @Test(expected = IllegalArgumentException.class)
     public void rejectsEmptyOcrImages() {
         LegacyTuringCompat.ocrInputDimensions(55, 0);

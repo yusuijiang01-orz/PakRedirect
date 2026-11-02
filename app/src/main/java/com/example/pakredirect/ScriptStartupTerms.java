@@ -4,6 +4,11 @@ import java.util.List;
 
 /** Recognizes only the game's known first-use terms page from OCR line centers. */
 final class ScriptStartupTerms {
+    private static final float TITLE_LEFT = 0.35f;
+    private static final float TITLE_RIGHT = 0.65f;
+    private static final float TITLE_TOP = 0.08f;
+    private static final float TITLE_BOTTOM = 0.20f;
+
     private ScriptStartupTerms() { }
 
     static final class Line {
@@ -26,6 +31,23 @@ final class ScriptStartupTerms {
             this.x = x;
             this.y = y;
         }
+    }
+
+    /** Small central crop containing the terms dialog's fixed title. */
+    static int[] titleRegion(int width, int height) {
+        if (width <= 0 || height <= 0) return new int[]{0, 0, 0, 0};
+        return new int[]{Math.round(width * TITLE_LEFT), Math.round(height * TITLE_TOP),
+                Math.round(width * TITLE_RIGHT), Math.round(height * TITLE_BOTTOM)};
+    }
+
+    static int[] dialogRegion(int width, int height) {
+        if (width <= 0 || height <= 0) return new int[]{0, 0, 0, 0};
+        return new int[]{Math.round(width * 0.12f), Math.round(height * 0.08f),
+                Math.round(width * 0.88f), Math.round(height * 0.94f)};
+    }
+
+    static boolean isTermsTitle(String text) {
+        return compact(text).contains("使用条款");
     }
 
     static Tap findAgreeTap(List<Line> lines, int width, int height) {

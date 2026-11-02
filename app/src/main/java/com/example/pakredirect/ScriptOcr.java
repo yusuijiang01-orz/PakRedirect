@@ -32,6 +32,11 @@ public final class ScriptOcr implements AutoCloseable {
     private final AtomicBoolean recognizersClosed = new AtomicBoolean();
 
     public Result recognize(Bitmap bitmap, boolean chineseText, long timeoutMs) throws Exception {
+        return recognize(bitmap, chineseText, timeoutMs, 960);
+    }
+
+    public Result recognize(Bitmap bitmap, boolean chineseText, long timeoutMs,
+                            int maxInputEdge) throws Exception {
         if (bitmap == null || bitmap.isRecycled()) throw new IllegalArgumentException("OCR 图片不可用");
         if (closeRequested.get()) throw new IllegalStateException("OCR 识别器已关闭");
         int requestId = REQUEST_SEQUENCE.incrementAndGet();
@@ -55,7 +60,8 @@ public final class ScriptOcr implements AutoCloseable {
         try {
             if (closeRequested.get()) throw new IllegalStateException("OCR 识别器已关闭");
             TextRecognizer recognizer = chineseText ? chinese : latin;
-            int[] size = LegacyTuringCompat.ocrInputDimensions(bitmap.getWidth(), bitmap.getHeight());
+            int[] size = LegacyTuringCompat.ocrInputDimensions(
+                    bitmap.getWidth(), bitmap.getHeight(), maxInputEdge);
             input = size[0] == bitmap.getWidth() && size[1] == bitmap.getHeight()
                     ? bitmap.copy(Bitmap.Config.ARGB_8888, false)
                     : Bitmap.createScaledBitmap(bitmap, size[0], size[1], true);
@@ -64,6 +70,9 @@ public final class ScriptOcr implements AutoCloseable {
             final int inputWidth = taskInput.getWidth();
             final int inputHeight = taskInput.getHeight();
             long taskStart = android.os.SystemClock.elapsedRealtime();
+            Log.d(TAG, "OCR #" + requestId + " started; source=" + bitmap.getWidth() + "x"
+                    + bitmap.getHeight() + ", input=" + inputWidth + "x" + inputHeight
+                    + ", maxEdge=" + maxInputEdge);
             markTaskStarted();
             Runnable finishTask = () -> {
                 if (!taskFinished.compareAndSet(false, true)) return;
@@ -138,6 +147,10 @@ public final class ScriptOcr implements AutoCloseable {
             if (message != null && message.startsWith("OCR 连续超时")) return true;
         }
         return false;
+    }
+
+    static boolean isUnavailable(Throwable error) {
+        return isTimeout(error) || isCircuitOpen(error);
     }
 
     private synchronized void markTaskStarted() {

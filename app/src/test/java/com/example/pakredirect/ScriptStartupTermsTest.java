@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
@@ -21,6 +22,14 @@ public final class ScriptStartupTermsTest {
         assertNotNull(tap);
         assertEquals(602, tap.x);
         assertEquals(748, tap.y);
+    }
+
+    @Test public void startupPrecheckUsesSmallFixedHeaderCrop() {
+        assertArrayEquals(new int[]{560, 72, 1040, 180}, ScriptStartupTerms.titleRegion(WIDTH, HEIGHT));
+        assertArrayEquals(new int[]{192, 72, 1408, 846}, ScriptStartupTerms.dialogRegion(WIDTH, HEIGHT));
+        assertTrue(ScriptStartupTerms.isTermsTitle("使用条款"));
+        assertTrue(ScriptStartupTerms.isTermsTitle("  使用条款  "));
+        assertFalse(ScriptStartupTerms.isTermsTitle("Quy định sử dụng"));
     }
 
     @Test public void rejectsGenericDialogAndIncompleteTermsBody() {

@@ -35,6 +35,9 @@ public final class ScriptRuntimeService extends Service {
     private static final int NOTIFICATION_ID = 49;
     private static final String DIAGNOSTICS = "script_runtime_diagnostics";
     private static final String LAST_ERROR = "last_error";
+    private static final int STARTUP_OCR_MAX_EDGE = 640;
+    private static final long STARTUP_TITLE_OCR_TIMEOUT_MS = 5_000L;
+    private static final long STARTUP_DIALOG_OCR_TIMEOUT_MS = 15_000L;
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
         Thread thread = new Thread(r, "rylux-lua-host");
@@ -311,65 +314,77 @@ public final class ScriptRuntimeService extends Service {
     }
 
     private void acceptFirstUseTermsIfPresent() throws Exception {
-        long deadline = android.os.SystemClock.uptimeMillis() + 45_000L;
-        boolean termsAccepted = false;
+        // Most launches start from an already-running game screen. OCR only the
+        // fixed title strip first; scanning every HUD label at 960x540 can saturate
+        // LDPlayer's CPU and prevent the Lua host from ever starting.
         try (ScriptOcr ocr = new ScriptOcr()) {
-            while (true) {
-                control.checkpoint();
-                if (android.os.SystemClock.uptimeMillis() >= deadline) {
-                    publish("启动页等待结束，交由 Lua 登录流程继续");
-                    return;
-                }
-                Bitmap frame = null;
+            control.checkpoint();
+            Bitmap frame = null;
+            Bitmap titleCrop = null;
+            Bitmap dialogCrop = null;
+            try {
+                frame = captureStartupFrame(30_000, 5_000);
+                int[] titleRegion = ScriptStartupTerms.titleRegion(frame.getWidth(), frame.getHeight());
+                titleCrop = Bitmap.createBitmap(frame, titleRegion[0], titleRegion[1],
+                        titleRegion[2] - titleRegion[0], titleRegion[3] - titleRegion[1]);
+                ScriptOcr.Result titleResult;
                 try {
-                    frame = captureStartupFrame(30_000, 5_000);
-                    ScriptOcr.Result result;
-                    try {
-                        result = ocr.recognize(frame, true, 15_000);
-                    } catch (IllegalStateException slowOcr) {
-                        if (!ScriptOcr.isTimeout(slowOcr)) throw slowOcr;
-                        publish("启动页 OCR 响应较慢，正在重试");
-                        control.sleep(1_000L);
-                        continue;
-                    }
-                    JSONArray recognized = new JSONArray(result.json);
-                    List<ScriptStartupTerms.Line> lines = new ArrayList<>();
-                    for (int i = 0; i < recognized.length(); i++) {
-                        JSONObject line = recognized.getJSONObject(i);
-                        lines.add(new ScriptStartupTerms.Line(line.optString("text", ""),
-                                line.optInt("x", -1), line.optInt("y", -1)));
-                    }
-                    ScriptStartupTerms.Tap agree = ScriptStartupTerms.findAgreeTap(
-                            lines, frame.getWidth(), frame.getHeight());
-                    if (!termsAccepted && agree != null) {
-                        control.checkpoint();
-                        try {
-                            if (!ScriptGameAdapter.requireConnected(control).tap(agree.x, agree.y, 60, 3_000)) {
-                                throw new IllegalStateException("游戏首次使用条款的同意按钮未能完成触控");
-                            }
-                        } catch (TargetGameNotForegroundException focusChanged) {
-                            // Re-read the screen after focus returns; coordinates from
-                            // the old frame must not be used for a later gesture.
-                            publish("游戏暂时不在前台，等待返回后重新检查启动页");
-                            continue;
-                        }
-                        termsAccepted = true;
-                        publish("已确认游戏首次使用条款");
-                    }
-                    // The game can show its first-use terms several seconds after
-                    // the BlackBox activity becomes foreground. Keep polling until
-                    // the localized account page appears, so Lua does not start
-                    // against a loading screen or remain trapped behind the terms.
-                    if (ScriptStartupTerms.isLocalizedLoginPage(lines)) return;
-                } finally {
-                    if (frame != null && !frame.isRecycled()) frame.recycle();
-                }
-                long remaining = deadline - android.os.SystemClock.uptimeMillis();
-                if (remaining <= 0) {
-                    publish("启动页等待结束，交由 Lua 登录流程继续");
+                    titleResult = ocr.recognize(titleCrop, true, STARTUP_TITLE_OCR_TIMEOUT_MS,
+                            STARTUP_OCR_MAX_EDGE);
+                } catch (Exception slowOcr) {
+                    if (!ScriptOcr.isUnavailable(slowOcr)) throw slowOcr;
+                    publish("启动页小区域 OCR 超时；跳过非必要条款预检，交由 Lua 流程继续");
                     return;
                 }
-                control.sleep(Math.min(1_000L, remaining));
+                if (!ScriptStartupTerms.isTermsTitle(titleResult.text)) {
+                    publish("未检测到首次使用条款，交由 Lua 流程继续");
+                    return;
+                }
+
+                int[] dialogRegion = ScriptStartupTerms.dialogRegion(frame.getWidth(), frame.getHeight());
+                dialogCrop = Bitmap.createBitmap(frame, dialogRegion[0], dialogRegion[1],
+                        dialogRegion[2] - dialogRegion[0], dialogRegion[3] - dialogRegion[1]);
+                ScriptOcr.Result result;
+                try {
+                    result = ocr.recognize(dialogCrop, true, STARTUP_DIALOG_OCR_TIMEOUT_MS,
+                            STARTUP_OCR_MAX_EDGE);
+                } catch (Exception slowOcr) {
+                    if (ScriptOcr.isUnavailable(slowOcr)) {
+                        publish("检测到使用条款，但 OCR 未能完整核实；未执行点击，请先手动处理条款");
+                        throw new IllegalStateException(
+                                "使用条款页面 OCR 超时，未自动确认；请手动处理后重启脚本", slowOcr);
+                    }
+                    throw slowOcr;
+                }
+
+                JSONArray recognized = new JSONArray(result.json);
+                List<ScriptStartupTerms.Line> lines = new ArrayList<>();
+                for (int i = 0; i < recognized.length(); i++) {
+                    JSONObject line = recognized.getJSONObject(i);
+                    lines.add(new ScriptStartupTerms.Line(line.optString("text", ""),
+                            line.optInt("x", -1) + dialogRegion[0],
+                            line.optInt("y", -1) + dialogRegion[1]));
+                }
+                ScriptStartupTerms.Tap agree = ScriptStartupTerms.findAgreeTap(
+                        lines, frame.getWidth(), frame.getHeight());
+                if (agree == null) {
+                    throw new IllegalStateException(
+                            "检测到使用条款，但无法完整核实页面内容；未执行点击");
+                }
+                control.checkpoint();
+                try {
+                    if (!ScriptGameAdapter.requireConnected(control).tap(agree.x, agree.y, 60, 3_000)) {
+                        throw new IllegalStateException("游戏首次使用条款的同意按钮未能完成触控");
+                    }
+                } catch (TargetGameNotForegroundException focusChanged) {
+                    publish("游戏在确认首次使用条款时离开前台；未复用旧截图点击");
+                    return;
+                }
+                publish("已确认游戏首次使用条款");
+            } finally {
+                if (dialogCrop != null && !dialogCrop.isRecycled()) dialogCrop.recycle();
+                if (titleCrop != null && !titleCrop.isRecycled()) titleCrop.recycle();
+                if (frame != null && !frame.isRecycled()) frame.recycle();
             }
         }
     }
