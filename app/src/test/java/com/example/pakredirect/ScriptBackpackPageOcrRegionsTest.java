@@ -48,7 +48,7 @@ public final class ScriptBackpackPageOcrRegionsTest {
     }
 
     private static Globals createProbeGlobals(List<int[]> calls, boolean backpackTitle) throws IOException {
-        String source = Files.readString(LUA, StandardCharsets.UTF_8);
+        String source = new String(Files.readAllBytes(LUA), StandardCharsets.UTF_8);
         String startMarker = "function L0_1(标题, markers, requiredMarkers)";
         String endMarker = "_ENV[\"药品_识别自动设置页面\"] = function()";
         int start = source.indexOf(startMarker);
