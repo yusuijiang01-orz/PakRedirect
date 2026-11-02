@@ -12,7 +12,6 @@ import com.google.mlkit.vision.text.latin.TextRecognizerOptions;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -23,7 +22,7 @@ public final class ScriptOcr implements AutoCloseable {
     static final long LUA_TIMEOUT_MS = 30_000L;
     private static final String TAG = "RYLUX-ScriptOcr";
     private static final Executor CALLBACK_EXECUTOR = Runnable::run;
-    private static final Semaphore PROCESS_GATE = new Semaphore(1, true);
+    private static final ScriptOcrGate PROCESS_GATE = new ScriptOcrGate();
     private static final AtomicInteger REQUEST_SEQUENCE = new AtomicInteger();
     private final TextRecognizer chinese = TextRecognition.getClient(
             new ChineseTextRecognizerOptions.Builder().build());
@@ -38,15 +37,15 @@ public final class ScriptOcr implements AutoCloseable {
         int requestId = REQUEST_SEQUENCE.incrementAndGet();
         long timeout = Math.max(1L, timeoutMs);
         long deadline = android.os.SystemClock.elapsedRealtime() + timeout;
-        if (!PROCESS_GATE.tryAcquire(timeout, TimeUnit.MILLISECONDS)) {
+        ScriptOcrGate.Lease gateLease = PROCESS_GATE.acquire(timeout);
+        if (gateLease == null) {
             Log.w(TAG, "OCR #" + requestId + " semaphore timeout; source="
                     + bitmap.getWidth() + "x" + bitmap.getHeight());
+            if (PROCESS_GATE.isCircuitOpen()) {
+                throw new IllegalStateException("OCR 连续超时，识别已暂停；为避免脚本卡住，已停止后续识别");
+            }
             throw new IllegalStateException("OCR 识别超时：上一张图片仍在识别");
         }
-        AtomicBoolean gateReleased = new AtomicBoolean();
-        Runnable releaseGate = () -> {
-            if (gateReleased.compareAndSet(false, true)) PROCESS_GATE.release();
-        };
         CountDownLatch done = new CountDownLatch(1);
         Text[] output = new Text[1];
         Exception[] failure = new Exception[1];
@@ -76,7 +75,7 @@ public final class ScriptOcr implements AutoCloseable {
                 if (!taskInput.isRecycled()) taskInput.recycle();
                 markTaskFinished();
                 done.countDown();
-                releaseGate.run();
+                PROCESS_GATE.complete(gateLease);
             };
             try {
                 Task<Text> task = recognizer.process(InputImage.fromBitmap(taskInput, 0));
@@ -100,9 +99,13 @@ public final class ScriptOcr implements AutoCloseable {
             }
             long remaining = deadline - android.os.SystemClock.elapsedRealtime();
             if (remaining <= 0 || !done.await(remaining, TimeUnit.MILLISECONDS)) {
+                PROCESS_GATE.markTimedOut(gateLease);
                 Log.e(TAG, "OCR #" + requestId + " inference timeout; source="
                         + bitmap.getWidth() + "x" + bitmap.getHeight() + ", input="
                         + inputWidth + "x" + inputHeight + ", timeout=" + timeout + "ms");
+                if (PROCESS_GATE.isCircuitOpen()) {
+                    throw new IllegalStateException("OCR 连续超时，识别已暂停；为避免脚本卡住，已停止后续识别");
+                }
                 throw new IllegalStateException("OCR 识别超时（等待 " + timeout + " 毫秒）");
             }
             if (failure[0] != null) throw failure[0];
@@ -111,7 +114,7 @@ public final class ScriptOcr implements AutoCloseable {
         } finally {
             if (!listenerAttached) {
                 if (input != null && !input.isRecycled()) input.recycle();
-                releaseGate.run();
+                PROCESS_GATE.complete(gateLease);
             }
         }
     }
@@ -125,6 +128,14 @@ public final class ScriptOcr implements AutoCloseable {
         for (Throwable current = error; current != null; current = current.getCause()) {
             String message = current.getMessage();
             if (message != null && message.startsWith("OCR 识别超时")) return true;
+        }
+        return false;
+    }
+
+    static boolean isCircuitOpen(Throwable error) {
+        for (Throwable current = error; current != null; current = current.getCause()) {
+            String message = current.getMessage();
+            if (message != null && message.startsWith("OCR 连续超时")) return true;
         }
         return false;
     }

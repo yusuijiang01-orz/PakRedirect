@@ -1682,18 +1682,22 @@ function L0_1()
   if not npcSearch then return false end
   local ok, rows = pcall(tomocrtexttable, 0, 120, 330, 650)
   if not ok or type(rows) ~= "table" then return false end
-  local npcX, npcY, matches = nil, nil, 0
-  for _, row in pairs(rows) do
+  local npcX, npcY = nil, nil
+  for index = 1, #rows do
+    local row = rows[index]
     if type(row) == "table" then
       local text = tostring(row.words or row.text or ""):gsub("%s", "")
       local x, y = tonumber(row.x), tonumber(row.y)
-      if text == "大夫" and (tonumber(row.score) or 0) >= 0.82
+      -- The live NPC list labels these entries 东门大夫/南门大夫/西门大夫/中门大夫.
+      -- Match the role name and select the first visible doctor row in list order.
+      if string.find(text, "大夫", 1, true) and (tonumber(row.score) or 0) >= 0.82
           and x and y and x >= 0 and x <= 150 and y >= 140 and y <= 650 then
-        npcX, npcY, matches = x, y, matches + 1
+        npcX, npcY = x, y
+        break
       end
     end
   end
-  if matches ~= 1 then return false end
+  if not npcX or not npcY then return false end
   _ENV["点击"]("@@前往卖货npc", math.floor(npcX), math.floor(npcY), 1000)
   -- Selecting a merchant highlights it on the map, but does not start
   -- movement until the map's go button is confirmed.

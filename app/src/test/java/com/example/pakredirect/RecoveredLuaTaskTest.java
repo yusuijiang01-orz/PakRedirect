@@ -2396,7 +2396,7 @@ public final class RecoveredLuaTaskTest {
 
     @Test public void merchantRouteSelectsVisibleDoctorRowWithoutMapCheckmark() throws Exception {
         Globals globals = JsePlatform.standardGlobals();
-        AtomicReference<String> npcName = new AtomicReference<>("大夫");
+        AtomicReference<String> npcName = new AtomicReference<>("东门大夫");
         List<String> taps = new ArrayList<>();
         globals.set("tickCount", new ZeroArgFunction() {
             @Override public LuaValue call() { return LuaValue.valueOf(1_000L); }
@@ -2409,8 +2409,13 @@ public final class RecoveredLuaTaskTest {
                 LuaTable rows = new LuaTable();
                 if (args.arg(1).toint() == 0 && args.arg(2).toint() == 0)
                     rows.set(1, ocrRow("输入NPC名", 67, 98));
-                if (args.arg(1).toint() == 0 && args.arg(2).toint() == 120)
+                if (args.arg(1).toint() == 0 && args.arg(2).toint() == 120) {
                     rows.set(1, ocrRow(npcName.get(), 35, 160));
+                    if ("东门大夫".equals(npcName.get())) {
+                        rows.set(2, ocrRow("南门大夫", 35, 205));
+                        rows.set(3, ocrRow("西门大夫", 35, 250));
+                    }
+                }
                 return rows;
             }
         });

@@ -409,7 +409,21 @@ final class LegacyLuaRuntime {
         });
         globals.set("print", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) {
-                if (listener != null && args.narg() > 0) listener.onStatus(args.tojstring());
+                if (listener != null && args.narg() > 0) {
+                    StringBuilder message = new StringBuilder();
+                    for (int index = 1; index <= args.narg(); index++) {
+                        if (index > 1) message.append('\t');
+                        LuaValue value = args.arg(index);
+                        if (value.istable()) {
+                            LuaValue words = value.get("words");
+                            if (words.isstring()) message.append(words.tojstring());
+                            else message.append("table[").append(value.length()).append(']');
+                        } else {
+                            message.append(value.tojstring());
+                        }
+                    }
+                    listener.onStatus(message.toString());
+                }
                 return LuaValue.NONE;
             }
         });
@@ -816,6 +830,9 @@ final class LegacyLuaRuntime {
             return table;
         } catch (Exception error) {
             rethrowIfStopped();
+            if (ScriptOcr.isCircuitOpen(error)) {
+                throw new LuaError("OCR 连续无响应；为避免角色停在满包状态，脚本已停止：" + error.getMessage());
+            }
             if (ScriptOcr.isTimeout(error)) {
                 if (listener != null) listener.onStatus("OCR 暂时超时，本次按未识别处理，稍后重试");
                 return table;
