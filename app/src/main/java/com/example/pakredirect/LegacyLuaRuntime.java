@@ -51,6 +51,7 @@ final class LegacyLuaRuntime {
     private final Consumer<Throwable> failureListener;
     private final ScriptWebRouteBridge routeBridge;
     private final ScriptRuntimeLog runtimeLog;
+    private final SandboxBagSnapshotRelay bagSnapshotRelay;
     private final AtomicBoolean captureHeld = new AtomicBoolean(false);
     private final CopyOnWriteArrayList<Thread> threads = new CopyOnWriteArrayList<>();
     private final ScriptHudStatus hudStatus = new ScriptHudStatus();
@@ -65,7 +66,8 @@ final class LegacyLuaRuntime {
 
     LegacyLuaRuntime(Context context, ScriptExecutionControl control, JSONObject config,
                      Listener listener, Consumer<Throwable> failureListener,
-                     ScriptWebRouteBridge routeBridge, ScriptRuntimeLog runtimeLog) {
+                     ScriptWebRouteBridge routeBridge, ScriptRuntimeLog runtimeLog,
+                     SandboxBagSnapshotRelay bagSnapshotRelay) {
         this.context = context.getApplicationContext();
         this.control = control;
         this.config = config;
@@ -73,6 +75,7 @@ final class LegacyLuaRuntime {
         this.failureListener = failureListener;
         this.routeBridge = routeBridge;
         this.runtimeLog = runtimeLog;
+        this.bagSnapshotRelay = bagSnapshotRelay;
     }
 
     static String[] compatibilityBlockers(Context context) {
@@ -129,6 +132,42 @@ final class LegacyLuaRuntime {
         });
         globals.set("tickCount", new ZeroFunction() {
             @Override public LuaValue invoke() { control.checkpoint(); return LuaValue.valueOf(SystemClock.uptimeMillis()); }
+        });
+        globals.set("getSandboxBagSnapshot", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                control.checkpoint();
+                if (ScriptToolsActivity.TARGET_MODE_DESKTOP.equals(
+                        config.optString("目标运行环境", ScriptToolsActivity.TARGET_MODE_SANDBOX))) {
+                    return unavailableBagSnapshot("DESKTOP_MODE");
+                }
+                if (bagSnapshotRelay == null) return unavailableBagSnapshot("RELAY_UNAVAILABLE");
+                SandboxBagSnapshot snapshot = bagSnapshotRelay.snapshot();
+                if (snapshot == null) return unavailableBagSnapshot("WAITING_FOR_SNAPSHOT");
+                LuaTable value = new LuaTable();
+                value.set("supported", LuaValue.valueOf(snapshot.supported));
+                value.set("status", LuaValue.valueOf(snapshot.status));
+                value.set("buildId", LuaValue.valueOf(snapshot.buildId));
+                if (snapshot.supported) {
+                    int reserveSlots = Math.max(0, args.arg(1).optint(2));
+                    int reserveWeight = Math.max(0, args.arg(2).optint(3));
+                    value.set("freeSlots", LuaValue.valueOf(snapshot.freeSlots));
+                    value.set("currentWeight", LuaValue.valueOf(snapshot.currentWeight));
+                    value.set("maxWeight", LuaValue.valueOf(snapshot.maxWeight));
+                    value.set("shouldVisitDoctor", LuaValue.valueOf(
+                            snapshot.shouldVisitDoctor(reserveSlots, reserveWeight)));
+                    value.set("ageMs", LuaValue.valueOf(
+                            android.os.SystemClock.elapsedRealtime() - snapshot.receivedAtElapsedMs));
+                }
+                return value;
+            }
+
+            private LuaTable unavailableBagSnapshot(String status) {
+                LuaTable value = new LuaTable();
+                value.set("supported", LuaValue.FALSE);
+                value.set("status", LuaValue.valueOf(status));
+                value.set("buildId", LuaValue.valueOf(""));
+                return value;
+            }
         });
         globals.set("keepCapture", new ZeroFunction() {
             @Override public LuaValue invoke() { control.checkpoint(); captureHeld.set(true); refreshFrame(); return LuaValue.NONE; }

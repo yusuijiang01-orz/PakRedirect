@@ -373,7 +373,7 @@ public final class ScriptToolsActivity extends Activity {
         addNumber(supplies, "购买蓝的数量", "每次购买蓝药", "10", "个", 1, 99999);
 
         root = (LinearLayout) tabPages.get(3).getChildAt(0);
-        LinearLayout inventory = section("背包与装备", "背包剩余负重达到阈值或可用空格达到阈值，任一条件满足就前往大夫。装备默认不出售；要清理装备需开启“出售装备”并关闭“保护装备不出售”，再勾选品质（默认白、蓝）。回红/回内或词条无法确认的装备始终保留。");
+        LinearLayout inventory = section("背包与装备", "自动清包触发只接受已验证的 610 沙箱内存快照；桌面版、旧版或无有效快照时脚本会安全停止，不再用 OCR 猜负重和空格。NPC、商店及物品文字识别仍依赖 OCR。装备默认不出售；要清理装备需开启“出售装备”并关闭“保护装备不出售”，再勾选品质。回红/回内或词条无法确认的装备始终保留。");
         addSwitch(inventory, "保护装备不出售", "总保护开关；开启后不出售任何装备", true);
         addSwitch(inventory, "检测修理装备", "检测并修理装备", true);
         addNumber(inventory, "背包保留重量", "剩余负重达到此值时卖垃圾", "3", "重量", 0, 99999);

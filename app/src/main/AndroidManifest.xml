@@ -33,6 +33,7 @@
 
         <activity
             android:name=".MainActivity"
+            android:screenOrientation="portrait"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -40,12 +41,13 @@
             </intent-filter>
         </activity>
 
-        <activity android:name=".PaymentActivity" android:exported="false" />
-        <activity android:name=".AuthorWeChatActivity" android:exported="false" />
-        <activity android:name=".BlackBoxSandboxActivity" android:exported="false" />
-        <activity android:name=".ScriptToolsActivity" android:exported="false" />
+        <activity android:name=".PaymentActivity" android:screenOrientation="portrait" android:exported="false" />
+        <activity android:name=".AuthorWeChatActivity" android:screenOrientation="portrait" android:exported="false" />
+        <activity android:name=".BlackBoxSandboxActivity" android:screenOrientation="portrait" android:exported="false" />
+        <activity android:name=".ScriptToolsActivity" android:screenOrientation="portrait" android:exported="false" />
         <activity
             android:name=".wxapi.WXPayEntryActivity"
+            android:screenOrientation="portrait"
             android:exported="true"
             android:launchMode="singleTop"
             android:taskAffinity="com.example.pakredirect"

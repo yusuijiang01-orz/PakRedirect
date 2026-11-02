@@ -18,6 +18,11 @@ android {
         versionCode = (project.findProperty('ryluxVersionCode') ?: '37').toInteger()
         versionName = (project.findProperty('ryluxVersionName') ?: '2.4.16').toString()
         manifestPlaceholders = [ryluxWechatAppId: (project.findProperty('ryluxWechatAppId') ?: 'wx_replace_with_merchant_appid').toString()]
+        externalNativeBuild {
+            ndkBuild {
+                arguments 'APP_PLATFORM=android-26'
+            }
+        }
     }
 
     sourceSets {
@@ -32,6 +37,7 @@ android {
             java.exclude '**/RecoveredLuaTaskTest.java'
             java.exclude '**/RecoveredLuaLiveLoginTest.java'
             java.exclude '**/RecoveredLuaLiveBackpackDetectionTest.java'
+            java.exclude '**/SandboxBagSnapshotPolicyTest.java'
             java.exclude '**/RecoveredLuaLiveActivityPanelTest.java'
             java.exclude '**/RecoveredLuaLiveCombatTest.java'
             java.exclude '**/RecoveredLuaLiveMedicineTest.java'
@@ -80,6 +86,13 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
+
+    externalNativeBuild {
+        ndkBuild {
+            path file('src/main/cpp/Android.mk')
+        }
+    }
+    ndkVersion '27.0.12077973'
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_11

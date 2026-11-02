@@ -160,6 +160,7 @@ final class LiveLuaDeviceHost implements AutoCloseable {
 
     void requireForeground() throws Exception {
         String windows = new String(adb(8_000, "shell", "dumpsys", "window"), StandardCharsets.UTF_8);
+        boolean desktopTarget = "desktop".equalsIgnoreCase(System.getenv("RYLUX_LIVE_TARGET_MODE"));
         int displaysStart = windows.indexOf("WINDOW MANAGER DISPLAY CONTENTS");
         String displays = displaysStart < 0 ? "" : windows.substring(displaysStart);
         Matcher blocks = Pattern.compile("(?ms)^\\s*Display: mDisplayId=(\\d+)(.*?)(?=^\\s*Display: mDisplayId=|^WINDOW MANAGER |\\z)")
@@ -172,12 +173,16 @@ final class LiveLuaDeviceHost implements AutoCloseable {
                     .matcher(block).find();
             boolean proxy = Pattern.compile("(?m)^\\s*mFocusedApp=ActivityRecord\\{[^\\r\\n]*\\scom\\.example\\.pakredirect/top\\.niunaijun\\.blackbox\\.proxy\\.ProxyActivity\\$P\\d+\\s[^}\\r\\n]*\\}")
                     .matcher(block).find();
-            foreground = guest && proxy;
+            foreground = desktopTarget ? Pattern.compile(
+                    "(?m)^\\s*mCurrentFocus=Window\\{[^\\r\\n]*\\scom\\.tepaylink\\.tamgioiphantranhmobile/[^}\\r\\n]+\\}")
+                    .matcher(block).find() : guest && proxy;
             break;
         }
         if (!foreground) {
-            event("foreground", "display0 guest/proxy focus mismatch");
-            throw new IOException("BlackBox proxy or localized game guest lost foreground; see events.tsv");
+            event("foreground", desktopTarget ? "display0 desktop game focus mismatch"
+                    : "display0 guest/proxy focus mismatch");
+            throw new IOException(desktopTarget ? "Desktop game lost foreground; see events.tsv"
+                    : "BlackBox proxy or localized game guest lost foreground; see events.tsv");
         }
     }
 

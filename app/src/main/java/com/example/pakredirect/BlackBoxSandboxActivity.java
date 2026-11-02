@@ -3,6 +3,8 @@ package com.example.pakredirect;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.net.Uri;
@@ -38,8 +40,11 @@ public final class BlackBoxSandboxActivity extends Activity {
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private LinearLayout appList;
     private TextView status;
+    private TextView desktopVersionNote;
     private ProgressBar progress;
     private Switch localizationToggle;
+    private Button desktopCloneButton;
+    private volatile boolean desktopGameAvailable;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -121,6 +126,18 @@ public final class BlackBoxSandboxActivity extends Activity {
         Button importButton = button("选择游戏 APK 导入沙箱", true);
         importButton.setOnClickListener(v -> pickApk());
         root.addView(importButton, new LinearLayout.LayoutParams(-1, dp(50)));
+
+        desktopVersionNote = label("正在检查系统桌面版与沙箱版…", 12, RyluxDesignSystem.MUTED, false);
+        LinearLayout.LayoutParams desktopNoteLp = new LinearLayout.LayoutParams(-1, -2);
+        desktopNoteLp.topMargin = dp(10);
+        root.addView(desktopVersionNote, desktopNoteLp);
+
+        desktopCloneButton = button("从系统桌面导入封神榜", false);
+        desktopCloneButton.setEnabled(false);
+        desktopCloneButton.setOnClickListener(v -> cloneDesktopGame());
+        LinearLayout.LayoutParams desktopCloneLp = new LinearLayout.LayoutParams(-1, dp(46));
+        desktopCloneLp.topMargin = dp(8);
+        root.addView(desktopCloneButton, desktopCloneLp);
 
         LinearLayout statusCard = new LinearLayout(this);
         statusCard.setGravity(Gravity.CENTER_VERTICAL);
@@ -257,16 +274,38 @@ public final class BlackBoxSandboxActivity extends Activity {
         worker.execute(() -> {
             try {
                 List<ApplicationInfo> apps = BlackBoxCore.get().getInstalledApplications(0, 0);
-                runOnUiThread(() -> showApps(apps));
+                PackageInfo desktopGame = null;
+                try {
+                    desktopGame = getPackageManager().getPackageInfo(LOCALIZED_GAME_PACKAGE, 0);
+                } catch (PackageManager.NameNotFoundException ignored) {
+                    // The desktop client is optional; APK-file import still works.
+                }
+                PackageInfo sandboxGame = BlackBoxCore.getBPackageManager()
+                        .getPackageInfo(LOCALIZED_GAME_PACKAGE, 0, 0);
+                PackageInfo finalDesktopGame = desktopGame;
+                runOnUiThread(() -> showApps(apps, finalDesktopGame, sandboxGame));
             } catch (Throwable error) {
                 runOnUiThread(() -> setBusy(false, "读取失败：" + safe(error.getMessage())));
             }
         });
     }
 
-    private void showApps(List<ApplicationInfo> apps) {
+    private void showApps(List<ApplicationInfo> apps, PackageInfo desktopGame, PackageInfo sandboxGame) {
         localizationToggle = null;
         appList.removeAllViews();
+        desktopGameAvailable = desktopGame != null && desktopGame.applicationInfo != null
+                && desktopGame.applicationInfo.sourceDir != null;
+        if (desktopVersionNote != null) {
+            String desktopVersion = desktopGame == null ? "未安装" : versionLabel(desktopGame);
+            String sandboxVersion = sandboxGame == null ? "未导入" : versionLabel(sandboxGame);
+            desktopVersionNote.setText("系统桌面版：" + desktopVersion + "　·　沙箱版：" + sandboxVersion);
+        }
+        if (desktopCloneButton != null) {
+            desktopCloneButton.setText(desktopGame == null
+                    ? "未检测到系统桌面版封神榜"
+                    : "从系统桌面导入 " + versionLabel(desktopGame));
+            desktopCloneButton.setEnabled(desktopGameAvailable);
+        }
         int count = 0;
         for (ApplicationInfo app : apps) {
             if (app == null || app.packageName == null || getPackageName().equals(app.packageName)) continue;
@@ -318,6 +357,38 @@ public final class BlackBoxSandboxActivity extends Activity {
         }
         if (count == 0) appList.addView(label("还没有导入应用。选择一个 APK 开始测试。", 13, RyluxDesignSystem.MUTED, false));
         setBusy(false, "虚拟环境就绪 · " + count + " 个应用");
+    }
+
+    private void cloneDesktopGame() {
+        if (!desktopGameAvailable) {
+            setBusy(false, "未检测到系统桌面版封神榜，仍可选择 APK 文件导入");
+            return;
+        }
+        setBusy(true, "正在从系统桌面同步封神榜到沙箱…");
+        worker.execute(() -> {
+            try {
+                PackageInfo source = getPackageManager().getPackageInfo(LOCALIZED_GAME_PACKAGE, 0);
+                InstallResult result = BlackBoxCore.get().installPackageAsUser(LOCALIZED_GAME_PACKAGE, 0);
+                String message = result != null && result.success
+                        ? "已从系统桌面导入 " + versionLabel(source) + " 到沙箱；沙箱游戏数据已保留"
+                        : "桌面版导入失败：" + safe(result == null ? null : result.msg);
+                runOnUiThread(() -> {
+                    setBusy(false, message);
+                    Toast.makeText(this, result != null && result.success ? "桌面版已同步到沙箱" : "导入失败",
+                            Toast.LENGTH_LONG).show();
+                    refreshApps();
+                });
+            } catch (Throwable error) {
+                runOnUiThread(() -> setBusy(false, "桌面版导入失败：" + safe(error.getMessage())));
+            }
+        });
+    }
+
+    private static String versionLabel(PackageInfo info) {
+        if (info == null) return "未知版本";
+        String name = info.versionName == null || info.versionName.trim().isEmpty()
+                ? "" : info.versionName.trim();
+        return name.isEmpty() ? "versionCode " + info.versionCode : "v" + name;
     }
 
     private void launch(String packageName, boolean withLocalization) {

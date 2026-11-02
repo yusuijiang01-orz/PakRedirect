@@ -3,6 +3,7 @@ package com.example.pakredirect;
 import android.app.Activity;
 import android.app.Application;
 import android.content.Context;
+import android.content.pm.ActivityInfo;
 import android.os.Bundle;
 import android.util.Log;
 
@@ -53,6 +54,9 @@ public class RyluxApplication extends Application {
         }
         registerActivityLifecycleCallbacks(new ActivityLifecycleCallbacks() {
             @Override public void onActivityResumed(Activity activity) {
+                if (isRyluxUiActivity(activity)) {
+                    activity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+                }
                 if (activity instanceof MainActivity) {
                     RyluxUiPolish.attach(activity);
                     RyluxResponsiveTuner.attach(activity);
@@ -84,6 +88,15 @@ public class RyluxApplication extends Application {
                 }
             }
         });
+    }
+
+    private static boolean isRyluxUiActivity(Activity activity) {
+        return activity instanceof MainActivity
+                || activity instanceof PaymentActivity
+                || activity instanceof AuthorWeChatActivity
+                || activity instanceof BlackBoxSandboxActivity
+                || activity instanceof ScriptToolsActivity
+                || activity instanceof com.example.pakredirect.wxapi.WXPayEntryActivity;
     }
 
     boolean isBlackBoxReady() {

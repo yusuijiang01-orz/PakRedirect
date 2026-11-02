@@ -2,6 +2,8 @@
 -keep class com.alipay.** { *; }
 -keep class com.tencent.mm.opensdk.** { *; }
 -keep class com.example.pakredirect.wxapi.** { *; }
+-keep class com.example.pakredirect.SandboxGameMemoryBridge { public static void onGameActivityResumed(android.app.Activity); public static void onGameActivityPaused(android.app.Activity); public static void onGameActivityDestroyed(android.app.Activity); }
+-keep class com.example.pakredirect.SandboxGameMemoryNative { *; }
 -dontwarn com.alipay.**
 -keep class org.amnezia.awg.hevtunnel.TProxyService { *; }
 

@@ -6,6 +6,7 @@ import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Intent;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
@@ -14,6 +15,7 @@ import android.util.Log;
 
 import org.json.JSONObject;
 
+import java.io.InputStream;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeoutException;
@@ -33,8 +35,8 @@ public final class ScriptRuntimeService extends Service {
     private static final int NOTIFICATION_ID = 49;
     private static final String DIAGNOSTICS = "script_runtime_diagnostics";
     private static final String LAST_ERROR = "last_error";
-    private static final int STARTUP_OCR_MAX_EDGE = 640;
-    private static final long STARTUP_TITLE_OCR_TIMEOUT_MS = 5_000L;
+    private static final String STARTUP_AGREE_TEMPLATE =
+            "script_modules/脚本/素材库/汉化条款同意按钮.png";
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
         Thread thread = new Thread(r, "rylux-lua-host");
@@ -45,6 +47,7 @@ public final class ScriptRuntimeService extends Service {
     private volatile String lastMessage = "就绪";
     private volatile String state = ScriptExecutionControl.State.IDLE.name();
     private final ScriptWebRouteBridge routeBridge = new ScriptWebRouteBridge();
+    private SandboxBagSnapshotRelay bagSnapshotRelay;
     private ScriptRuntimeLog runtimeLog;
     private volatile boolean workerRunning;
     private volatile boolean entitlementCheckPending;
@@ -77,6 +80,7 @@ public final class ScriptRuntimeService extends Service {
     @Override public void onCreate() {
         super.onCreate();
         runtimeLog = new ScriptRuntimeLog(new java.io.File(getFilesDir(), "logs"));
+        bagSnapshotRelay = new SandboxBagSnapshotRelay(this);
         createNotificationChannel();
         mainHandler.postDelayed(entitlementWatchdog, 10_000L);
     }
@@ -212,6 +216,18 @@ public final class ScriptRuntimeService extends Service {
             publish("启动失败：Lua 路线桥接无法监听：" + failure.getMessage());
             stopSelf(latestStartId);
             return;
+        }
+        if (ScriptToolsActivity.TARGET_MODE_SANDBOX.equals(config.optString("目标运行环境",
+                ScriptToolsActivity.TARGET_MODE_SANDBOX))) {
+            try {
+                bagSnapshotRelay.start();
+                publish("沙箱背包内存读取桥已就绪，等待游戏快照");
+            } catch (java.io.IOException failure) {
+                Log.w("RYLUX-Lua", "沙箱背包内存桥不可用，将使用屏幕识别", failure);
+                publish("沙箱内存桥不可用，将使用屏幕识别");
+            }
+        } else {
+            bagSnapshotRelay.close();
         }
         control = new ScriptExecutionControl();
         control.start();
@@ -400,7 +416,7 @@ public final class ScriptRuntimeService extends Service {
             verifyStartupDisplayCapture();
             waitForFirstUseTermsIfNeeded();
             LegacyLuaRuntime runtime = new LegacyLuaRuntime(this, runControl, config,
-                    this::publish, this::saveFailure, routeBridge, runtimeLog);
+                    this::publish, this::saveFailure, routeBridge, runtimeLog, bagSnapshotRelay);
             runtime.run();
             return gameObserved.get();
         } finally {
@@ -452,6 +468,7 @@ public final class ScriptRuntimeService extends Service {
         if (control != finished) return;
         workerRunning = false;
         routeBridge.close();
+        if (bagSnapshotRelay != null) bagSnapshotRelay.close();
         String restart = pendingRestartConfig;
         pendingRestartConfig = null;
         if (restart != null) {
@@ -495,69 +512,70 @@ public final class ScriptRuntimeService extends Service {
     }
 
     private void waitForFirstUseTermsIfNeeded() throws Exception {
-        // Most launches start from an already-running game screen. OCR only the
-        // fixed title strip first; scanning every HUD label at 960x540 can saturate
-        // LDPlayer's CPU and prevent the Lua host from ever starting.
-        try (ScriptOcr ocr = new ScriptOcr()) {
+        // The consent control is a fixed image asset. Detect it by template so
+        // startup does not consume or poison the dynamic-text OCR pipeline.
+        Bitmap template;
+        try (InputStream input = getAssets().open(STARTUP_AGREE_TEMPLATE)) {
+            template = BitmapFactory.decodeStream(input);
+        }
+        if (template == null) throw new IllegalStateException("使用条款按钮模板无法读取，脚本已停止");
+        try {
             control.checkpoint();
-            Bitmap frame = null;
-            Bitmap titleCrop = null;
+            Bitmap frame = captureStartupFrame(30_000L, 5_000L);
             try {
-                frame = captureStartupFrame(30_000, 5_000);
-                int[] titleRegion = ScriptStartupTerms.titleRegion(frame.getWidth(), frame.getHeight());
-                titleCrop = Bitmap.createBitmap(frame, titleRegion[0], titleRegion[1],
-                        titleRegion[2] - titleRegion[0], titleRegion[3] - titleRegion[1]);
-                ScriptOcr.Result titleResult;
-                try {
-                    titleResult = ocr.recognize(titleCrop, true, STARTUP_TITLE_OCR_TIMEOUT_MS,
-                            STARTUP_OCR_MAX_EDGE);
-                } catch (Exception slowOcr) {
-                    if (!ScriptOcr.isUnavailable(slowOcr)) throw slowOcr;
-                    throw new IllegalStateException(
-                            "启动页 OCR 无响应，无法确认是否需要处理使用条款；脚本已安全停止",
-                            slowOcr);
-                }
-                if (!ScriptStartupTerms.isTermsTitle(titleResult.text)) {
-                    publish("未检测到首次使用条款，交由 Lua 流程继续");
+                if (!isStartupAgreeButtonVisible(frame, template)) {
+                    publish("未检测到使用条款确认按钮，交由 Lua 流程继续");
                     return;
                 }
-
-                publish("检测到游戏首次使用条款，请在游戏界面手动阅读并确认；脚本将等待，不会代点同意");
-                while (true) {
-                    control.sleep(1_500L);
-                    Bitmap nextFrame = null;
-                    Bitmap nextTitleCrop = null;
-                    try {
-                        nextFrame = captureStartupFrame(30_000L, 5_000L);
-                        int[] nextRegion = ScriptStartupTerms.titleRegion(
-                                nextFrame.getWidth(), nextFrame.getHeight());
-                        nextTitleCrop = Bitmap.createBitmap(nextFrame, nextRegion[0], nextRegion[1],
-                                nextRegion[2] - nextRegion[0], nextRegion[3] - nextRegion[1]);
-                        ScriptOcr.Result nextTitle = ocr.recognize(nextTitleCrop, true,
-                                STARTUP_TITLE_OCR_TIMEOUT_MS, STARTUP_OCR_MAX_EDGE);
-                        if (!ScriptStartupTerms.isTermsTitle(nextTitle.text)) {
-                            publish("使用条款页面已关闭，继续自动登录流程");
-                            return;
-                        }
-                    } catch (ScriptExecutionControl.StopRequestedException stopped) {
-                        throw stopped;
-                    } catch (Exception retryOcr) {
-                        if (ScriptOcr.isUnavailable(retryOcr)) {
-                            throw new IllegalStateException(
-                                    "使用条款页 OCR 无响应，已安全停止等待；请手动处理条款后重新启动脚本",
-                                    retryOcr);
-                        }
-                        publish("仍在等待首次使用条款处理；若页面未变化，请在游戏内手动确认");
-                    } finally {
-                        if (nextTitleCrop != null && !nextTitleCrop.isRecycled()) nextTitleCrop.recycle();
-                        if (nextFrame != null && !nextFrame.isRecycled()) nextFrame.recycle();
-                    }
-                }
             } finally {
-                if (titleCrop != null && !titleCrop.isRecycled()) titleCrop.recycle();
-                if (frame != null && !frame.isRecycled()) frame.recycle();
+                if (!frame.isRecycled()) frame.recycle();
             }
+            publish("检测到使用条款确认按钮，请在游戏界面手动阅读并确认；脚本不会代点");
+            while (true) {
+                control.sleep(1_500L);
+                Bitmap nextFrame = captureStartupFrame(30_000L, 5_000L);
+                try {
+                    if (!isStartupAgreeButtonVisible(nextFrame, template)) {
+                        publish("使用条款按钮已消失，继续自动登录流程");
+                        return;
+                    }
+                } finally {
+                    if (!nextFrame.isRecycled()) nextFrame.recycle();
+                }
+            }
+        } finally {
+            if (!template.isRecycled()) template.recycle();
         }
+    }
+
+    private boolean isStartupAgreeButtonVisible(Bitmap frame, Bitmap sourceTemplate) {
+        if (frame == null || frame.isRecycled()) return false;
+        LegacyCoordinateMapper mapper = new LegacyCoordinateMapper(
+                1280, 720, frame.getWidth(), frame.getHeight());
+        int templateWidth = Math.max(1, mapper.toScreenDeltaX(sourceTemplate.getWidth()));
+        int templateHeight = Math.max(1, mapper.toScreenDeltaY(sourceTemplate.getHeight()));
+        Bitmap template = sourceTemplate;
+        if (templateWidth != sourceTemplate.getWidth() || templateHeight != sourceTemplate.getHeight()) {
+            template = Bitmap.createScaledBitmap(sourceTemplate, templateWidth, templateHeight, true);
+        }
+        try {
+            LegacyImageMatcher.Pixels screenPixels = bitmapPixels(frame);
+            LegacyImageMatcher.Pixels templatePixels = bitmapPixels(template);
+            LegacyImageMatcher.Match match = LegacyImageMatcher.find(screenPixels, templatePixels,
+                    mapper.left(320), mapper.top(504), mapper.right(640), mapper.bottom(684),
+                    0x00101010, 0.86d, control::checkpoint);
+            return match != null;
+        } finally {
+            if (template != sourceTemplate && !template.isRecycled()) template.recycle();
+        }
+    }
+
+    private static LegacyImageMatcher.Pixels bitmapPixels(Bitmap bitmap) {
+        return new LegacyImageMatcher.Pixels() {
+            @Override public int width() { return bitmap.getWidth(); }
+            @Override public int height() { return bitmap.getHeight(); }
+            @Override public int getPixel(int x, int y) { return bitmap.getPixel(x, y); }
+        };
     }
 
     /** A game activity can lose focus briefly while opening or changing screens. */
@@ -692,6 +710,7 @@ public final class ScriptRuntimeService extends Service {
         ScriptExecutionControl current = control;
         if (current != null) current.requestStop();
         routeBridge.close();
+        if (bagSnapshotRelay != null) bagSnapshotRelay.close();
         executor.shutdownNow();
         super.onDestroy();
     }

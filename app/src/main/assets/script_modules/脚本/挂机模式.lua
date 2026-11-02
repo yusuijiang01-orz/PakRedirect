@@ -2318,6 +2318,81 @@ function L0_1()
     sleep(1000)
     return false
   end
+  -- The sell trip may only be triggered by a fresh, validated 610 sandbox
+  -- memory snapshot. Do not silently fall back to OCR for weight/free slots:
+  -- a wrong reading can send the character away or sell the wrong inventory.
+  if type(getSandboxBagSnapshot) ~= "function" then
+    error("自动清包缺少沙箱背包数据接口；已停止脚本，未继续挂机或出售")
+  end
+  local reserveSlots = tonumber(_ENV["背包保留格子"]) or 2
+  local reserveWeight = tonumber(_ENV["背包保留重量"]) or 3
+  local snapshotDeadline = tickCount() + 5000
+  local snapshot, snapshotStatus = nil, "WAITING_FOR_SNAPSHOT"
+  repeat
+    local snapshotOk, value = pcall(getSandboxBagSnapshot, reserveSlots, reserveWeight)
+    if not snapshotOk then
+      error("沙箱背包数据读取异常：" .. tostring(value) .. "；已停止脚本，未继续出售")
+    end
+    if type(value) == "table" then
+      snapshotStatus = tostring(value.status or "INVALID_SNAPSHOT")
+      if value.supported == true then
+        snapshot = value
+        break
+      end
+      if snapshotStatus ~= "WAITING_FOR_SNAPSHOT" then
+        error("当前环境不支持可靠的背包内存读取（" .. snapshotStatus
+          .. "）；清包需要 610 沙箱游戏，已停止脚本")
+      end
+    end
+    if tickCount() >= snapshotDeadline then
+      error("等待 610 沙箱背包快照超时；已停止脚本，未使用 OCR 猜测或出售物品")
+    end
+    sleep(250)
+  until false
+
+  local freeSlots = tonumber(snapshot.freeSlots)
+  local currentWeight = tonumber(snapshot.currentWeight)
+  local maxWeight = tonumber(snapshot.maxWeight)
+  local ageMs = tonumber(snapshot.ageMs)
+  if not freeSlots or freeSlots < 0 or freeSlots > 200
+      or not currentWeight or currentWeight < 0 or currentWeight > 1000000
+      or not maxWeight or maxWeight <= 0 or maxWeight > 1000000
+      or not ageMs or ageMs < 0 or ageMs > 5000 then
+    error("沙箱背包快照数值无效或已过期；已停止脚本，未触发出售")
+  end
+  local 内存背包 = {
+    空格 = math.floor(freeSlots),
+    重量 = math.floor(currentWeight),
+    上限 = math.floor(maxWeight),
+    buildId = tostring(snapshot.buildId or "")
+  }
+  _ENV["背包读取来源"] = "游戏内存"
+  _ENV["当前背包格子"] = 内存背包.空格
+  _ENV["当前背包重量"] = 内存背包.重量 .. "/" .. 内存背包.上限
+  _ENV["背包重量识别失败"] = false
+  _ENV["背包格子识别失败"] = false
+  local lowSlots = 内存背包.空格 <= reserveSlots
+  _ENV["背包接近负重阈值"] = 内存背包.上限 - 内存背包.重量 <= reserveWeight + 5
+  if snapshot.shouldVisitDoctor == true then
+    _ENV["上次检测背包"] = tickCount()
+    if lowSlots then
+      toast("内存检测空格不足" .. 内存背包.空格 .. "格，前往大夫")
+    else
+      toast("内存检测剩余负重达到阈值，前往大夫")
+    end
+    return false
+  end
+  -- With no inventory-driven purchase/sale enabled, the memory snapshot fully
+  -- answers the cleanup trigger; do not open the backpack for OCR polling.
+  local inventoryConfig = _ENV["界面数据"]
+  local wantsPotionInventory = inventoryConfig["购买小红"] == "true"
+      or inventoryConfig["购买小蓝"] == "true"
+      or inventoryConfig["出售全部红"] == "true"
+      or inventoryConfig["出售全部蓝"] == "true"
+  if not wantsPotionInventory then
+    _ENV["上次检测背包"] = tickCount()
+    return true
+  end
   -- The configured interval still controls medicine checks. Weight and free
   -- slots need a shorter independent interval so a near-full bag is not left
   -- unchecked for a whole minute. Near-full and failed reads retry sooner.
@@ -2387,7 +2462,8 @@ function L0_1()
     -- backpack. Read the explicit free-slot counter first so a full bag is
     -- not dependent on matching every empty-cell image template.
     local 空格文本 = tomocrtextall(1045, 604, 1215, 655)
-    local 当前空格子 = _ENV["检测背包_解析空格子"](空格文本)
+    local 当前空格子 = 内存背包 and 内存背包.空格
+        or _ENV["检测背包_解析空格子"](空格文本)
     if 当前空格子 == nil then
       当前空格子 = _ENV["检测背包_识别空格子"]()
     end
@@ -2400,9 +2476,14 @@ function L0_1()
     end
     -- 361/200 is in the upper portion of the right-hand backpack panel
     -- (reference coordinates for the 1280x720 game canvas).
-    local 识别结果 = tomocrtextall(1100, 225, 1210, 260)
-    print("背包重量识别结果", 识别结果)
-    local 重量, 总重量 = _ENV["检测背包_解析重量"](识别结果)
+    local 重量, 总重量
+    if 内存背包 ~= nil then
+      重量, 总重量 = 内存背包.重量, 内存背包.上限
+    else
+      local 识别结果 = tomocrtextall(1100, 225, 1210, 260)
+      print("背包重量识别结果", 识别结果)
+      重量, 总重量 = _ENV["检测背包_解析重量"](识别结果)
+    end
     local 重量已识别 = 重量 ~= nil and 总重量 ~= nil
     _ENV["背包重量识别失败"] = not 重量已识别
     if 重量已识别 then
