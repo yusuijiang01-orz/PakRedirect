@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 16327)
-Total output lines: 1266
-
 package com.example.pakredirect;
 
 import android.app.Activity;
@@ -579,7 +576,39 @@ public final class ScriptToolsActivity extends Activity {
                 .setAction(ScriptControlOverlayService.ACTION_PREVIEW);
         if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent);
         else startService(intent);
-        Toast.makeText(this, "悬浮窗预览已打开；预览不会启动游戏或脚…327 tokens truncated…String key, Button picker) {
+        Toast.makeText(this, "悬浮窗预览已打开；预览不会启动游戏或脚本", Toast.LENGTH_LONG).show();
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == 417 && Build.VERSION.SDK_INT >= 23 && Settings.canDrawOverlays(this)) {
+            startOverlayPreviewService();
+        }
+    }
+
+    private LinearLayout section(String title, String description) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(14), dp(14), dp(14), dp(14));
+        card.setBackground(RyluxDesignSystem.card(this, 16));
+        card.addView(label(title, 16, TEXT, true));
+        TextView note = label(description, 12, MUTED, false);
+        note.setPadding(0, dp(5), 0, dp(12));
+        card.addView(note);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.topMargin = dp(14);
+        root.addView(card, lp);
+        return card;
+    }
+
+    private void addMap(LinearLayout parent, String key) {
+        parent.addView(fieldLabel(key));
+        Button picker = button(mapName(values.optInt(key, 0)), SOFT);
+        picker.setOnClickListener(v -> chooseMap(key, picker));
+        addButton(parent, picker);
+    }
+
+    private void chooseMap(String key, Button picker) {
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(dp(16), dp(10), dp(16), 0);
@@ -1234,4 +1263,3 @@ public final class ScriptToolsActivity extends Activity {
         return Math.round(value * getResources().getDisplayMetrics().density);
     }
 }
-
