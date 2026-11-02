@@ -1,8 +1,10 @@
 package com.example.pakredirect;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageInfo;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.net.Uri;
@@ -107,7 +109,7 @@ public final class BlackBoxSandboxActivity extends Activity {
         root.addView(title, titleLp);
 
         TextView note = label(
-                "测试版：导入单个 APK 并尝试在虚拟环境运行。无需 Root；暂不支持 XAPK/APKS，游戏与模拟器兼容性需逐个验证。",
+                "可克隆桌面已安装的封神榜手游，也可手动导入单个 APK。沙箱数据独立；暂不支持分卷 APK（XAPK/APKS）。",
                 13,
                 RyluxDesignSystem.MUTED,
                 false
@@ -118,9 +120,15 @@ public final class BlackBoxSandboxActivity extends Activity {
         noteLp.bottomMargin = dp(16);
         root.addView(note, noteLp);
 
-        Button importButton = button("选择游戏 APK 导入沙箱", true);
+        Button cloneButton = button("克隆桌面封神榜手游到沙箱", true);
+        cloneButton.setOnClickListener(v -> prepareDesktopClone());
+        root.addView(cloneButton, new LinearLayout.LayoutParams(-1, dp(50)));
+
+        Button importButton = button("选择 APK 手动导入", false);
         importButton.setOnClickListener(v -> pickApk());
-        root.addView(importButton, new LinearLayout.LayoutParams(-1, dp(50)));
+        LinearLayout.LayoutParams importLp = new LinearLayout.LayoutParams(-1, dp(44));
+        importLp.topMargin = dp(8);
+        root.addView(importButton, importLp);
 
         LinearLayout statusCard = new LinearLayout(this);
         statusCard.setGravity(Gravity.CENTER_VERTICAL);
@@ -243,6 +251,129 @@ public final class BlackBoxSandboxActivity extends Activity {
         } catch (IOException | RuntimeException error) {
             stagedApk.delete();
             throw error;
+        }
+    }
+
+    private void prepareDesktopClone() {
+        setBusy(true, "正在检查桌面封神榜手游…");
+        worker.execute(() -> {
+            try {
+                RyluxApplication application = (RyluxApplication) getApplication();
+                if (!application.isBlackBoxReady()) {
+                    String error = application.getBlackBoxError();
+                    throw new IOException(error == null || error.trim().isEmpty()
+                            ? "BlackBox 虚拟环境尚未就绪" : error);
+                }
+
+                ApplicationInfo desktopApplication = getPackageManager()
+                        .getApplicationInfo(LOCALIZED_GAME_PACKAGE, 0);
+                PackageInfo desktopPackage = getPackageManager()
+                        .getPackageInfo(LOCALIZED_GAME_PACKAGE, 0);
+                if (desktopApplication.sourceDir == null
+                        || desktopApplication.sourceDir.trim().isEmpty()) {
+                    throw new IOException("桌面游戏没有可读取的 APK 路径");
+                }
+                String[] splits = desktopApplication.splitSourceDirs;
+                if (splits != null && splits.length > 0) {
+                    throw new IOException("桌面游戏由多个分卷 APK 组成，当前沙箱克隆只支持单 APK；请使用整包 APK 手动导入");
+                }
+
+                boolean installedInSandbox = BlackBoxCore.get()
+                        .isInstalled(LOCALIZED_GAME_PACKAGE, 0);
+                PackageInfo sandboxPackage = installedInSandbox
+                        ? BlackBoxCore.getBPackageManager().getPackageInfo(
+                                LOCALIZED_GAME_PACKAGE, 0, 0)
+                        : null;
+                DesktopClonePlan plan = new DesktopClonePlan(
+                        desktopPackage.versionName,
+                        getVersionCode(desktopPackage),
+                        sandboxPackage == null ? null : sandboxPackage.versionName,
+                        sandboxPackage == null ? null : getVersionCode(sandboxPackage));
+                runOnUiThread(() -> showDesktopCloneConfirmation(plan));
+            } catch (Throwable error) {
+                runOnUiThread(() -> {
+                    setBusy(false, "无法克隆桌面客户端：" + safe(error.getMessage()));
+                    Toast.makeText(this, "克隆失败：" + safe(error.getMessage()), Toast.LENGTH_LONG).show();
+                });
+            }
+        });
+    }
+
+    private void showDesktopCloneConfirmation(DesktopClonePlan plan) {
+        if (isFinishing() || isDestroyed()) return;
+        StringBuilder details = new StringBuilder()
+                .append("桌面客户端：").append(safe(plan.desktopVersionName))
+                .append("（版本码 ").append(plan.desktopVersionCode).append("）");
+        if (plan.sandboxVersionCode != null) {
+            details.append("\n沙箱当前版本：").append(safe(plan.sandboxVersionName))
+                    .append("（版本码 ").append(plan.sandboxVersionCode).append("）")
+                    .append("\n继续后会用桌面 APK 替换沙箱内同包游戏。");
+        } else {
+            details.append("\n沙箱中尚未安装该游戏，将把桌面 APK 安装到沙箱。");
+        }
+        details.append("\n沙箱原有数据由 BlackBox 保留；桌面端的登录状态和游戏数据不会复制过去。继续后可能需要在沙箱重新登录。");
+
+        new AlertDialog.Builder(this)
+                .setTitle("克隆桌面客户端")
+                .setMessage(details.toString())
+                .setNegativeButton("取消", (dialog, which) -> setBusy(false, "已取消克隆"))
+                .setPositiveButton("继续克隆", (dialog, which) -> cloneDesktopPackage(plan))
+                .setOnCancelListener(dialog -> setBusy(false, "已取消克隆"))
+                .show();
+    }
+
+    private void cloneDesktopPackage(DesktopClonePlan plan) {
+        setBusy(true, "正在把桌面客户端安装到沙箱…");
+        worker.execute(() -> {
+            try {
+                InstallResult result = BlackBoxCore.get()
+                        .installPackageAsUser(LOCALIZED_GAME_PACKAGE, 0);
+                if (result == null || !result.success) {
+                    String reason = result == null ? "BlackBox 没有返回安装结果" : safe(result.msg);
+                    throw new IOException(reason);
+                }
+                PackageInfo installed = BlackBoxCore.getBPackageManager()
+                        .getPackageInfo(LOCALIZED_GAME_PACKAGE, 0, 0);
+                if (installed == null || getVersionCode(installed) != plan.desktopVersionCode) {
+                    String found = installed == null ? "未找到" : String.valueOf(getVersionCode(installed));
+                    throw new IOException("安装结果版本校验失败，期望 "
+                            + plan.desktopVersionCode + "，沙箱读取到 " + found);
+                }
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    setBusy(false, "克隆完成：封神榜手游 " + safe(plan.desktopVersionName)
+                            + "（" + plan.desktopVersionCode + "）");
+                    Toast.makeText(this, "桌面客户端已克隆到沙箱", Toast.LENGTH_LONG).show();
+                    refreshApps();
+                });
+            } catch (Throwable error) {
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    setBusy(false, "克隆失败：" + safe(error.getMessage()));
+                    Toast.makeText(this, "克隆失败：" + safe(error.getMessage()), Toast.LENGTH_LONG).show();
+                    refreshApps();
+                });
+            }
+        });
+    }
+
+    private static long getVersionCode(PackageInfo packageInfo) {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+                ? packageInfo.getLongVersionCode() : packageInfo.versionCode;
+    }
+
+    private static final class DesktopClonePlan {
+        final String desktopVersionName;
+        final long desktopVersionCode;
+        final String sandboxVersionName;
+        final Long sandboxVersionCode;
+
+        DesktopClonePlan(String desktopVersionName, long desktopVersionCode,
+                         String sandboxVersionName, Long sandboxVersionCode) {
+            this.desktopVersionName = desktopVersionName;
+            this.desktopVersionCode = desktopVersionCode;
+            this.sandboxVersionName = sandboxVersionName;
+            this.sandboxVersionCode = sandboxVersionCode;
         }
     }
 
