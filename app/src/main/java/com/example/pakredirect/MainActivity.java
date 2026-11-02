@@ -16,6 +16,8 @@ import android.graphics.drawable.GradientDrawable;
 import android.net.VpnService;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
 import android.text.InputFilter;
 import android.text.InputType;
@@ -108,6 +110,21 @@ public class MainActivity extends Activity {
     private TextView moduleProgressText;
     private Switch localizationSwitch;
     private Switch accelerationSwitch;
+    private final Handler membershipHandler = new Handler(Looper.getMainLooper());
+    private boolean homeReady;
+    private boolean membershipRefreshInFlight;
+    private long lastMembershipRefreshAt;
+    private final Runnable membershipWatchdog = new Runnable() {
+        @Override public void run() {
+            if (!homeReady || isFinishing() || isDestroyed()) return;
+            if (!MembershipAccess.hasCachedAccess(MainActivity.this)) {
+                revokeExpiredMembership();
+            } else if (System.currentTimeMillis() - lastMembershipRefreshAt >= 60_000L) {
+                refreshMembershipForHome();
+            }
+            membershipHandler.postDelayed(this, 5_000L);
+        }
+    };
     private volatile String launchWaitError = "";
     private Button pendingVpnButton;
     private boolean pendingVpnLocalization;
@@ -125,6 +142,28 @@ public class MainActivity extends Activity {
             showSessionLoading();
             refreshProfile(true);
         }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (homeReady) {
+            membershipHandler.removeCallbacks(membershipWatchdog);
+            membershipWatchdog.run();
+            refreshMembershipForHome();
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        membershipHandler.removeCallbacks(membershipWatchdog);
+        super.onPause();
+    }
+
+    @Override
+    protected void onDestroy() {
+        membershipHandler.removeCallbacks(membershipWatchdog);
+        super.onDestroy();
     }
 
     @Override
@@ -458,6 +497,8 @@ public class MainActivity extends Activity {
         currentMembershipKind = profile.membershipKind == null ? "expired" : profile.membershipKind;
         currentExpiresAt = profile.expiresAt;
         currentUsername = profile.username;
+        homeReady = true;
+        lastMembershipRefreshAt = System.currentTimeMillis();
         if (!currentMembershipActive) {
             LocalizationSettings.setEnabled(this, false);
             stopInterceptModule();
@@ -484,6 +525,8 @@ public class MainActivity extends Activity {
         root.addView(canvas, canvasLp);
 
         setScrollableContent(root);
+        membershipHandler.removeCallbacks(membershipWatchdog);
+        membershipHandler.postDelayed(membershipWatchdog, 5_000L);
     }
 
     private FrameLayout buildAvatar(AuthClient.ProfileResult profile) {
@@ -1071,6 +1114,11 @@ public class MainActivity extends Activity {
                 toast("汉化已关闭，下次启动使用官方资源");
                 return;
             }
+            if (!MembershipAccess.hasCachedAccess(this)) {
+                revokeExpiredMembership();
+                toast("VIP / 体验会员已到期，汉化功能不可用");
+                return;
+            }
             requestLocalizationAccess(toggle);
         });
         localizationSwitch = toggle;
@@ -1120,10 +1168,11 @@ public class MainActivity extends Activity {
         MembershipAccess.refresh(this, result -> runOnUiThread(() -> {
             if (isFinishing() || isDestroyed()) return;
             applyMembershipCheck(result);
-            boolean allowed = result != null && result.allowed;
+            boolean allowed = result != null && result.allowed
+                    && MembershipAccess.hasCachedAccess(this);
             LocalizationSettings.setEnabled(this, allowed);
             toggle.setChecked(allowed);
-            toggle.setEnabled(allowed || result == null || !result.success);
+            toggle.setEnabled(allowed || MembershipAccess.hasCachedAccess(this));
             toggle.setOnCheckedChangeListener((view, isChecked) -> {
                 if (isChecked) requestLocalizationAccess(toggle);
                 else {
@@ -1146,14 +1195,42 @@ public class MainActivity extends Activity {
         currentExpiresAt = profile.expiresAt;
         currentUsername = profile.username;
         if (!currentMembershipActive) {
-            LocalizationSettings.setEnabled(this, false);
+            revokeExpiredMembership();
+        } else if (localizationSwitch != null) {
+            localizationSwitch.setEnabled(true);
+        }
+    }
+
+    private void refreshMembershipForHome() {
+        final String token = currentToken;
+        if (token == null || token.trim().isEmpty() || membershipRefreshInFlight) return;
+        membershipRefreshInFlight = true;
+        lastMembershipRefreshAt = System.currentTimeMillis();
+        MembershipAccess.refresh(this, result -> runOnUiThread(() -> {
+            membershipRefreshInFlight = false;
+            if (!token.equals(currentToken) || isFinishing() || isDestroyed()) return;
+            if (result != null && result.success && result.profile != null) {
+                applyMembershipCheck(result);
+            } else if (!MembershipAccess.hasCachedAccess(this)) {
+                revokeExpiredMembership();
+            }
+        }));
+    }
+
+    private void revokeExpiredMembership() {
+        boolean revoke = currentMembershipActive || LocalizationSettings.isEnabled(this)
+                || (localizationSwitch != null && localizationSwitch.isChecked());
+        currentMembershipActive = false;
+        currentMembershipKind = "expired";
+        LocalizationSettings.setEnabled(this, false);
+        if (localizationSwitch != null) {
+            localizationSwitch.setOnCheckedChangeListener(null);
+            localizationSwitch.setChecked(false);
+            localizationSwitch.setEnabled(false);
+        }
+        if (revoke) {
             stopInterceptModule();
             stopScriptFeatures();
-            if (localizationSwitch != null) {
-                localizationSwitch.setOnCheckedChangeListener(null);
-                localizationSwitch.setChecked(false);
-                localizationSwitch.setEnabled(false);
-            }
         }
     }
 
@@ -1252,8 +1329,13 @@ public class MainActivity extends Activity {
     }
 
     private void activateModule(Button button) {
+        if (currentMembershipActive && !MembershipAccess.hasCachedAccess(this)) {
+            revokeExpiredMembership();
+        }
         boolean accelerationEnabled = isAccelerationEnabledForCurrentUser();
-        boolean useLocalization = currentMembershipActive && LocalizationSettings.isEnabled(this);
+        boolean useLocalization = currentMembershipActive
+                && MembershipAccess.hasCachedAccess(this)
+                && LocalizationSettings.isEnabled(this);
         if (accelerationEnabled) {
             startAdminAcceleration(button, useLocalization);
             return;
