@@ -22,8 +22,7 @@ import org.luaj.vm2.lib.jse.JsePlatform;
 
 /** Keeps fallback backpack-page recognition on small, explicit screen regions. */
 public final class ScriptBackpackPageOcrRegionsTest {
-    private static final Path LUA = Paths.get("app", "src", "main", "assets",
-            "script_modules", "脚本", "挂机模式.lua");
+    private static final Path LUA = resolveLuaPath();
 
     @Test public void backpackProbeUsesTitleAndRightPanelCropsInsteadOfFullScreen() throws Exception {
         List<int[]> calls = new ArrayList<>();
@@ -45,6 +44,12 @@ public final class ScriptBackpackPageOcrRegionsTest {
 
         assertFalse(globals.get("药品_识别背包页面").call().toboolean());
         assertEquals("A missing title should not trigger additional OCR work", 1, calls.size());
+    }
+
+    private static Path resolveLuaPath() {
+        Path modulePath = Paths.get("src", "main", "assets", "script_modules", "脚本", "挂机模式.lua");
+        if (Files.exists(modulePath)) return modulePath;
+        return Paths.get("app", "src", "main", "assets", "script_modules", "脚本", "挂机模式.lua");
     }
 
     private static Globals createProbeGlobals(List<int[]> calls, boolean backpackTitle) throws IOException {
