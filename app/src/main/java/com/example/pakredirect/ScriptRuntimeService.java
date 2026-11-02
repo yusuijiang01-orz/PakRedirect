@@ -12,14 +12,12 @@ import android.os.IBinder;
 import android.os.Looper;
 import android.util.Log;
 
-import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Explicitly started foreground host for the recovered Lua script. */
 public final class ScriptRuntimeService extends Service {
@@ -37,7 +35,6 @@ public final class ScriptRuntimeService extends Service {
     private static final String LAST_ERROR = "last_error";
     private static final int STARTUP_OCR_MAX_EDGE = 640;
     private static final long STARTUP_TITLE_OCR_TIMEOUT_MS = 5_000L;
-    private static final long STARTUP_DIALOG_OCR_TIMEOUT_MS = 15_000L;
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
         Thread thread = new Thread(r, "rylux-lua-host");
@@ -225,46 +222,214 @@ public final class ScriptRuntimeService extends Service {
         startForeground(NOTIFICATION_ID, notification(lastMessage));
         publish(lastMessage);
         executor.execute(() -> {
-            LegacyLuaRuntime runtime = new LegacyLuaRuntime(this, runControl, config,
-                    this::publish, this::saveFailure, routeBridge, runtimeLog);
             try {
-                awaitTargetGameForeground();
-                verifyStartupDisplayCapture();
-                acceptFirstUseTermsIfPresent();
-                runtime.run();
-                control.complete();
-                Throwable workerFailure = control.getFailure();
-                if (workerFailure != null) reportFailure(workerFailure);
-                else publish("脚本已完成");
-            } catch (ScriptExecutionControl.StopRequestedException stopped) {
-                Throwable workerFailure = control.getFailure();
-                if (workerFailure != null) reportFailure(workerFailure);
-                else { control.complete(); publish("已停止"); }
-            } catch (Throwable failure) {
-                Throwable workerFailure = control.getFailure();
-                if (workerFailure != null) reportFailure(workerFailure);
-                else if (control.isStopRequested()) {
-                    control.complete();
-                    publish("已停止");
-                } else if (failure instanceof StartupDisplayCaptureException) {
-                    if (control.fail(failure)) {
-                        saveFailure(failure);
-                        publish("启动失败：显示截图检查失败：" + rootMessage(failure.getCause()));
-                    }
-                } else if (failure instanceof StartupTargetForegroundException) {
-                    if (control.fail(failure)) {
-                        saveFailure(failure);
-                        publish("启动失败：" + failure.getMessage());
-                    }
-                } else {
-                    if (control.fail(failure)) reportFailure(failure);
-                    else if (control.getFailure() != null) reportFailure(control.getFailure());
-                    else { control.complete(); publish("已停止"); }
-                }
+                runWithCrashRecovery(config, runControl);
             } finally {
                 finishWorker(runControl);
             }
         });
+    }
+
+    private void runWithCrashRecovery(JSONObject config, ScriptExecutionControl runControl) {
+        boolean autoLogin = config.optBoolean("自动登录", true);
+        String targetMode = config.optString("目标运行环境", ScriptToolsActivity.TARGET_MODE_SANDBOX);
+        ScriptGameProcessMonitor processMonitor = new ScriptGameProcessMonitor();
+        boolean gameWasObserved = false;
+        int restartsInWindow = 0;
+        long restartWindowStarted = android.os.SystemClock.elapsedRealtime();
+
+        while (!runControl.isStopRequested()) {
+            try {
+                gameWasObserved |= runMonitoredAttempt(config, runControl, targetMode,
+                        processMonitor);
+                Throwable workerFailure = runControl.getFailure();
+                if (workerFailure != null) throw workerFailure;
+                if (runControl.isStopRequested()) {
+                    runControl.complete();
+                    publish("已停止");
+                } else {
+                    runControl.complete();
+                    publish("脚本已完成");
+                }
+                return;
+            } catch (Throwable failure) {
+                if (runControl.isStopRequested()) {
+                    runControl.complete();
+                    publish("已停止");
+                    return;
+                }
+
+                ScriptGameProcessMonitor.State processState = processMonitor.inspect(this, targetMode);
+                gameWasObserved |= processMonitor.hasObservedRunningProcess();
+                long now = android.os.SystemClock.elapsedRealtime();
+                if (now - restartWindowStarted >= ScriptAutoRecoveryPolicy.RESTART_WINDOW_MS) {
+                    restartWindowStarted = now;
+                    restartsInWindow = 0;
+                }
+                if (ScriptAutoRecoveryPolicy.shouldRestart(autoLogin, gameWasObserved, false,
+                        processState, restartsInWindow)) {
+                    restartsInWindow++;
+                    processMonitor.acknowledgeRecoveryAttempt();
+                    if (runControl.getState() == ScriptExecutionControl.State.FAILED) {
+                        if (runControl.hasActiveWorkers()) {
+                            reportFailure(new IllegalStateException(
+                                    "游戏已退出，但仍有 Lua 工作线程未结束；为避免重复触控，自动恢复已停止"));
+                            return;
+                        }
+                        try {
+                            runControl.start();
+                        } catch (RuntimeException cannotRestart) {
+                            reportFailure(new IllegalStateException(
+                                    "游戏已退出，但上一轮 Lua 工作线程尚未完全结束；为避免重复触控，自动恢复已停止",
+                                    cannotRestart));
+                            return;
+                        }
+                    }
+                    long backoff = ScriptAutoRecoveryPolicy.backoffMs(restartsInWindow);
+                    publish("已确认游戏进程退出，" + (backoff / 1000) + " 秒后自动重启并重新登录（"
+                            + restartsInWindow + "/" + ScriptAutoRecoveryPolicy.MAX_RESTARTS_PER_WINDOW + "）");
+                    try {
+                        runControl.sleep(backoff);
+                    } catch (ScriptExecutionControl.StopRequestedException stopped) {
+                        runControl.complete();
+                        publish("已停止");
+                        return;
+                    }
+                    if (!launchConfiguredGame(targetMode)) {
+                        IllegalStateException launchFailure = new IllegalStateException(
+                                "自动恢复无法启动所选的封神榜客户端；请检查安装状态与目标来源");
+                        if (runControl.fail(launchFailure)) reportFailure(launchFailure);
+                        return;
+                    }
+                    publish("游戏已重新启动，等待登录流程进入主界面后继续挂机方案");
+                    continue;
+                }
+
+                if (autoLogin && gameWasObserved
+                        && processState == ScriptGameProcessMonitor.State.RUNNING
+                        && isForegroundWaitFailure(failure)) {
+                    if (runControl.getState() == ScriptExecutionControl.State.FAILED) {
+                        if (runControl.hasActiveWorkers()) {
+                            reportFailure(new IllegalStateException(
+                                    "游戏仍在运行，但仍有 Lua 工作线程未结束；已停止以避免并发触控"));
+                            return;
+                        }
+                        try { runControl.start(); }
+                        catch (RuntimeException cannotResume) {
+                            reportFailure(new IllegalStateException(
+                                    "游戏仍在运行，但旧 Lua 工作线程未退出；已停止以避免并发触控",
+                                    cannotResume));
+                            return;
+                        }
+                    }
+                    publish("游戏进程仍在运行但暂时不在前台；等待游戏返回，不会强行重开或抢占其他应用");
+                    continue;
+                }
+
+                Throwable workerFailure = runControl.getFailure();
+                Throwable reported = workerFailure == null ? failure : workerFailure;
+                if (runControl.fail(reported)) reportFailure(reported);
+                else if (runControl.getFailure() != null) reportFailure(runControl.getFailure());
+                else {
+                    runControl.complete();
+                    if (processState == ScriptGameProcessMonitor.State.UNKNOWN && autoLogin) {
+                        publish("自动恢复未执行：系统无法确认游戏进程状态；请检查游戏是否仍在运行后手动重启脚本");
+                    } else if (failure instanceof StartupDisplayCaptureException) {
+                        saveFailure(failure);
+                        publish("启动失败：显示截图检查失败：" + rootMessage(failure.getCause()));
+                    } else if (failure instanceof StartupTargetForegroundException) {
+                        saveFailure(failure);
+                        publish("启动失败：" + failure.getMessage());
+                    } else {
+                        reportFailure(failure);
+                    }
+                }
+                return;
+            }
+        }
+        runControl.complete();
+        publish("已停止");
+    }
+
+    private boolean runMonitoredAttempt(JSONObject config, ScriptExecutionControl runControl,
+                                        String targetMode,
+                                        ScriptGameProcessMonitor processMonitor) throws Exception {
+        AtomicBoolean watching = new AtomicBoolean(true);
+        AtomicBoolean gameObserved = new AtomicBoolean(false);
+        Thread watcher = new Thread(() -> {
+            while (watching.get() && !runControl.isStopRequested()) {
+                ScriptGameProcessMonitor.State processState = processMonitor.inspect(this, targetMode);
+                if (processState == ScriptGameProcessMonitor.State.RUNNING) {
+                    gameObserved.set(true);
+                } else if (processState == ScriptGameProcessMonitor.State.CRASHED
+                        && gameObserved.get()) {
+                    GameProcessExitedException crashed = new GameProcessExitedException();
+                    if (runControl.fail(crashed)) {
+                        publish("检测到游戏进程已退出，正在按自动登录设置恢复");
+                    }
+                    return;
+                }
+                try { Thread.sleep(1_000L); }
+                catch (InterruptedException stopped) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+        }, "rylux-game-process-watch");
+        watcher.setDaemon(true);
+        watcher.start();
+        try {
+            awaitTargetGameForeground();
+            gameObserved.set(true);
+            verifyStartupDisplayCapture();
+            waitForFirstUseTermsIfNeeded();
+            LegacyLuaRuntime runtime = new LegacyLuaRuntime(this, runControl, config,
+                    this::publish, this::saveFailure, routeBridge, runtimeLog);
+            runtime.run();
+            return gameObserved.get();
+        } finally {
+            watching.set(false);
+            watcher.interrupt();
+            try { watcher.join(1_500L); }
+            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+        }
+    }
+
+    private static final class GameProcessExitedException extends Exception {
+        GameProcessExitedException() { super("目标游戏进程已退出"); }
+    }
+
+    private boolean launchConfiguredGame(String targetMode) {
+        if (!ScriptToolsActivity.TARGET_MODE_DESKTOP.equals(targetMode)) {
+            try {
+                return top.niunaijun.blackbox.BlackBoxCore.get()
+                        .launchApk(ScriptGameAdapter.TARGET_GAME_PACKAGE, 0);
+            } catch (RuntimeException unavailable) {
+                Log.w("RYLUX-Lua", "自动恢复无法启动沙箱游戏", unavailable);
+                return false;
+            }
+        }
+        Intent launch = getPackageManager().getLaunchIntentForPackage(
+                ScriptGameAdapter.TARGET_GAME_PACKAGE);
+        if (launch == null) return false;
+        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            startActivity(launch);
+            return true;
+        } catch (RuntimeException unavailable) {
+            Log.w("RYLUX-Lua", "自动恢复无法启动桌面游戏", unavailable);
+            return false;
+        }
+    }
+
+    private static boolean isForegroundWaitFailure(Throwable failure) {
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            if (current instanceof StartupTargetForegroundException
+                    || (current.getMessage() != null
+                    && (current.getMessage().contains("不在前台")
+                    || current.getMessage().contains("等待所选游戏回到前台")))) return true;
+        }
+        return false;
     }
 
     private synchronized void finishWorker(ScriptExecutionControl finished) {
@@ -313,7 +478,7 @@ public final class ScriptRuntimeService extends Service {
         }
     }
 
-    private void acceptFirstUseTermsIfPresent() throws Exception {
+    private void waitForFirstUseTermsIfNeeded() throws Exception {
         // Most launches start from an already-running game screen. OCR only the
         // fixed title strip first; scanning every HUD label at 960x540 can saturate
         // LDPlayer's CPU and prevent the Lua host from ever starting.
@@ -321,7 +486,6 @@ public final class ScriptRuntimeService extends Service {
             control.checkpoint();
             Bitmap frame = null;
             Bitmap titleCrop = null;
-            Bitmap dialogCrop = null;
             try {
                 frame = captureStartupFrame(30_000, 5_000);
                 int[] titleRegion = ScriptStartupTerms.titleRegion(frame.getWidth(), frame.getHeight());
@@ -341,48 +505,33 @@ public final class ScriptRuntimeService extends Service {
                     return;
                 }
 
-                int[] dialogRegion = ScriptStartupTerms.dialogRegion(frame.getWidth(), frame.getHeight());
-                dialogCrop = Bitmap.createBitmap(frame, dialogRegion[0], dialogRegion[1],
-                        dialogRegion[2] - dialogRegion[0], dialogRegion[3] - dialogRegion[1]);
-                ScriptOcr.Result result;
-                try {
-                    result = ocr.recognize(dialogCrop, true, STARTUP_DIALOG_OCR_TIMEOUT_MS,
-                            STARTUP_OCR_MAX_EDGE);
-                } catch (Exception slowOcr) {
-                    if (ScriptOcr.isUnavailable(slowOcr)) {
-                        publish("检测到使用条款，但 OCR 未能完整核实；未执行点击，请先手动处理条款");
-                        throw new IllegalStateException(
-                                "使用条款页面 OCR 超时，未自动确认；请手动处理后重启脚本", slowOcr);
+                publish("检测到游戏首次使用条款，请在游戏界面手动阅读并确认；脚本将等待，不会代点同意");
+                while (true) {
+                    control.sleep(1_500L);
+                    Bitmap nextFrame = null;
+                    Bitmap nextTitleCrop = null;
+                    try {
+                        nextFrame = captureStartupFrame(30_000L, 5_000L);
+                        int[] nextRegion = ScriptStartupTerms.titleRegion(
+                                nextFrame.getWidth(), nextFrame.getHeight());
+                        nextTitleCrop = Bitmap.createBitmap(nextFrame, nextRegion[0], nextRegion[1],
+                                nextRegion[2] - nextRegion[0], nextRegion[3] - nextRegion[1]);
+                        ScriptOcr.Result nextTitle = ocr.recognize(nextTitleCrop, true,
+                                STARTUP_TITLE_OCR_TIMEOUT_MS, STARTUP_OCR_MAX_EDGE);
+                        if (!ScriptStartupTerms.isTermsTitle(nextTitle.text)) {
+                            publish("使用条款页面已关闭，继续自动登录流程");
+                            return;
+                        }
+                    } catch (ScriptExecutionControl.StopRequestedException stopped) {
+                        throw stopped;
+                    } catch (Exception retryOcr) {
+                        publish("仍在等待首次使用条款处理；若页面未变化，请在游戏内手动确认");
+                    } finally {
+                        if (nextTitleCrop != null && !nextTitleCrop.isRecycled()) nextTitleCrop.recycle();
+                        if (nextFrame != null && !nextFrame.isRecycled()) nextFrame.recycle();
                     }
-                    throw slowOcr;
                 }
-
-                JSONArray recognized = new JSONArray(result.json);
-                List<ScriptStartupTerms.Line> lines = new ArrayList<>();
-                for (int i = 0; i < recognized.length(); i++) {
-                    JSONObject line = recognized.getJSONObject(i);
-                    lines.add(new ScriptStartupTerms.Line(line.optString("text", ""),
-                            line.optInt("x", -1) + dialogRegion[0],
-                            line.optInt("y", -1) + dialogRegion[1]));
-                }
-                ScriptStartupTerms.Tap agree = ScriptStartupTerms.findAgreeTap(
-                        lines, frame.getWidth(), frame.getHeight());
-                if (agree == null) {
-                    throw new IllegalStateException(
-                            "检测到使用条款，但无法完整核实页面内容；未执行点击");
-                }
-                control.checkpoint();
-                try {
-                    if (!ScriptGameAdapter.requireConnected(control).tap(agree.x, agree.y, 60, 3_000)) {
-                        throw new IllegalStateException("游戏首次使用条款的同意按钮未能完成触控");
-                    }
-                } catch (TargetGameNotForegroundException focusChanged) {
-                    publish("游戏在确认首次使用条款时离开前台；未复用旧截图点击");
-                    return;
-                }
-                publish("已确认游戏首次使用条款");
             } finally {
-                if (dialogCrop != null && !dialogCrop.isRecycled()) dialogCrop.recycle();
                 if (titleCrop != null && !titleCrop.isRecycled()) titleCrop.recycle();
                 if (frame != null && !frame.isRecycled()) frame.recycle();
             }

@@ -31,6 +31,7 @@ android {
             // in tools/lua-regression, not Android's local unit-test runtime.
             java.exclude '**/RecoveredLuaTaskTest.java'
             java.exclude '**/RecoveredLuaLiveLoginTest.java'
+            java.exclude '**/RecoveredLuaLiveBackpackDetectionTest.java'
             java.exclude '**/RecoveredLuaLiveActivityPanelTest.java'
             java.exclude '**/RecoveredLuaLiveCombatTest.java'
             java.exclude '**/RecoveredLuaLiveMedicineTest.java'

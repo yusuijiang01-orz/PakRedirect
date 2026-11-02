@@ -330,6 +330,7 @@ public final class ScriptToolsActivity extends Activity {
         addButton(profiles, saveAs);
 
         LinearLayout run = section("运行与状态", "先检查运行条件，再确认本次方案。开始后会启动设置中选定的封神榜客户端，并显示 RYLUX 悬浮控制面板。");
+        addSwitch(run, "自动登录", "游戏崩溃或 ANR 后最多自动重启 5 次/15 分钟，并继续当前挂机登录流程", true);
         Button preflight = button("查看配置与运行前检查", BLUE);
         preflight.setOnClickListener(v -> showPreflight());
         addButton(run, preflight);
@@ -816,6 +817,7 @@ public final class ScriptToolsActivity extends Activity {
                 + "\n运行来源：" + targetModeCaption() + "\n脚本：封神榜"
                 + "\n挂机点：" + mapName(values.optInt("挂机点地图", 0))
                 + " (" + values.optString("挂机点x", "100") + ", " + values.optString("挂机点y", "200") + ")"
+                + "\n自动登录与崩溃恢复：" + onOff("自动登录")
                 + "\n卖货地图：" + mapName(values.optInt("卖货地图", 0))
                 + "\n自动战斗：" + onOff("自动战斗")
                 + " · 装备耐久阈值：" + values.optString("装备耐久阈值", "15") + "%"
@@ -866,6 +868,7 @@ public final class ScriptToolsActivity extends Activity {
                 + targetModeCaption() + "\n运行模式：无障碍截图与触控"
                 + "\n路线：" + mapName(values.optInt("挂机点地图", 0))
                 + "（" + values.optString("挂机点x", "100") + ", " + values.optString("挂机点y", "200") + "）"
+                + "\n自动登录与崩溃恢复：" + onOff("自动登录")
                 + "\n自动战斗：" + onOff("自动战斗")
                 + "\n装备出售：" + onOff("出售装备") + "；装备保护："
                 + (values.optBoolean("保护装备不出售", true) ? "开启" : "关闭")

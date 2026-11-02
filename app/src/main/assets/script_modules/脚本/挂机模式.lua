@@ -1987,6 +1987,7 @@ _ENV["登录_记录失败"] = L0_1
 -- localized page may still use OCR when needed, but button taps are grounded
 -- by the saved button templates and do not wait for a full-page OCR pass.
 function L0_1()
+  if _ENV["界面数据"]["自动登录"] == "false" then return false end
   if _ENV["登录_自动重试终止"] then return false end
   local now = tickCount()
   local retryAt = tonumber(_ENV["登录_重试允许时间"])

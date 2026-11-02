@@ -19,6 +19,12 @@ public final class ScriptExecutionControl {
     public State getState() { return state; }
     public Throwable getFailure() { return failure; }
 
+    /** True while a Lua worker from the current run could still issue game input. */
+    public boolean hasActiveWorkers() {
+        for (Thread worker : workers) if (worker.isAlive()) return true;
+        return false;
+    }
+
     public boolean isCurrentThreadCancellationRequested() {
         State currentState = state;
         return currentState == State.STOP_REQUESTED || currentState == State.STOPPED
