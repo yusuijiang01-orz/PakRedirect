@@ -424,8 +424,8 @@ public final class ScriptRuntimeService extends Service {
             ScriptForegroundGate.await(
                     ScriptGameAdapter::isTargetGameForeground,
                     control::checkpoint,
-                    15_000L,
-                    "15 秒内未检测到所选的封神榜客户端处于前台；已阻止脚本截图和触控");
+                    60_000L,
+                    "60 秒内未检测到所选的封神榜客户端处于前台；已阻止脚本截图和触控");
         } catch (TimeoutException timeout) {
             String detail = timeout.getMessage() + "（诊断："
                     + ScriptGameAdapter.foregroundDiagnostic() + "）";

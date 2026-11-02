@@ -2747,20 +2747,48 @@ end
 _ENV["战斗_查找自动设置药品"] = L0_1
 
 function L0_1(标题, markers, requiredMarkers)
-  local ok, rows = pcall(tomocrtexttable, 0, 0, 1280, 720)
-  if not ok or type(rows) ~= "table" then return false end
-  local text = ""
-  for i = 1, #rows do
-    local row = rows[i]
+  -- Do not OCR the full 1280x720 game canvas to decide whether the backpack
+  -- opened. On-device ML Kit times out on this screen-sized crop on LDPlayer,
+  -- leaving the timed-out native task burning CPU. Check the fixed title first,
+  -- then only the backpack's tabs/counter/action column.
+  local titleLeft, titleTop, titleRight, titleBottom = 620, 0, 940, 105
+  if 标题 ~= "背包" then
+    titleLeft, titleRight = 420, 900
+  end
+  local titleOk, titleRows = pcall(tomocrtexttable,
+      titleLeft, titleTop, titleRight, titleBottom)
+  if not titleOk or type(titleRows) ~= "table" then return false end
+  local titleText = ""
+  for i = 1, #titleRows do
+    local row = titleRows[i]
     local score = tonumber(row.score) or tonumber(row.confidence) or 0
     if score >= 0.55 then
-      text = text .. string.gsub(tostring(row.words or row.text or ""), "%s+", "") .. "|"
+      titleText = titleText .. string.gsub(tostring(row.words or row.text or ""), "%s+", "") .. "|"
     end
   end
-  if not string.find(text, 标题, 1, true) then return false end
+  if not string.find(titleText, 标题, 1, true) then return false end
+
+  local regions
+  if 标题 == "背包" then
+    regions = {{650, 70, 1000, 280}, {990, 130, 1235, 300}, {990, 285, 1235, 585}}
+  else
+    regions = {{220, 95, 1060, 650}}
+  end
   local found = 0
-  for i = 1, #markers do
-    if string.find(text, markers[i], 1, true) then found = found + 1 end
+  for _, region in ipairs(regions) do
+    local ok, rows = pcall(tomocrtexttable, table.unpack(region))
+    if not ok or type(rows) ~= "table" then return false end
+    local text = ""
+    for i = 1, #rows do
+      local row = rows[i]
+      local score = tonumber(row.score) or tonumber(row.confidence) or 0
+      if score >= 0.55 then
+        text = text .. string.gsub(tostring(row.words or row.text or ""), "%s+", "") .. "|"
+      end
+    end
+    for i = 1, #markers do
+      if string.find(text, markers[i], 1, true) then found = found + 1 end
+    end
   end
   return found >= requiredMarkers
 end

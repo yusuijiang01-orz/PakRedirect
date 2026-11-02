@@ -3,9 +3,11 @@ package com.example.pakredirect;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
-/** Serializes ML Kit requests while allowing bounded recovery from a hung task. */
+/** Serializes ML Kit requests and blocks new work until a timed-out task finishes. */
 final class ScriptOcrGate {
-    static final int MAX_ORPHANED_REQUESTS = 2;
+    // ML Kit's Task cannot be cancelled reliably. A timed-out inference still
+    // consumes CPU, so never start another inference until its callback returns.
+    static final int MAX_ORPHANED_REQUESTS = 1;
     private static final long RECOVERY_ACQUIRE_MS = 250L;
 
     private final Semaphore permit = new Semaphore(1, true);
@@ -33,9 +35,9 @@ final class ScriptOcrGate {
         if (lease == null || lease.owner != this || lease.finished || lease.timedOut) return;
         lease.timedOut = true;
         orphanedRequests++;
-        // Keep one slot available for a recovery attempt. After two outstanding
-        // timed-out tasks, acquire() fails immediately instead of queueing more.
-        if (orphanedRequests <= MAX_ORPHANED_REQUESTS) release(lease);
+        // Keep the semaphore until the original ML Kit callback completes. The
+        // circuit opens immediately, rather than running a second expensive OCR
+        // task beside an inference that did not respect its timeout.
     }
 
     synchronized void complete(Lease lease) {
