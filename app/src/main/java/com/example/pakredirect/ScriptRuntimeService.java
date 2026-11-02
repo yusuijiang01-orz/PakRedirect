@@ -286,7 +286,7 @@ public final class ScriptRuntimeService extends Service {
                         }
                     }
                     long backoff = ScriptAutoRecoveryPolicy.backoffMs(restartsInWindow);
-                    publish("已确认游戏进程退出，" + (backoff / 1000) + " 秒后自动重启并重新登录（"
+                    publish("已检测到游戏崩溃/无响应，" + (backoff / 1000) + " 秒后自动重启并重新登录（"
                             + restartsInWindow + "/" + ScriptAutoRecoveryPolicy.MAX_RESTARTS_PER_WINDOW + "）");
                     try {
                         runControl.sleep(backoff);
@@ -294,6 +294,22 @@ public final class ScriptRuntimeService extends Service {
                         runControl.complete();
                         publish("已停止");
                         return;
+                    }
+                    if (ScriptToolsActivity.TARGET_MODE_DESKTOP.equals(targetMode)
+                            && processState == ScriptGameProcessMonitor.State.CRASHED) {
+                        boolean dismissed = ScriptGameAdapter.dismissTargetCrashDialog();
+                        try { runControl.sleep(500L); }
+                        catch (ScriptExecutionControl.StopRequestedException stopped) {
+                            runControl.complete();
+                            publish("已停止");
+                            return;
+                        }
+                        if (!dismissed && ScriptGameAdapter.isTargetCrashDialogVisible()) {
+                            IllegalStateException blocked = new IllegalStateException(
+                                    "已识别游戏崩溃提示，但无法自动关闭系统弹窗；请手动点“关闭应用”后再启动脚本");
+                            if (runControl.fail(blocked)) reportFailure(blocked);
+                            return;
+                        }
                     }
                     if (!launchConfiguredGame(targetMode)) {
                         IllegalStateException launchFailure = new IllegalStateException(
@@ -365,7 +381,7 @@ public final class ScriptRuntimeService extends Service {
                         && gameObserved.get()) {
                     GameProcessExitedException crashed = new GameProcessExitedException();
                     if (runControl.fail(crashed)) {
-                        publish("检测到游戏进程已退出，正在按自动登录设置恢复");
+                        publish("检测到游戏崩溃/无响应，正在按自动登录设置恢复");
                     }
                     return;
                 }

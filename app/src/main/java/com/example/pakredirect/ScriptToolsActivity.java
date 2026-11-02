@@ -330,7 +330,7 @@ public final class ScriptToolsActivity extends Activity {
         addButton(profiles, saveAs);
 
         LinearLayout run = section("运行与状态", "先检查运行条件，再确认本次方案。开始后会启动设置中选定的封神榜客户端，并显示 RYLUX 悬浮控制面板。");
-        addSwitch(run, "自动登录", "游戏崩溃或 ANR 后最多自动重启 5 次/15 分钟，并继续当前挂机登录流程", true);
+        addSwitch(run, "自动登录", "识别到崩溃后最多重启 5 次/15 分钟；桌面版依赖系统显示该游戏的崩溃/无响应提示", true);
         Button preflight = button("查看配置与运行前检查", BLUE);
         preflight.setOnClickListener(v -> showPreflight());
         addButton(run, preflight);

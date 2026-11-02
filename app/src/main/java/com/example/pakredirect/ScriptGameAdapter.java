@@ -36,6 +36,12 @@ public final class ScriptGameAdapter extends AccessibilityService {
     private static volatile String targetMode = ScriptToolsActivity.TARGET_MODE_SANDBOX;
     private volatile ForegroundEvent foregroundEvent = ForegroundEvent.EMPTY;
     private volatile String targetGameLabel = "";
+    private volatile String crashDialogPackage = "";
+    private volatile String crashDialogClass = "";
+    private volatile String crashDialogText = "";
+    private volatile long crashDialogObservedAt;
+
+    private static final long CRASH_DIALOG_TTL_MS = 60_000L;
 
     private static final class ForegroundEvent {
         static final ForegroundEvent EMPTY = new ForegroundEvent("", "", -1);
@@ -55,6 +61,8 @@ public final class ScriptGameAdapter extends AccessibilityService {
     static void setTargetMode(String mode) {
         targetMode = ScriptToolsActivity.TARGET_MODE_DESKTOP.equals(mode)
                 ? ScriptToolsActivity.TARGET_MODE_DESKTOP : ScriptToolsActivity.TARGET_MODE_SANDBOX;
+        ScriptGameAdapter current = instance;
+        if (current != null) current.targetGameLabel = current.loadTargetGameLabel();
     }
 
     public static ScriptGameAdapter requireConnected() {
@@ -78,13 +86,15 @@ public final class ScriptGameAdapter extends AccessibilityService {
     }
 
     @Override public void onAccessibilityEvent(AccessibilityEvent event) {
-        if (event == null || event.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return;
+        if (event == null || (event.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+                && event.getEventType() != AccessibilityEvent.TYPE_WINDOWS_CHANGED)) return;
         // Keep the Android activity class and window identity with the package.
         // A host-package event alone also describes the RYLUX workbench.
         foregroundEvent = new ForegroundEvent(
                 event.getPackageName() == null ? "" : event.getPackageName().toString(),
                 event.getClassName() == null ? "" : event.getClassName().toString(),
                 event.getWindowId());
+        updateCrashDialog(event);
     }
     @Override public void onInterrupt() { }
 
@@ -115,6 +125,16 @@ public final class ScriptGameAdapter extends AccessibilityService {
     public static boolean isTargetGameForeground() {
         ScriptGameAdapter current = instance;
         return current != null && current.hasTargetGameForeground();
+    }
+
+    static boolean isTargetCrashDialogVisible() {
+        ScriptGameAdapter current = instance;
+        return current != null && current.hasRecentTargetCrashDialog();
+    }
+
+    static boolean dismissTargetCrashDialog() {
+        ScriptGameAdapter current = instance;
+        return current != null && current.dismissCrashDialog();
     }
 
     public static String foregroundDiagnostic() {
@@ -208,6 +228,15 @@ public final class ScriptGameAdapter extends AccessibilityService {
     }
 
     private String loadTargetGameLabel() {
+        if (ScriptToolsActivity.TARGET_MODE_DESKTOP.equals(targetMode)) {
+            try {
+                ApplicationInfo info = getPackageManager().getApplicationInfo(TARGET_GAME_PACKAGE, 0);
+                CharSequence label = getPackageManager().getApplicationLabel(info);
+                if (label != null) return label.toString();
+            } catch (Exception ignored) {
+                // Package visibility or a not-installed desktop client leaves only package matching.
+            }
+        }
         try {
             for (ApplicationInfo info : top.niunaijun.blackbox.BlackBoxCore.get()
                     .getInstalledApplications(0, 0)) {
@@ -219,6 +248,94 @@ public final class ScriptGameAdapter extends AccessibilityService {
             // The proxy event/package checks remain available if the sandbox is not ready.
         }
         return "";
+    }
+
+    private void updateCrashDialog(AccessibilityEvent event) {
+        String pkg = event.getPackageName() == null ? "" : event.getPackageName().toString();
+        String cls = event.getClassName() == null ? "" : event.getClassName().toString();
+        if (!ScriptCrashDialogDetector.isPotentialSystemDialog(pkg, cls)) return;
+        StringBuilder text = new StringBuilder();
+        if (event.getText() != null) {
+            for (CharSequence item : event.getText()) {
+                if (item != null) text.append(item).append(' ');
+            }
+        }
+        AccessibilityNodeInfo root = null;
+        try {
+            root = getRootInActiveWindow();
+            appendNodeText(root, text, 0, new int[]{0});
+        } catch (RuntimeException ignored) {
+            // Event text may still be enough for a system error dialog.
+        } finally {
+            if (root != null) root.recycle();
+        }
+        if (ScriptCrashDialogDetector.isTargetCrashDialog(pkg, cls, text.toString(),
+                TARGET_GAME_PACKAGE, targetGameLabel)) {
+            crashDialogPackage = pkg;
+            crashDialogClass = cls;
+            crashDialogText = text.toString();
+            crashDialogObservedAt = SystemClock.elapsedRealtime();
+            Log.w(TAG, "target game crash dialog detected; " + cls);
+        }
+    }
+
+    private static void appendNodeText(AccessibilityNodeInfo node, StringBuilder out,
+                                       int depth, int[] visited) {
+        if (node == null || depth > 12 || visited[0] >= 100) return;
+        visited[0]++;
+        CharSequence text = node.getText();
+        CharSequence description = node.getContentDescription();
+        if (text != null) out.append(text).append(' ');
+        if (description != null) out.append(description).append(' ');
+        for (int i = 0; i < node.getChildCount() && visited[0] < 100; i++) {
+            AccessibilityNodeInfo child = node.getChild(i);
+            if (child == null) continue;
+            try { appendNodeText(child, out, depth + 1, visited); }
+            finally { child.recycle(); }
+        }
+    }
+
+    private boolean hasRecentTargetCrashDialog() {
+        long age = SystemClock.elapsedRealtime() - crashDialogObservedAt;
+        return !crashDialogText.isEmpty() && age >= 0 && age <= CRASH_DIALOG_TTL_MS;
+    }
+
+    private boolean dismissCrashDialog() {
+        if (!hasRecentTargetCrashDialog()) return false;
+        AccessibilityNodeInfo root = null;
+        try {
+            root = getRootInActiveWindow();
+            boolean clicked = clickCloseButton(root, 0, new int[]{0});
+            if (clicked) {
+                crashDialogText = "";
+                crashDialogObservedAt = 0L;
+            }
+            return clicked;
+        } catch (RuntimeException ignored) {
+            return false;
+        } finally {
+            if (root != null) root.recycle();
+        }
+    }
+
+    private static boolean clickCloseButton(AccessibilityNodeInfo node, int depth, int[] visited) {
+        if (node == null || depth > 12 || visited[0] >= 100) return false;
+        visited[0]++;
+        CharSequence text = node.getText();
+        CharSequence description = node.getContentDescription();
+        boolean close = ScriptCrashDialogDetector.isCloseAppButton(text == null ? "" : text.toString())
+                || ScriptCrashDialogDetector.isCloseAppButton(
+                        description == null ? "" : description.toString());
+        if (close && node.isClickable() && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+            return true;
+        }
+        for (int i = 0; i < node.getChildCount() && visited[0] < 100; i++) {
+            AccessibilityNodeInfo child = node.getChild(i);
+            if (child == null) continue;
+            try { if (clickCloseButton(child, depth + 1, visited)) return true; }
+            finally { child.recycle(); }
+        }
+        return false;
     }
 
     private String describeForegroundState() {

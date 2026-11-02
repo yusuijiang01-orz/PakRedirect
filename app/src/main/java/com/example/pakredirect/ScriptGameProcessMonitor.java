@@ -20,17 +20,21 @@ final class ScriptGameProcessMonitor {
     private long lastClassifiedExitMillis;
     private String observedProcessName;
     private State lastExitState = State.UNKNOWN;
+    private boolean pendingCrashDetected;
 
     boolean hasObservedRunningProcess() { return observedRunningProcess; }
 
     void acknowledgeRecoveryAttempt() {
         lastExitState = State.STOPPED;
         currentlyRunning = false;
+        pendingCrashDetected = false;
     }
 
     State inspect(Context context, String targetMode) {
+        if (pendingCrashDetected) return State.CRASHED;
         State raw = ScriptToolsActivity.TARGET_MODE_DESKTOP.equals(targetMode)
                 ? inspectDesktop(context) : inspectSandbox(context);
+        if (raw == State.CRASHED) pendingCrashDetected = true;
         if (raw == State.RUNNING) {
             if (!currentlyRunning) {
                 observedAtMillis = System.currentTimeMillis();
@@ -48,31 +52,11 @@ final class ScriptGameProcessMonitor {
     }
 
     private State inspectDesktop(Context context) {
-        ActivityManager manager = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
-        if (manager == null) return State.UNKNOWN;
-        try {
-            List<ActivityManager.RunningAppProcessInfo> processes = manager.getRunningAppProcesses();
-            if (processes == null) return State.UNKNOWN;
-            for (ActivityManager.RunningAppProcessInfo process : processes) {
-                if (process == null) continue;
-                if (GAME.equals(process.processName) || (process.processName != null
-                        && process.processName.startsWith(GAME + ":"))) {
-                    observedProcessName = process.processName;
-                    return State.RUNNING;
-                }
-                if (process.pkgList != null) {
-                    for (String packageName : process.pkgList) {
-                        if (GAME.equals(packageName)) {
-                            observedProcessName = process.processName;
-                            return State.RUNNING;
-                        }
-                    }
-                }
-            }
-            return State.STOPPED;
-        } catch (RuntimeException unavailable) {
-            return State.UNKNOWN;
-        }
+        // A regular RYLUX install cannot read another UID's ApplicationExitInfo
+        // (that API requires DUMP for cross-UID queries). Use the accessibility
+        // error dialog, which names the target app, as the desktop crash signal.
+        if (ScriptGameAdapter.isTargetCrashDialogVisible()) return State.CRASHED;
+        return ScriptGameAdapter.isTargetGameForeground() ? State.RUNNING : State.UNKNOWN;
     }
 
     private State inspectSandbox(Context context) {
