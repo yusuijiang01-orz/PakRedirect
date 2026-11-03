@@ -40,6 +40,20 @@ public final class ScriptStartupTermsTest {
         assertNull(ScriptStartupTerms.templateCenter(400, 630, 0, 48));
     }
 
+    @Test public void agreeSearchRegionCoversButtonInCroppedLandscapeCapture() {
+        assertArrayEquals(new int[]{380, 450, 580, 532},
+                ScriptStartupTerms.agreeSearchRegion(1280, 589));
+        assertArrayEquals(new int[]{0, 0, 0, 0}, ScriptStartupTerms.agreeSearchRegion(0, 589));
+    }
+
+    @Test public void agreeTemplateScaleCandidatesCoverMeasuredScreenScales() {
+        double[] scales = ScriptStartupTerms.agreeTemplateScales(1280, 589);
+        assertEquals(7, scales.length);
+        assertEquals(0.646d, scales[2], 0.002d);
+        assertEquals(1.05d, ScriptStartupTerms.agreeTemplateScales(1600, 900)[3], 0.0001d);
+        assertEquals(0, ScriptStartupTerms.agreeTemplateScales(0, 900).length);
+    }
+
     @Test public void rejectsGenericDialogAndIncompleteTermsBody() {
         assertNull(ScriptStartupTerms.findAgreeTap(Arrays.asList(
                 line("提示", 800, 240), line("是否继续游戏？", 800, 470),

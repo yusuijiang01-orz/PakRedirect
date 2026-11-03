@@ -556,25 +556,32 @@ public final class ScriptRuntimeService extends Service {
 
     private ScriptStartupTerms.Tap findStartupAgreeButton(Bitmap frame, Bitmap sourceTemplate) {
         if (frame == null || frame.isRecycled()) return null;
-        LegacyCoordinateMapper mapper = new LegacyCoordinateMapper(
-                1280, 720, frame.getWidth(), frame.getHeight());
-        int templateWidth = Math.max(1, mapper.toScreenDeltaX(sourceTemplate.getWidth()));
-        int templateHeight = Math.max(1, mapper.toScreenDeltaY(sourceTemplate.getHeight()));
-        Bitmap template = sourceTemplate;
-        if (templateWidth != sourceTemplate.getWidth() || templateHeight != sourceTemplate.getHeight()) {
-            template = Bitmap.createScaledBitmap(sourceTemplate, templateWidth, templateHeight, true);
+        int[] region = ScriptStartupTerms.agreeSearchRegion(frame.getWidth(), frame.getHeight());
+        LegacyImageMatcher.Pixels screenPixels = bitmapPixels(frame);
+        ScriptStartupTerms.Tap bestTap = null;
+        double bestScore = 0.74d;
+        for (double scale : ScriptStartupTerms.agreeTemplateScales(frame.getWidth(), frame.getHeight())) {
+            control.checkpoint();
+            int templateWidth = Math.max(1, (int) Math.round(sourceTemplate.getWidth() * scale));
+            int templateHeight = Math.max(1, (int) Math.round(sourceTemplate.getHeight() * scale));
+            Bitmap template = sourceTemplate;
+            if (templateWidth != sourceTemplate.getWidth() || templateHeight != sourceTemplate.getHeight()) {
+                template = Bitmap.createScaledBitmap(sourceTemplate, templateWidth, templateHeight, true);
+            }
+            try {
+                LegacyImageMatcher.Match match = LegacyImageMatcher.find(screenPixels, bitmapPixels(template),
+                        region[0], region[1], region[2], region[3], 0x00101010, 0.74d,
+                        control::checkpoint);
+                if (match != null && match.score > bestScore) {
+                    bestScore = match.score;
+                    bestTap = ScriptStartupTerms.templateCenter(match.x, match.y,
+                            template.getWidth(), template.getHeight());
+                }
+            } finally {
+                if (template != sourceTemplate && !template.isRecycled()) template.recycle();
+            }
         }
-        try {
-            LegacyImageMatcher.Pixels screenPixels = bitmapPixels(frame);
-            LegacyImageMatcher.Pixels templatePixels = bitmapPixels(template);
-            LegacyImageMatcher.Match match = LegacyImageMatcher.find(screenPixels, templatePixels,
-                    mapper.left(320), mapper.top(504), mapper.right(640), mapper.bottom(684),
-                    0x00101010, 0.86d, control::checkpoint);
-            return match == null ? null : ScriptStartupTerms.templateCenter(
-                    match.x, match.y, template.getWidth(), template.getHeight());
-        } finally {
-            if (template != sourceTemplate && !template.isRecycled()) template.recycle();
-        }
+        return bestTap;
     }
 
     private static LegacyImageMatcher.Pixels bitmapPixels(Bitmap bitmap) {

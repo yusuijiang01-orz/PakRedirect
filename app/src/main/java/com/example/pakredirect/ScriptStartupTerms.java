@@ -2,8 +2,10 @@ package com.example.pakredirect;
 
 import java.util.List;
 
-/** Recognizes only the game's known first-use terms page from OCR line centers. */
+/** Coordinates and anchors for the game's known first-use terms page. */
 final class ScriptStartupTerms {
+    private static final double[] AGREE_TEMPLATE_SCALE_FACTORS =
+            {0.82d, 0.88d, 0.94d, 1.00d, 1.06d, 1.12d, 1.18d};
     private static final float TITLE_LEFT = 0.35f;
     private static final float TITLE_RIGHT = 0.65f;
     private static final float TITLE_TOP = 0.08f;
@@ -81,6 +83,22 @@ final class ScriptStartupTerms {
     static Tap templateCenter(int left, int top, int templateWidth, int templateHeight) {
         if (templateWidth <= 0 || templateHeight <= 0) return null;
         return new Tap(left + templateWidth / 2, top + templateHeight / 2);
+    }
+
+    /** Search box measured from the localized 1280x720 terms-page capture. */
+    static int[] agreeSearchRegion(int width, int height) {
+        if (width <= 0 || height <= 0) return new int[]{0, 0, 0, 0};
+        return new int[]{Math.round(width * 380f / 1280f), Math.round(height * 550f / 720f),
+                Math.round(width * 580f / 1280f), Math.round(height * 650f / 720f)};
+    }
+
+    /** Candidate template scales around the measured 1600x900 sandbox capture. */
+    static double[] agreeTemplateScales(int width, int height) {
+        if (width <= 0 || height <= 0) return new double[0];
+        double base = 1.05d * Math.min(width / 1600d, height / 900d);
+        double[] scales = new double[AGREE_TEMPLATE_SCALE_FACTORS.length];
+        for (int i = 0; i < scales.length; i++) scales[i] = base * AGREE_TEMPLATE_SCALE_FACTORS[i];
+        return scales;
     }
 
     static boolean isLocalizedLoginPage(List<Line> lines) {
