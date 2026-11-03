@@ -38,6 +38,11 @@ public final class ScriptRuntimeService extends Service {
     private static final String LAST_ERROR = "last_error";
     private static final String STARTUP_AGREE_TEMPLATE =
             "script_modules/脚本/素材库/汉化条款同意按钮.png";
+    // The same world HUD anchors used by 在主页面 in 通用数据.lua (1280x720).
+    private static final String WORLD_SETTINGS_POINTS =
+            "1213|662|c69e63-111111,1212|651|e7cb84-111111,1207|646|f7df8c-111111,1199|646|f7e794-111111,1196|650|f7df8c-111111,1195|663|dec37b-111111,1203|666|cea66b-111111,1227|670|b5ae9c-111111,1227|660|d6cfbd-111111,1225|659|e7e3d6-111111,1222|648|c6bead-111111,1223|641|d6cbbd-111111,1218|636|e7dfce-111111";
+    private static final String WORLD_SKILL_POINTS =
+            "1250|662|eff7ff-222222,1248|660|f7fbff-222222,1240|659|f7fbff-222222,1233|659|f7fbff-222222,1230|660|f7fbff-222222,1237|662|eff7ff-222222,1246|662|eff7ff-222222,1243|678|9cd7ef-222222,1239|675|addfef-222222,1231|674|b5e3ef-222222,1224|674|b5e3ef-222222,1222|675|addfef-222222,1224|678|9cd7ef-222222,1234|676|a5dfef-222222,1240|677|a5dbef-222222,1237|250|bdb2ef-222222,1234|246|cecff7-222222,1215|249|bdbaef-222222,1218|246|cecff7-222222,1219|232|ffffff-222222,1216|228|ffffff-222222,1234|231|ffffff-222222,1238|228|ffffff-222222";
     private static final long STALL_SCREEN_SAMPLE_INTERVAL_MS = 5_000L;
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
@@ -720,9 +725,17 @@ public final class ScriptRuntimeService extends Service {
             int noMatchFrames = 0;
             while (clickAttempts < 3) {
                 control.checkpoint();
+                if (clickAttempts == 0) {
+                    publish("正在检查使用条款页（" + (noMatchFrames + 1) + "/12）");
+                }
                 Bitmap frame = captureStartupFrame(30_000L, 5_000L);
                 ScriptStartupTerms.Tap tap;
                 try {
+                    if (isWorldHudVisible(frame)) {
+                        Log.i("RYLUX-Lua", "world HUD detected; skipping startup terms scan");
+                        publish("已检测到游戏主界面，继续挂机流程");
+                        return;
+                    }
                     tap = findStartupAgreeButton(frame, template);
                 } finally {
                     if (!frame.isRecycled()) frame.recycle();
@@ -734,7 +747,6 @@ public final class ScriptRuntimeService extends Service {
                         return;
                     }
                     noMatchFrames++;
-                    if (noMatchFrames == 1) publish("正在用图片识别检查使用条款确认按钮");
                     if (noMatchFrames >= 12) {
                         Log.w("RYLUX-Lua", "startup terms template not found after " + noMatchFrames
                                 + " scans; continuing startup; see screen-size/region diagnostics above");
@@ -757,7 +769,8 @@ public final class ScriptRuntimeService extends Service {
             }
             Bitmap verifyFrame = captureStartupFrame(30_000L, 5_000L);
             try {
-                if (findStartupAgreeButton(verifyFrame, template) != null) {
+                if (!isWorldHudVisible(verifyFrame)
+                        && findStartupAgreeButton(verifyFrame, template) != null) {
                     throw new IllegalStateException("已重试 3 次点击使用条款“同意”，页面仍未关闭");
                 }
                 publish("使用条款页已关闭，继续自动登录流程");
@@ -767,6 +780,16 @@ public final class ScriptRuntimeService extends Service {
         } finally {
             if (!template.isRecycled()) template.recycle();
         }
+    }
+
+    private boolean isWorldHudVisible(Bitmap frame) {
+        if (frame == null || frame.isRecycled() || frame.getWidth() < frame.getHeight()) return false;
+        LegacyCoordinateMapper mapper = new LegacyCoordinateMapper(1280, 720,
+                frame.getWidth(), frame.getHeight());
+        return LegacyLuaCompat.matchesColorPoints(mapper.mapColorPoints(WORLD_SETTINGS_POINTS),
+                0.9d, frame.getWidth(), frame.getHeight(), frame::getPixel)
+                || LegacyLuaCompat.matchesColorPoints(mapper.mapColorPoints(WORLD_SKILL_POINTS),
+                0.9d, frame.getWidth(), frame.getHeight(), frame::getPixel);
     }
 
     private ScriptStartupTerms.Tap findStartupAgreeButton(Bitmap frame, Bitmap sourceTemplate) {
