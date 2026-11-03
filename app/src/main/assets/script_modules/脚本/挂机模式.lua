@@ -2304,7 +2304,7 @@ _ENV["登录_汉化选区确认"] = L0_1
 local 登录素材 = {
   ["进入游戏"] = {"素材库/服务器进入游戏按钮.png", 470, 310, 810, 410, 300, 72, 0.78},
   ["登录"] = {"素材库/汉化登录按钮.png", 480, 455, 820, 585, 306, 75, 0.65},
-  ["确认"] = {"素材库/汉化角色确认按钮.png", 850, 405, 1150, 520, 203, 57, 0.52},
+  ["确认"] = {"素材库/汉化角色确认按钮.png", 850, 535, 1150, 600, 203, 57, 0.52},
   ["返回"] = {"素材库/汉化登录返回按钮.png", 530, 420, 750, 520, 128, 46, 0.62}
 }
 local 登录素材查找缓存 = {}
@@ -2316,6 +2316,7 @@ _ENV["登录_自动重试终止"] = false
 _ENV["登录_页面动作记录"] = {}
 _ENV["登录_等待角色确认"] = false
 _ENV["登录_角色确认扫描次数"] = 0
+_ENV["登录_角色确认恢复阶段"] = nil
 
 function L0_1(key)
   local item = 登录素材[key]
@@ -2474,7 +2475,7 @@ function L0_1()
   _ENV["登录_自动重试终止"] = false
   local confirmX, confirmY = _ENV["登录_找素材按钮"]("确认")
   if confirmX == nil or confirmY == nil or confirmX < 930 or confirmX > 1070
-      or confirmY < 430 or confirmY > 500 then return false end
+      or confirmY < 535 or confirmY > 600 then return false end
   local now = tickCount()
   if not _ENV["登录_允许页面动作"]("角色确认", now) then return true end
   if _ENV["登录_快速点击"]("@@汉化角色确认", confirmX, confirmY) then
@@ -2486,13 +2487,34 @@ _ENV["登录_汉化角色确认"] = L0_1
 
 -- After entering the selected server, lock the login flow to the character
 -- confirmation button. Do not run terms/server/account/OCR branches until this
--- button is found and tapped, or fail after ten direct image scans.
+-- button is found and tapped; after ten misses, return to server selection.
 function L0_1()
+  local recovery = _ENV["登录_角色确认恢复阶段"]
+  if recovery == "返回服务器" then
+    _ENV["当前任务2"] = "角色确认连续 10 次未识别，返回服务器选择页重试"
+    if _ENV["登录_快速点击"]("@@返回服务器选择并重试", 1000, 643) then
+      _ENV["登录_角色确认恢复阶段"] = "等待服务器"
+    end
+    return true
+  elseif recovery == "等待服务器" then
+    local serverX, serverY = _ENV["登录_找素材按钮"]("进入游戏")
+    if serverX ~= nil and serverY ~= nil and serverX >= 580 and serverX <= 700
+        and serverY >= 335 and serverY <= 385
+        and _ENV["登录_快速点击"]("@@重新进入已选服务器", serverX, serverY) then
+      _ENV["登录_角色确认恢复阶段"] = nil
+      _ENV["登录_等待角色确认"] = true
+      _ENV["登录_角色确认扫描次数"] = 0
+      _ENV["登录_记录页面动作"]("服务器进入游戏", tickCount())
+    else
+      _ENV["当前任务2"] = "重试登录：等待服务器选择页"
+    end
+    return true
+  end
   if not _ENV["登录_等待角色确认"] then return false end
   local attempt = (tonumber(_ENV["登录_角色确认扫描次数"]) or 0) + 1
   _ENV["登录_角色确认扫描次数"] = attempt
   local x, y = _ENV["登录_找素材按钮"]("确认")
-  if x ~= nil and y ~= nil and x >= 930 and x <= 1070 and y >= 430 and y <= 500 then
+  if x ~= nil and y ~= nil and x >= 930 and x <= 1070 and y >= 535 and y <= 600 then
     if _ENV["登录_快速点击"]("@@汉化角色确认", x, y) then
       _ENV["登录_等待角色确认"] = false
       _ENV["登录_角色确认扫描次数"] = 0
@@ -2503,8 +2525,9 @@ function L0_1()
   _ENV["当前任务2"] = "等待角色确认：扫描 " .. attempt .. "/10"
   if attempt >= 10 then
     _ENV["登录_等待角色确认"] = false
-    _ENV["当前任务2"] = "角色确认按钮连续 10 次未识别，已终止脚本"
-    error("角色确认按钮连续 10 次未识别，停止自动登录", 0)
+    _ENV["登录_角色确认扫描次数"] = 0
+    _ENV["登录_角色确认恢复阶段"] = "返回服务器"
+    _ENV["当前任务2"] = "角色确认按钮连续 10 次未识别，返回服务器选择页重试"
   end
   return true
 end
@@ -2566,7 +2589,7 @@ _ENV["登录_处理超时"] = L0_1
 function L0_1()
   _ENV["登录_自动重试终止"] = false
   local uiConfig = _ENV["界面数据"]
-  if _ENV["登录_等待角色确认"] then
+  if _ENV["登录_等待角色确认"] or _ENV["登录_角色确认恢复阶段"] ~= nil then
     return _ENV["登录_强制扫描角色确认"]()
   end
   if type(uiConfig) == "table" and uiConfig["自动登录"] == "false" then return false end
