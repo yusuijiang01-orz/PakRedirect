@@ -2426,7 +2426,30 @@ function L0_1()
   if type(uiConfig) == "table" and uiConfig["自动登录"] == "false" then return false end
   _ENV["登录_自动重试终止"] = false
   local now = tickCount()
-  local loginX, loginY = _ENV["登录_找素材按钮"]("登录")
+  -- Tepaylink's current Vietnamese account page exposes a wide, solid-blue
+  -- native login button. Its label is not the old Chinese image template, so
+  -- match the stable button fill first; the seven spaced samples reject the
+  -- small blue checkboxes and other unrelated controls without OCR.
+  local loginX, loginY
+  local cached = _ENV["登录_账号按钮缓存"]
+  if type(cached) == "table" and now - (tonumber(cached.time) or 0) < 250 then
+    if cached.found then loginX, loginY = cached.x, cached.y end
+  else
+    local ok, buttonX, buttonY = pcall(function()
+      return findMultiColor(150, 532, 760, 548, "2A9CF5-181818",
+        "40|0|2A9CF5-181818|100|0|2A9CF5-181818|170|0|2A9CF5-181818|240|0|2A9CF5-181818|310|0|2A9CF5-181818|380|0|2A9CF5-181818|450|0|2A9CF5-181818")
+    end)
+    buttonX, buttonY = tonumber(buttonX), tonumber(buttonY)
+    if ok and buttonX ~= nil and buttonY ~= nil and buttonX >= 150 and buttonX <= 300 then
+      loginX, loginY = math.floor(buttonX + 288), math.floor(buttonY + 18)
+      _ENV["登录_账号按钮缓存"] = {time = now, found = true, x = loginX, y = loginY}
+    else
+      _ENV["登录_账号按钮缓存"] = {time = now, found = false}
+    end
+  end
+  if loginX == nil or loginY == nil then
+    loginX, loginY = _ENV["登录_找素材按钮"]("登录")
+  end
   if loginX == nil or loginY == nil then return false end
   if not _ENV["登录_允许页面动作"]("账号登录", now) then return true end
   _ENV["登录_快速点击"]("@@汉化账号密码登录", loginX, loginY)
