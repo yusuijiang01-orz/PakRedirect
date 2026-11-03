@@ -173,7 +173,7 @@ public final class ScriptLuaUpdateManager {
 
     private static JSONObject fetchManifest() throws Exception {
         Throwable last = null;
-        for (String base : new String[]{GITEE_BASE, GITHUB_BASE}) {
+        for (String base : new String[]{GITHUB_BASE, GITEE_BASE}) {
             HttpURLConnection connection = null;
             try {
                 connection = open(base + "/manifest.json?rylux_rev=" + System.currentTimeMillis());
@@ -226,7 +226,7 @@ public final class ScriptLuaUpdateManager {
         String encodedName = Uri.encode(name, "-_.~");
         String relative = "/releases/" + version + "/" + encodedName;
         Throwable last = null;
-        for (String base : new String[]{GITEE_BASE, GITHUB_BASE}) {
+        for (String base : new String[]{GITHUB_BASE, GITEE_BASE}) {
             HttpURLConnection connection = null;
             File temp = new File(target.getParentFile(), target.getName() + ".part");
             try {
