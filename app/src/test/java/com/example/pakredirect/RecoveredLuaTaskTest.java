@@ -1652,6 +1652,64 @@ public final class RecoveredLuaTaskTest {
         assertEquals(Arrays.asList("@@打开背包"), taps);
     }
 
+    @Test public void fresh610MemoryTriggerSkipsOcrBackpackPreflight() throws Exception {
+        Globals globals = JsePlatform.standardGlobals();
+        AtomicInteger ocrBagPageCalls = new AtomicInteger();
+        globals.set("_ENV", globals);
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.valueOf(10_000L); }
+        });
+        globals.set("sleep", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue millis) { return LuaValue.NONE; }
+        });
+        VarArgFunction noOp = new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return LuaValue.NONE; }
+        };
+        globals.set("toast", noOp);
+        globals.set("print", noOp);
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua"))
+            loadModule(globals, scriptRoot().resolve(module), module);
+        globals.set("修改数据库", noOp);
+        globals.set("界面数据", new LuaTable());
+        globals.set("背包保留重量", LuaValue.valueOf(3));
+        globals.set("背包保留格子", LuaValue.valueOf(2));
+        globals.set("找到", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue template) { return LuaValue.FALSE; }
+        });
+        globals.set("在主页面", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.TRUE; }
+        });
+        globals.set("点击", noOp);
+        globals.set("药品_识别背包页面", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                ocrBagPageCalls.incrementAndGet();
+                return LuaValue.FALSE;
+            }
+        });
+        globals.set("getSandboxBagSnapshot", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                LuaTable value = new LuaTable();
+                value.set("supported", LuaValue.TRUE);
+                value.set("status", LuaValue.valueOf("OK"));
+                value.set("buildId", LuaValue.valueOf("350ee73d222f974988c13b5917337fb2d96fe68a"));
+                value.set("freeSlots", LuaValue.valueOf(10));
+                value.set("currentWeight", LuaValue.valueOf(197));
+                value.set("maxWeight", LuaValue.valueOf(200));
+                value.set("ageMs", LuaValue.valueOf(0));
+                value.set("shouldVisitDoctor", LuaValue.valueOf(
+                        200 - 197 <= args.arg(2).optint(3)));
+                return value;
+            }
+        });
+
+        assertFalse("3 remaining weight must trigger the doctor route",
+                globals.get("检测背包").checkfunction().call().toboolean());
+        assertTrue("the fresh memory proof should be enough to begin routing",
+                globals.get("去卖货_准备背包").checkfunction().call().toboolean());
+        assertEquals("merchant preflight must not reopen the backpack for OCR", 0,
+                ocrBagPageCalls.get());
+    }
+
     @Test public void backpackDetectionRetriesWhenBothSlotReadersFailInsteadOfCrashing() throws Exception {
         Globals globals = JsePlatform.standardGlobals();
         globals.set("tickCount", new ZeroArgFunction() {

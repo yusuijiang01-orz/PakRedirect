@@ -1531,6 +1531,26 @@ require("网页路线")
 -- stacks, but does not grant permission to sell items; the shop's existing
 -- equipment protection and explicit item allowlist still decide every sale.
 function L0_1()
+  -- The same 610 memory snapshot already proved that the configured doctor
+  -- threshold was reached. Reopening the bag here used to invoke OCR before
+  -- the doctor route, which could time out and kill the entire farming loop.
+  -- Skip only this optional sort/preflight when the proof is fresh and the
+  -- player is visibly back on the world HUD. The sale still uses its normal
+  -- allowlist, rarity checks, and confirmation flow at the shop.
+  local snapshot = _ENV["最近背包内存快照"]
+  if type(snapshot) == "table" and snapshot.需要去大夫 == true
+      and snapshot.buildId == "350ee73d222f974988c13b5917337fb2d96fe68a"
+      and snapshot.保留格子 == (tonumber(_ENV["背包保留格子"]) or 2)
+      and snapshot.保留重量 == (tonumber(_ENV["背包保留重量"]) or 3) then
+    local capturedAt = tonumberEx(snapshot.时间)
+    local now = tonumberEx(tickCount())
+    local age = capturedAt ~= nil and now ~= nil and now - capturedAt or nil
+    if age ~= nil and age >= 0 and age <= 5000 and _ENV["在主页面"]() then
+      _ENV["当前任务2"] = "背包内存已确认，跳过OCR整理"
+      toast("内存已确认背包阈值，直接前往大夫")
+      return true
+    end
+  end
   if not (_ENV["找到"](tz["背包页面"]) or _ENV["药品_识别背包页面"]()) then
     if not _ENV["在主页面"]() then return false end
     _ENV["点击"]("@@打开背包", 902, 693, 1000)
@@ -2366,6 +2386,21 @@ function L0_1()
     上限 = math.floor(maxWeight),
     buildId = tostring(snapshot.buildId or "")
   }
+  local 需要去大夫 = 内存背包.空格 <= reserveSlots
+      or 内存背包.上限 - 内存背包.重量 <= reserveWeight
+  if snapshot.shouldVisitDoctor ~= 需要去大夫 then
+    error("沙箱背包触发结果与原始数值不一致；已停止卖货")
+  end
+  _ENV["最近背包内存快照"] = {
+    空格 = 内存背包.空格,
+    重量 = 内存背包.重量,
+    上限 = 内存背包.上限,
+    buildId = 内存背包.buildId,
+    时间 = tickCount(),
+    保留格子 = reserveSlots,
+    保留重量 = reserveWeight,
+    需要去大夫 = 需要去大夫
+  }
   _ENV["背包读取来源"] = "游戏内存"
   _ENV["当前背包格子"] = 内存背包.空格
   _ENV["当前背包重量"] = 内存背包.重量 .. "/" .. 内存背包.上限
@@ -2373,7 +2408,7 @@ function L0_1()
   _ENV["背包格子识别失败"] = false
   local lowSlots = 内存背包.空格 <= reserveSlots
   _ENV["背包接近负重阈值"] = 内存背包.上限 - 内存背包.重量 <= reserveWeight + 5
-  if snapshot.shouldVisitDoctor == true then
+  if 需要去大夫 then
     _ENV["上次检测背包"] = tickCount()
     if lowSlots then
       toast("内存检测空格不足" .. 内存背包.空格 .. "格，前往大夫")

@@ -36,6 +36,7 @@ sourceSets {
             include '**/ScriptStartupTerms.java'
             include '**/ScriptHudStatus.java'
             include '**/ScriptRuntimeErrors.java'
+            include '**/SandboxBagMemoryProfile.java'
             include '**/RecoveredLuaTaskTest.java'
             include '**/RecoveredLuaLiveLoginTest.java'
             include '**/LiveLuaDeviceHost.java'
