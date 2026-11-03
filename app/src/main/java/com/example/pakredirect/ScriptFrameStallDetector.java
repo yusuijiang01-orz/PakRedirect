@@ -28,6 +28,7 @@ final class ScriptFrameStallDetector {
     private int previousWidth;
     private int previousHeight;
     private long unchangedSinceMs;
+    private int consecutiveChangedFrames;
 
     Observation observe(Bitmap frame, long nowMs) {
         if (frame == null || frame.isRecycled() || frame.getWidth() <= 0 || frame.getHeight() <= 0) {
@@ -39,12 +40,20 @@ final class ScriptFrameStallDetector {
         int[] pixels = new int[SAMPLE_WIDTH * SAMPLE_HEIGHT];
         sample.getPixels(pixels, 0, SAMPLE_WIDTH, 0, 0, SAMPLE_WIDTH, SAMPLE_HEIGHT);
         if (sample != frame && !sample.isRecycled()) sample.recycle();
+        return observePixels(pixels, SAMPLE_WIDTH, SAMPLE_HEIGHT, nowMs);
+    }
 
-        if (previousPixels == null || previousWidth != frame.getWidth()
-                || previousHeight != frame.getHeight()) {
+    Observation observePixels(int[] pixels, int width, int height, long nowMs) {
+        if (pixels == null || pixels.length == 0 || width <= 0 || height <= 0
+                || (long) width * height != pixels.length) {
+            reset();
+            return new Observation(0d, 0L, false, false);
+        }
+        if (previousPixels == null || previousWidth != width
+                || previousHeight != height || previousPixels.length != pixels.length) {
             previousPixels = pixels;
-            previousWidth = frame.getWidth();
-            previousHeight = frame.getHeight();
+            previousWidth = width;
+            previousHeight = height;
             unchangedSinceMs = nowMs;
             return new Observation(1d, 0L, false, false);
         }
@@ -54,10 +63,22 @@ final class ScriptFrameStallDetector {
             if (rgbDistance(previousPixels[i], pixels[i]) <= MAX_RGB_DISTANCE) similar++;
         }
         double similarity = (double) similar / pixels.length;
-        if (similarity < REQUIRED_SIMILARITY) unchangedSinceMs = nowMs;
-        previousPixels = pixels;
+        if (similarity < REQUIRED_SIMILARITY) {
+            consecutiveChangedFrames++;
+            // Ignore one transient frame (for example a tap ripple or a brief render glitch).
+            // A real screen transition persists across samples and resets the timer on its second frame.
+            if (consecutiveChangedFrames >= 2) {
+                unchangedSinceMs = nowMs;
+                consecutiveChangedFrames = 0;
+                previousPixels = pixels;
+            }
+        } else {
+            consecutiveChangedFrames = 0;
+            previousPixels = pixels;
+        }
         long stableFor = Math.max(0L, nowMs - unchangedSinceMs);
-        return new Observation(similarity, stableFor, true, stableFor >= STALL_AFTER_MS);
+        return new Observation(similarity, stableFor, true,
+                similarity >= REQUIRED_SIMILARITY && stableFor >= STALL_AFTER_MS);
     }
 
     void reset() {
@@ -65,6 +86,7 @@ final class ScriptFrameStallDetector {
         previousWidth = 0;
         previousHeight = 0;
         unchangedSinceMs = 0L;
+        consecutiveChangedFrames = 0;
     }
 
     private static int rgbDistance(int first, int second) {

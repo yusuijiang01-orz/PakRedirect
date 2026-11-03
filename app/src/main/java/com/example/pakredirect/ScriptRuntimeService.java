@@ -20,6 +20,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** Explicitly started foreground host for the recovered Lua script. */
 public final class ScriptRuntimeService extends Service {
@@ -413,7 +414,9 @@ public final class ScriptRuntimeService extends Service {
                                         ScriptGameProcessMonitor processMonitor) throws Exception {
         AtomicBoolean watching = new AtomicBoolean(true);
         AtomicBoolean gameObserved = new AtomicBoolean(false);
+        AtomicReference<Throwable> watchdogFailure = new AtomicReference<>();
         boolean sandboxTarget = ScriptToolsActivity.TARGET_MODE_SANDBOX.equals(targetMode);
+        boolean autoLogin = config.optBoolean("自动登录", true);
         ScriptFrameStallDetector stallDetector = new ScriptFrameStallDetector();
         Thread watcher = new Thread(() -> {
             long nextScreenSampleAt = 0L;
@@ -425,12 +428,17 @@ public final class ScriptRuntimeService extends Service {
                 } else if (processState == ScriptGameProcessMonitor.State.CRASHED
                         && gameObserved.get()) {
                     GameProcessExitedException crashed = new GameProcessExitedException();
+                    watchdogFailure.compareAndSet(null, crashed);
                     if (runControl.fail(crashed)) {
                         publish("检测到游戏崩溃/无响应，正在按自动登录设置恢复");
                     }
                     return;
                 }
-                if (sandboxTarget && runControl.getState() == ScriptExecutionControl.State.RUNNING
+                ScriptExecutionControl.State controlState = runControl.getState();
+                boolean keepWatchingAfterLuaFailure = sandboxTarget && autoLogin
+                        && controlState == ScriptExecutionControl.State.FAILED;
+                if (sandboxTarget && (controlState == ScriptExecutionControl.State.RUNNING
+                        || keepWatchingAfterLuaFailure)
                         && processState == ScriptGameProcessMonitor.State.RUNNING
                         && ScriptGameAdapter.isTargetGameForeground()) {
                     long sampleAt = android.os.SystemClock.elapsedRealtime();
@@ -456,9 +464,13 @@ public final class ScriptRuntimeService extends Service {
                             if (observation.stalled) {
                                 GameScreenStalledException stalled = new GameScreenStalledException(
                                         observation.similarity, observation.stableForMs);
+                                watchdogFailure.compareAndSet(null, stalled);
                                 if (runControl.fail(stalled)) {
                                     Log.w("RYLUX-Lua", stalled.getMessage());
                                     publish("检测到沙箱游戏画面连续 2 分钟无变化，正在自动恢复登录");
+                                } else if (watchdogFailure.get() == stalled) {
+                                    Log.w("RYLUX-Lua", stalled.getMessage());
+                                    publish("挂机脚本本轮已退出，但沙箱仍卡在同一画面；正在启动自动恢复");
                                 }
                                 return;
                             }
@@ -492,7 +504,19 @@ public final class ScriptRuntimeService extends Service {
             waitForFirstUseTermsIfNeeded();
             LegacyLuaRuntime runtime = new LegacyLuaRuntime(this, runControl, config,
                     this::publish, this::saveFailure, routeBridge, runtimeLog, bagSnapshotRelay);
-            runtime.run();
+            try {
+                runtime.run();
+                Throwable workerFailure = runControl.getFailure();
+                if (workerFailure != null) throw workerFailure;
+            } catch (Throwable scriptFailure) {
+                if (sandboxTarget && autoLogin && gameObserved.get()
+                        && !runControl.isStopRequested()) {
+                    awaitSandboxWatchdogAfterLuaFailure(runControl, watchdogFailure, watcher);
+                }
+                if (scriptFailure instanceof Exception) throw (Exception) scriptFailure;
+                if (scriptFailure instanceof Error) throw (Error) scriptFailure;
+                throw new IllegalStateException("Lua 脚本异常退出", scriptFailure);
+            }
             return gameObserved.get();
         } finally {
             watching.set(false);
@@ -500,6 +524,42 @@ public final class ScriptRuntimeService extends Service {
             try { watcher.join(1_500L); }
             catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
         }
+    }
+
+    /** Keep the sandbox freeze monitor alive after a Lua error while auto-login remains enabled. */
+    private void awaitSandboxWatchdogAfterLuaFailure(ScriptExecutionControl runControl,
+                                                     AtomicReference<Throwable> watchdogFailure,
+                                                     Thread watcher) throws Exception {
+        long workerDrainDeadline = android.os.SystemClock.elapsedRealtime() + 10_000L;
+        while (runControl.hasActiveWorkers() && !runControl.isStopRequested()
+                && android.os.SystemClock.elapsedRealtime() < workerDrainDeadline) {
+            Thread.sleep(100L);
+        }
+        if (runControl.isStopRequested()) throw new ScriptExecutionControl.StopRequestedException();
+        if (runControl.hasActiveWorkers()) {
+            throw new IllegalStateException("Lua 工作线程未退出，无法安全等待沙箱卡屏恢复");
+        }
+
+        Throwable detected = watchdogFailure.get();
+        if (detected != null) throwWatchdogFailure(detected);
+        if (runControl.getState() == ScriptExecutionControl.State.FAILED) runControl.start();
+        publish("挂机脚本本轮异常退出；自动登录仍开启，继续监控沙箱画面，卡住 2 分钟后自动重启");
+
+        while (!runControl.isStopRequested()) {
+            detected = watchdogFailure.get();
+            if (detected != null) throwWatchdogFailure(detected);
+            if (!watcher.isAlive()) {
+                throw new IllegalStateException("沙箱画面监控线程意外退出，无法继续自动恢复");
+            }
+            runControl.sleep(250L);
+        }
+        throw new ScriptExecutionControl.StopRequestedException();
+    }
+
+    private static void throwWatchdogFailure(Throwable failure) throws Exception {
+        if (failure instanceof Exception) throw (Exception) failure;
+        if (failure instanceof Error) throw (Error) failure;
+        throw new IllegalStateException("沙箱自动恢复监控失败", failure);
     }
 
     private static final class GameProcessExitedException extends Exception {
