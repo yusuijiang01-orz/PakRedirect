@@ -2304,7 +2304,7 @@ _ENV["登录_汉化选区确认"] = L0_1
 local 登录素材 = {
   ["进入游戏"] = {"素材库/服务器进入游戏按钮.png", 470, 310, 810, 410, 300, 72, 0.78},
   ["登录"] = {"素材库/汉化登录按钮.png", 480, 455, 820, 585, 306, 75, 0.65},
-  ["确认"] = {"素材库/汉化角色确认按钮.png", 850, 405, 1150, 520, 203, 57, 0.68},
+  ["确认"] = {"素材库/汉化角色确认按钮.png", 850, 405, 1150, 520, 203, 57, 0.52},
   ["返回"] = {"素材库/汉化登录返回按钮.png", 530, 420, 750, 520, 128, 46, 0.62}
 }
 local 登录素材查找缓存 = {}
@@ -2387,7 +2387,8 @@ function L0_1(page, now)
     _ENV["登录_页面动作记录"] = actions
   end
   local previous = tonumber(actions[page])
-  return previous == nil or now - previous >= 1800
+  local interval = page == "角色确认" and 450 or 1800
+  return previous == nil or now - previous >= interval
 end
 _ENV["登录_允许页面动作"] = L0_1
 
@@ -2471,8 +2472,9 @@ function L0_1()
       or confirmY < 430 or confirmY > 500 then return false end
   local now = tickCount()
   if not _ENV["登录_允许页面动作"]("角色确认", now) then return true end
-  _ENV["登录_快速点击"]("@@汉化角色确认", confirmX, confirmY)
-  _ENV["登录_记录页面动作"]("角色确认", now)
+  if _ENV["登录_快速点击"]("@@汉化角色确认", confirmX, confirmY) then
+    _ENV["登录_记录页面动作"]("角色确认", now)
+  end
   return true
 end
 _ENV["登录_汉化角色确认"] = L0_1
