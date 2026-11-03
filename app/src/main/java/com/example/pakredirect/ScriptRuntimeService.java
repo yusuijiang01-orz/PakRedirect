@@ -252,6 +252,8 @@ public final class ScriptRuntimeService extends Service {
                 publish("正在检查 Lua 脚本版本…");
                 ScriptLuaUpdateManager.UpdateResult scriptUpdate =
                         ScriptLuaUpdateManager.checkAndApply(ScriptRuntimeService.this);
+                Log.i("RYLUX-Lua", "script update result: version=" + scriptUpdate.version
+                        + " changed=" + scriptUpdate.changed + " message=" + scriptUpdate.message);
                 publish(scriptUpdate.message);
                 if (runControl.isStopRequested()) return;
                 runWithCrashRecovery(config, runControl);
@@ -802,33 +804,43 @@ public final class ScriptRuntimeService extends Service {
 
     private ScriptStartupTerms.Tap findStartupAgreeButton(Bitmap frame, Bitmap sourceTemplate) {
         if (frame == null || frame.isRecycled()) return null;
-        int[] region = ScriptStartupTerms.agreeSearchRegion(frame.getWidth(), frame.getHeight());
+        int[] requestedRegion = ScriptStartupTerms.agreeSearchRegion(frame.getWidth(), frame.getHeight());
+        int left = Math.max(0, Math.min(frame.getWidth(), requestedRegion[0]));
+        int top = Math.max(0, Math.min(frame.getHeight(), requestedRegion[1]));
+        int right = Math.max(left, Math.min(frame.getWidth(), requestedRegion[2]));
+        int bottom = Math.max(top, Math.min(frame.getHeight(), requestedRegion[3]));
+        if (right <= left || bottom <= top) return null;
         Log.i("RYLUX-Lua", "startup terms image scan display=" + frame.getWidth() + "x"
-                + frame.getHeight() + " region=" + region[0] + "," + region[1] + "-"
-                + region[2] + "," + region[3]);
-        LegacyImageMatcher.Pixels screenPixels = bitmapPixels(frame);
+                + frame.getHeight() + " region=" + left + "," + top + "-"
+                + right + "," + bottom);
+        Bitmap searchArea = Bitmap.createBitmap(frame, left, top, right - left, bottom - top);
         ScriptStartupTerms.Tap bestTap = null;
         double bestScore = 0.74d;
-        for (double scale : ScriptStartupTerms.agreeTemplateScales(frame.getWidth(), frame.getHeight())) {
-            control.checkpoint();
-            int templateWidth = Math.max(1, (int) Math.round(sourceTemplate.getWidth() * scale));
-            int templateHeight = Math.max(1, (int) Math.round(sourceTemplate.getHeight() * scale));
-            Bitmap template = sourceTemplate;
-            if (templateWidth != sourceTemplate.getWidth() || templateHeight != sourceTemplate.getHeight()) {
-                template = Bitmap.createScaledBitmap(sourceTemplate, templateWidth, templateHeight, true);
-            }
-            try {
-                LegacyImageMatcher.Match match = LegacyImageMatcher.find(screenPixels, bitmapPixels(template),
-                        region[0], region[1], region[2], region[3], 0x00101010, 0.74d,
-                        control::checkpoint);
-                if (match != null && match.score > bestScore) {
-                    bestScore = match.score;
-                    bestTap = ScriptStartupTerms.templateCenter(match.x, match.y,
-                            template.getWidth(), template.getHeight());
+        try {
+            LegacyImageMatcher.Pixels screenPixels = bitmapPixels(searchArea);
+            for (double scale : ScriptStartupTerms.agreeTemplateScales(frame.getWidth(), frame.getHeight())) {
+                control.checkpoint();
+                int templateWidth = Math.max(1, (int) Math.round(sourceTemplate.getWidth() * scale));
+                int templateHeight = Math.max(1, (int) Math.round(sourceTemplate.getHeight() * scale));
+                Bitmap template = sourceTemplate;
+                if (templateWidth != sourceTemplate.getWidth() || templateHeight != sourceTemplate.getHeight()) {
+                    template = Bitmap.createScaledBitmap(sourceTemplate, templateWidth, templateHeight, true);
                 }
-            } finally {
-                if (template != sourceTemplate && !template.isRecycled()) template.recycle();
+                try {
+                    LegacyImageMatcher.Match match = LegacyImageMatcher.find(screenPixels, bitmapPixels(template),
+                            0, 0, searchArea.getWidth(), searchArea.getHeight(),
+                            0x00101010, 0.74d, control::checkpoint);
+                    if (match != null && match.score > bestScore) {
+                        bestScore = match.score;
+                        bestTap = ScriptStartupTerms.templateCenter(left + match.x, top + match.y,
+                                template.getWidth(), template.getHeight());
+                    }
+                } finally {
+                    if (template != sourceTemplate && !template.isRecycled()) template.recycle();
+                }
             }
+        } finally {
+            if (!searchArea.isRecycled()) searchArea.recycle();
         }
         if (bestTap != null) {
             Log.i("RYLUX-Lua", "startup terms image hit center=" + bestTap.x + "," + bestTap.y
@@ -838,10 +850,14 @@ public final class ScriptRuntimeService extends Service {
     }
 
     private static LegacyImageMatcher.Pixels bitmapPixels(Bitmap bitmap) {
+        int width = bitmap.getWidth();
+        int height = bitmap.getHeight();
+        int[] colors = new int[width * height];
+        bitmap.getPixels(colors, 0, width, 0, 0, width, height);
         return new LegacyImageMatcher.Pixels() {
-            @Override public int width() { return bitmap.getWidth(); }
-            @Override public int height() { return bitmap.getHeight(); }
-            @Override public int getPixel(int x, int y) { return bitmap.getPixel(x, y); }
+            @Override public int width() { return width; }
+            @Override public int height() { return height; }
+            @Override public int getPixel(int x, int y) { return colors[y * width + x]; }
         };
     }
 

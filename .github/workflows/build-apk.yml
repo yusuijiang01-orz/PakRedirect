@@ -6,11 +6,11 @@ on:
       version_name:
         description: 'Version name for this test build'
         required: true
-        default: '2.5.5-test'
+        default: '2.5.6-test'
       version_code:
         description: 'Monotonically increasing Android versionCode'
         required: true
-        default: '129'
+        default: '130'
       publish_release:
         description: 'Publish GitHub and Gitee releases after building (leave off for a test build)'
         required: true
@@ -38,8 +38,8 @@ jobs:
       contents: write
 
     env:
-      RYLUX_VERSION_NAME: ${{ inputs.version_name || '2.5.5-test' }}
-      RYLUX_VERSION_CODE: ${{ inputs.version_code || '129' }}
+      RYLUX_VERSION_NAME: ${{ inputs.version_name || '2.5.6-test' }}
+      RYLUX_VERSION_CODE: ${{ inputs.version_code || '130' }}
       RYLUX_KEYSTORE_B64: ${{ secrets.RYLUX_KEYSTORE_B64 }}
       RYLUX_KEYSTORE_PASSWORD: ${{ secrets.RYLUX_KEYSTORE_PASSWORD }}
       RYLUX_KEY_ALIAS: ${{ secrets.RYLUX_KEY_ALIAS }}
