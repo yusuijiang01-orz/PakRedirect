@@ -2302,7 +2302,7 @@ _ENV["登录_汉化选区确认"] = L0_1
 -- Localized login controls captured from the Chinese client. These image
 -- templates live in script_modules/脚本/素材库 and are searched in small ROIs.
 local 登录素材 = {
-  ["进入游戏"] = {"素材库/服务器进入游戏按钮.png", 470, 240, 810, 350, 300, 72, 0.55},
+  ["进入游戏"] = {"素材库/服务器进入游戏按钮.png", 470, 310, 810, 410, 300, 72, 0.78},
   ["登录"] = {"素材库/汉化登录按钮.png", 480, 455, 820, 585, 306, 75, 0.65},
   ["确认"] = {"素材库/汉化角色确认按钮.png", 850, 405, 1150, 520, 203, 57, 0.68},
   ["返回"] = {"素材库/汉化登录返回按钮.png", 530, 420, 750, 520, 128, 46, 0.62}
@@ -2362,7 +2362,7 @@ function L0_1()
     return false
   end
   local x, y = _ENV["登录_找素材按钮"]("进入游戏")
-  if x == nil or y == nil or x < 580 or x > 700 or y < 270 or y > 325 then return false end
+  if x == nil or y == nil or x < 580 or x > 700 or y < 335 or y > 385 then return false end
   local now = tickCount()
   if not _ENV["登录_允许页面动作"]("服务器进入游戏", now) then return true end
   _ENV["登录_快速点击"]("@@进入已选服务器", x, y)
