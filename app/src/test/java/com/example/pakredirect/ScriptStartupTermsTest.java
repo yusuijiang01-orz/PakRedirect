@@ -48,9 +48,11 @@ public final class ScriptStartupTermsTest {
 
     @Test public void agreeTemplateScaleCandidatesCoverMeasuredScreenScales() {
         double[] scales = ScriptStartupTerms.agreeTemplateScales(1280, 589);
-        assertEquals(7, scales.length);
+        assertEquals(6, scales.length);
         assertEquals(0.646d, scales[2], 0.002d);
         assertEquals(1.05d, ScriptStartupTerms.agreeTemplateScales(1600, 900)[3], 0.0001d);
+        assertTrue(scales[0] < 0.40d);
+        assertTrue(scales[5] > scales[2]);
         assertEquals(0, ScriptStartupTerms.agreeTemplateScales(0, 900).length);
     }
 

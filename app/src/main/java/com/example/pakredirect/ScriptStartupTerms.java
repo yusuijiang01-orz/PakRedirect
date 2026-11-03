@@ -5,7 +5,7 @@ import java.util.List;
 /** Coordinates and anchors for the game's known first-use terms page. */
 final class ScriptStartupTerms {
     private static final double[] AGREE_TEMPLATE_SCALE_FACTORS =
-            {0.82d, 0.88d, 0.94d, 1.00d, 1.06d, 1.12d, 1.18d};
+            {0.55d, 0.82d, 0.94d, 1.00d, 1.18d, 1.35d};
     private static final float TITLE_LEFT = 0.35f;
     private static final float TITLE_RIGHT = 0.65f;
     private static final float TITLE_TOP = 0.08f;

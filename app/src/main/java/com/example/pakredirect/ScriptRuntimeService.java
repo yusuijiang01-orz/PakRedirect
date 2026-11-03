@@ -520,7 +520,9 @@ public final class ScriptRuntimeService extends Service {
         }
         if (template == null) throw new IllegalStateException("使用条款按钮模板无法读取，脚本已停止");
         try {
-            for (int attempt = 1; attempt <= 3; attempt++) {
+            int clickAttempts = 0;
+            int noMatchFrames = 0;
+            while (clickAttempts < 3) {
                 control.checkpoint();
                 Bitmap frame = captureStartupFrame(30_000L, 5_000L);
                 ScriptStartupTerms.Tap tap;
@@ -530,13 +532,30 @@ public final class ScriptRuntimeService extends Service {
                     if (!frame.isRecycled()) frame.recycle();
                 }
                 if (tap == null) {
-                    publish(attempt == 1 ? "未检测到使用条款确认按钮，继续自动登录流程"
-                            : "使用条款页已关闭，继续自动登录流程");
-                    return;
+                    if (clickAttempts > 0) {
+                        Log.i("RYLUX-Lua", "startup terms page closed after consent tap");
+                        publish("使用条款页已关闭，继续自动登录流程");
+                        return;
+                    }
+                    noMatchFrames++;
+                    if (noMatchFrames == 1) publish("正在用图片识别检查使用条款确认按钮");
+                    if (noMatchFrames >= 12) {
+                        Log.w("RYLUX-Lua", "startup terms template not found after " + noMatchFrames
+                                + " scans; continuing startup; see screen-size/region diagnostics above");
+                        publish("多次图片识别未发现使用条款按钮，继续自动登录流程");
+                        return;
+                    }
+                    control.sleep(500L);
+                    continue;
                 }
-                publish("检测到使用条款页，正在点击“同意”（" + attempt + "/3）");
+                noMatchFrames = 0;
+                clickAttempts++;
+                Log.i("RYLUX-Lua", "startup terms consent detected; tap=" + tap.x + "," + tap.y
+                        + " attempt=" + clickAttempts + "/3");
+                publish("检测到使用条款页，正在点击“同意”（" + clickAttempts + "/3）");
                 boolean clicked = ScriptGameAdapter.requireConnected(control)
                         .tap(tap.x, tap.y, 100L, 5_000L);
+                Log.i("RYLUX-Lua", "startup terms consent tap accepted=" + clicked);
                 if (!clicked) throw new IllegalStateException("使用条款页已识别，但点击“同意”未成功");
                 control.sleep(1_000L);
             }
@@ -557,6 +576,9 @@ public final class ScriptRuntimeService extends Service {
     private ScriptStartupTerms.Tap findStartupAgreeButton(Bitmap frame, Bitmap sourceTemplate) {
         if (frame == null || frame.isRecycled()) return null;
         int[] region = ScriptStartupTerms.agreeSearchRegion(frame.getWidth(), frame.getHeight());
+        Log.i("RYLUX-Lua", "startup terms image scan display=" + frame.getWidth() + "x"
+                + frame.getHeight() + " region=" + region[0] + "," + region[1] + "-"
+                + region[2] + "," + region[3]);
         LegacyImageMatcher.Pixels screenPixels = bitmapPixels(frame);
         ScriptStartupTerms.Tap bestTap = null;
         double bestScore = 0.74d;
@@ -580,6 +602,10 @@ public final class ScriptRuntimeService extends Service {
             } finally {
                 if (template != sourceTemplate && !template.isRecycled()) template.recycle();
             }
+        }
+        if (bestTap != null) {
+            Log.i("RYLUX-Lua", "startup terms image hit center=" + bestTap.x + "," + bestTap.y
+                    + " score=" + bestScore);
         }
         return bestTap;
     }
