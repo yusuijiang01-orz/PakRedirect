@@ -249,6 +249,11 @@ public final class ScriptRuntimeService extends Service {
         publish(lastMessage);
         executor.execute(() -> {
             try {
+                publish("正在检查 Lua 脚本版本…");
+                ScriptLuaUpdateManager.UpdateResult scriptUpdate =
+                        ScriptLuaUpdateManager.checkAndApply(ScriptRuntimeService.this);
+                publish(scriptUpdate.message);
+                if (runControl.isStopRequested()) return;
                 runWithCrashRecovery(config, runControl);
             } finally {
                 finishWorker(runControl);

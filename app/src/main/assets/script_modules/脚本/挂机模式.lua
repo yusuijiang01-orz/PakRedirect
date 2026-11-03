@@ -2288,7 +2288,13 @@ function L0_1()
       "素材库/汉化服务器确认按钮.png", "101010", 0, 0.68)
   if tonumber(matched) == nil or tonumber(matched) <= 0
       or tonumber(x) == nil or tonumber(y) == nil then return false end
+  local now = tickCount()
+  if _ENV["登录_允许页面动作"] ~= nil
+      and not _ENV["登录_允许页面动作"]("服务器选择确认", now) then return true end
   _ENV["登录_快速点击"]("@@汉化服务器集群确认", math.floor(tonumber(x)), math.floor(tonumber(y)))
+  if _ENV["登录_记录页面动作"] ~= nil then
+    _ENV["登录_记录页面动作"]("服务器选择确认", now)
+  end
   return true
 end
 _ENV["登录_汉化选区确认"] = L0_1
@@ -2307,6 +2313,7 @@ _ENV["登录_动作开始时间"] = nil
 _ENV["登录_失败次数"] = 0
 _ENV["登录_最大失败次数"] = 3
 _ENV["登录_自动重试终止"] = false
+_ENV["登录_页面动作记录"] = {}
 
 function L0_1(key)
   local item = 登录素材[key]
@@ -2330,6 +2337,21 @@ function L0_1(key)
 end
 _ENV["登录_找素材按钮"] = L0_1
 
+-- Terms are a common first-run gate. Use its small saved image template rather
+-- than waiting for OCR to find the word 同意 in a full-screen capture.
+function L0_1()
+  local ok, matched, x, y = pcall(function()
+    return findPicAdaptive(380, 550, 580, 650,
+        "素材库/汉化条款同意按钮.png", "101010", 0, 0.68)
+  end)
+  if not ok or (matched ~= true and (tonumber(matched) == nil or tonumber(matched) <= 0))
+      or tonumber(x) == nil or tonumber(y) == nil or tonumber(x) < 0 or tonumber(y) < 0 then
+    return nil, nil
+  end
+  return math.floor(tonumber(x)), math.floor(tonumber(y))
+end
+_ENV["登录_找条款同意按钮"] = L0_1
+
 -- Match the selected-server entry button by its captured image. OCRing this
 -- tiny title crop on every login-loop pass can wedge ML Kit on emulator builds.
 function L0_1()
@@ -2340,21 +2362,46 @@ function L0_1()
   end
   local x, y = _ENV["登录_找素材按钮"]("进入游戏")
   if x == nil or y == nil then return false end
+  local now = tickCount()
+  if not _ENV["登录_允许页面动作"]("服务器进入游戏", now) then return true end
   _ENV["登录_快速点击"]("@@进入已选服务器", x, y)
-  _ENV["登录_动作阶段"] = "进入游戏中"
-  _ENV["登录_动作开始时间"] = tickCount()
-  _ENV["当前任务2"] = "进入已选服务器"
+  _ENV["登录_记录页面动作"]("服务器进入游戏", now)
   return true
 end
 _ENV["登录_汉化服务器进入"] = L0_1
 
 function L0_1(name, x, y)
-  -- w.tap adds +/-50 ms jitter; passing [550,1450] keeps the final delay
-  -- inside the requested 500..1500 ms human-like range.
+  -- Login screens need prompt feedback. The tap helper enforces a 300 ms
+  -- minimum between taps; a short delay here lets the next loop reclassify the
+  -- actual screen instead of sleeping for the old 0.5-1.5 second range.
   登录素材查找缓存 = {}
-  return _ENV["点击"](name, x, y, math.random(550, 1450))
+  return _ENV["点击"](name, x, y, 100)
 end
 _ENV["登录_快速点击"] = L0_1
+
+function L0_1(page, now)
+  local actions = _ENV["登录_页面动作记录"]
+  if type(actions) ~= "table" then
+    actions = {}
+    _ENV["登录_页面动作记录"] = actions
+  end
+  local previous = tonumber(actions[page])
+  return previous == nil or now - previous >= 1800
+end
+_ENV["登录_允许页面动作"] = L0_1
+
+function L0_1(page, now)
+  local actions = _ENV["登录_页面动作记录"]
+  if type(actions) ~= "table" then
+    actions = {}
+    _ENV["登录_页面动作记录"] = actions
+  end
+  actions[page] = now or tickCount()
+  _ENV["登录_动作阶段"] = page
+  _ENV["登录_动作开始时间"] = actions[page]
+  _ENV["当前任务2"] = "登录流程 · " .. page
+end
+_ENV["登录_记录页面动作"] = L0_1
 
 function L0_1()
   登录素材查找缓存 = {}
@@ -2362,14 +2409,12 @@ function L0_1()
   _ENV["登录_失败次数"] = failures
   _ENV["登录_动作阶段"] = nil
   _ENV["登录_动作开始时间"] = nil
-  if failures >= (tonumber(_ENV["登录_最大失败次数"]) or 3) then
-    _ENV["登录_自动重试终止"] = true
-    _ENV["当前任务2"] = "登录失败，连续重试已达上限，请检查服务器/账号后重新开始"
-    toast("登录失败，已停止连续重试；请检查服务器或账号")
-  else
-    _ENV["登录_重试允许时间"] = tickCount() + math.random(500, 1000)
-    toast("登录未完成，正在快速重试（" .. failures .. "/" .. _ENV["登录_最大失败次数"] .. "）")
-  end
+  -- Never permanently disable login recovery after a fixed number of misses.
+  -- Use a short capped backoff; every next pass still observes the live screen.
+  local backoff = math.min(500 * (2 ^ math.min(failures - 1, 4)), 8000)
+  _ENV["登录_自动重试终止"] = false
+  _ENV["登录_重试允许时间"] = tickCount() + backoff
+  _ENV["当前任务2"] = "登录未完成，稍后重新识别当前页面（" .. failures .. "）"
 end
 _ENV["登录_记录失败"] = L0_1
 
@@ -2379,26 +2424,13 @@ _ENV["登录_记录失败"] = L0_1
 function L0_1()
   local uiConfig = _ENV["界面数据"]
   if type(uiConfig) == "table" and uiConfig["自动登录"] == "false" then return false end
-  if _ENV["登录_自动重试终止"] then return false end
+  _ENV["登录_自动重试终止"] = false
   local now = tickCount()
-  local retryAt = tonumber(_ENV["登录_重试允许时间"])
-  if retryAt ~= nil and now < retryAt then return true end
-  if retryAt ~= nil then _ENV["登录_重试允许时间"] = nil end
   local loginX, loginY = _ENV["登录_找素材按钮"]("登录")
   if loginX == nil or loginY == nil then return false end
-  local stage = _ENV["登录_动作阶段"]
-  if stage == "登录中" then
-    if now - (tonumber(_ENV["登录_动作开始时间"]) or now) < 8000 then return true end
-    _ENV["登录_记录失败"]()
-    return true
-  elseif stage == "等待主画面" then
-    if now - (tonumber(_ENV["登录_动作开始时间"]) or now) < 8000 then return true end
-    _ENV["登录_记录失败"]()
-    return true
-  end
+  if not _ENV["登录_允许页面动作"]("账号登录", now) then return true end
   _ENV["登录_快速点击"]("@@汉化账号密码登录", loginX, loginY)
-  _ENV["登录_动作阶段"] = "登录中"
-  _ENV["登录_动作开始时间"] = now
+  _ENV["登录_记录页面动作"]("账号登录", now)
   return true
 end
 _ENV["登录_汉化账号确认"] = L0_1
@@ -2406,13 +2438,13 @@ _ENV["登录_汉化账号确认"] = L0_1
 -- Use the saved lower-right confirmation image directly so we don't spend
 -- several seconds waiting for OCR on the character-selection page.
 function L0_1()
-  if _ENV["登录_自动重试终止"] then return false end
-  if _ENV["登录_动作阶段"] == "等待主画面" then return true end
+  _ENV["登录_自动重试终止"] = false
   local confirmX, confirmY = _ENV["登录_找素材按钮"]("确认")
   if confirmX == nil or confirmY == nil then return false end
+  local now = tickCount()
+  if not _ENV["登录_允许页面动作"]("角色确认", now) then return true end
   _ENV["登录_快速点击"]("@@汉化角色确认", confirmX, confirmY)
-  _ENV["登录_动作阶段"] = "等待主画面"
-  _ENV["登录_动作开始时间"] = tickCount()
+  _ENV["登录_记录页面动作"]("角色确认", now)
   return true
 end
 _ENV["登录_汉化角色确认"] = L0_1
@@ -2426,7 +2458,7 @@ _ENV["登录_弹窗最后看到"] = nil
 _ENV["登录_弹窗下次检测"] = 0
 _ENV["登录_重试允许时间"] = nil
 function L0_1()
-  if _ENV["登录_自动重试终止"] then return true end
+  _ENV["登录_自动重试终止"] = false
   local now = tickCount()
   local retryAt = tonumber(_ENV["登录_重试允许时间"])
   if retryAt ~= nil and now < retryAt then
@@ -2457,9 +2489,8 @@ function L0_1()
   if _ENV["登录_弹窗开始时间"] == nil then
     _ENV["登录_弹窗开始时间"] = now
   end
-  -- Scan every 500 ms and close a stuck login modal at the next scan after
-  -- 9.5 seconds, within roughly ten seconds of first seeing its button.
-  if now - tonumber(_ENV["登录_弹窗开始时间"]) < 9500 then
+  -- Ignore a brief transition flicker, then dismiss the visible dialog promptly.
+  if now - tonumber(_ENV["登录_弹窗开始时间"]) < 700 then
     return true
   end
   _ENV["登录_快速点击"]("@@登录超时关闭提示", returnX, returnY)
@@ -2472,59 +2503,68 @@ end
 _ENV["登录_处理超时"] = L0_1
 
 function L0_1()
-  if _ENV["登录_自动重试终止"] then return true end
+  _ENV["登录_自动重试终止"] = false
+  local uiConfig = _ENV["界面数据"]
+  if type(uiConfig) == "table" and uiConfig["自动登录"] == "false" then return false end
   if _ENV["登录_处理超时"]() then return true end
-  if _ENV["登录_动作阶段"] == "等待主画面" then
-    local ok, inWorld = pcall(function() return _ENV["在主页面"]() end)
-    if ok and inWorld then
-      _ENV["登录_动作阶段"] = nil
-      _ENV["登录_动作开始时间"] = nil
-      _ENV["登录_失败次数"] = 0
-      return false
-    end
+  local now = tickCount()
+  local retryAt = tonumber(_ENV["登录_重试允许时间"])
+  if retryAt ~= nil and now < retryAt then return true end
+  if retryAt ~= nil then _ENV["登录_重试允许时间"] = nil end
+
+  -- Treat the visible page as the source of truth. This makes manual taps,
+  -- app relaunches, and server timeouts that return to account login recover
+  -- without waiting for or trusting an obsolete linear stage.
+  local termsX, termsY = _ENV["登录_找条款同意按钮"]()
+  if termsX ~= nil and _ENV["登录_允许页面动作"]("使用条款", now) then
+    _ENV["登录_快速点击"]("@@同意使用条款", termsX, termsY)
+    _ENV["登录_记录页面动作"]("使用条款", now)
+    return true
   end
-  if _ENV["登录_动作阶段"] ~= nil then
-    local stageAge = tickCount() - (tonumber(_ENV["登录_动作开始时间"]) or tickCount())
-    if _ENV["登录_动作阶段"] == "进入游戏中" then
-      local loginX = _ENV["登录_找素材按钮"]("登录")
-      local confirmX = _ENV["登录_找素材按钮"]("确认")
-      if loginX ~= nil or confirmX ~= nil then
-        _ENV["登录_动作阶段"] = nil
-        _ENV["登录_动作开始时间"] = nil
-      elseif _ENV["登录_汉化选区确认"]() then
-        _ENV["登录_动作阶段"] = nil
-        _ENV["登录_动作开始时间"] = nil
-        return true
-      elseif stageAge < 20000 then
-        return true
-      else
-        _ENV["登录_记录失败"]()
-        return true
-      end
-    elseif stageAge < 8000 then
-      return true
-    end
-    if _ENV["登录_动作阶段"] == "登录中" or _ENV["登录_动作阶段"] == "等待主画面" then
-      _ENV["登录_记录失败"]()
-      return true
-    end
+  if _ENV["登录_汉化选区确认"]() then
+    return true
   end
-  -- Chinese-client button templates run before the older Vietnamese OCR/image
-  -- fallback; this keeps startup actions on the foreground hot path.
+  if _ENV["登录_汉化服务器进入"]() then
+    return true
+  end
   if _ENV["登录_汉化账号确认"]() then return true end
   if _ENV["登录_汉化角色确认"]() then return true end
-  if _ENV["登录_汉化服务器进入"]() then return true end
-  _ENV["找到点击"]("@@选区失败页面_关闭按钮", tz["选区失败页面_关闭按钮"])
+
+  -- Clear transient action state as soon as the in-world HUD is confirmed.
+  local ok, inWorld = pcall(function() return _ENV["在主页面"]() end)
+  if ok and inWorld then
+    _ENV["登录_动作阶段"] = nil
+    _ENV["登录_动作开始时间"] = nil
+    _ENV["登录_失败次数"] = 0
+    _ENV["登录_页面动作记录"] = {}
+    return false
+  end
+
+  -- Older server/account screens remain supported, but execute one grounded
+  -- action per pass so the next pass can inspect the resulting page.
+  if _ENV["找到点击"]("@@选区失败页面_关闭按钮", tz["选区失败页面_关闭按钮"]) then
+    return true
+  end
   if _ENV["找到"](tz["选区页面"]) then
-    _ENV["点击"]("@@选区确定", 749, 664, 1000)
-  else
-    _ENV["登录_汉化选区确认"]()
+    if _ENV["登录_允许页面动作"]("旧版服务器选择", now) then
+      _ENV["登录_快速点击"]("@@选区确定", 749, 664)
+      _ENV["登录_记录页面动作"]("旧版服务器选择", now)
+    end
+    return true
   end
   if _ENV["找到"](tz["账号密码页面"]) then
-    _ENV["点击"]("@@确定账号密码", 660, 525, 1000)
+    if _ENV["登录_允许页面动作"]("旧版账号登录", now) then
+      _ENV["登录_快速点击"]("@@确定账号密码", 660, 525)
+      _ENV["登录_记录页面动作"]("旧版账号登录", now)
+    end
+    return true
   end
   if _ENV["找到"](tz["选角色页面"]) then
-    _ENV["点击"]("@@确定角色", 1090, 551, 1000)
+    if _ENV["登录_允许页面动作"]("旧版角色确认", now) then
+      _ENV["登录_快速点击"]("@@确定角色", 1090, 551)
+      _ENV["登录_记录页面动作"]("旧版角色确认", now)
+    end
+    return true
   end
   return false
 end

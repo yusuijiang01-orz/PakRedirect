@@ -1295,18 +1295,26 @@ final class LegacyLuaRuntime {
 
     private LuaValue loadModule(String assetPath, boolean main) {
         control.checkpoint();
-        try (InputStream stream = context.getAssets().open(ASSET_ROOT + assetPath);
-             InputStreamReader reader = new InputStreamReader(stream, StandardCharsets.UTF_8)) {
-            listener.onStatus("正在加载 " + (main ? "主脚本" : "依赖模块") + "：" + assetPath);
-            StringBuilder source = new StringBuilder();
-            char[] buffer = new char[8192];
-            int read;
-            while ((read = reader.read(buffer)) != -1) source.append(buffer, 0, read);
-            String compatibleSource = LuaSourceCompat.normalizeUnicodeIdentifiers(source.toString());
-            LuaFunction chunk = globals.load(compatibleSource, assetPath, globals).checkfunction();
-            LuaValue value = instructionGate.invoke(chunk, LuaValue.NONE);
-            listener.onStatus("已加载 " + assetPath);
-            return value.isnil() ? LuaValue.TRUE : value;
+        File remoteOverride = ScriptLuaUpdateManager.verifiedOverride(context, assetPath);
+        try {
+            InputStream moduleInput = remoteOverride == null
+                    ? context.getAssets().open(ASSET_ROOT + assetPath)
+                    : new java.io.FileInputStream(remoteOverride);
+            try (InputStream stream = moduleInput;
+                 InputStreamReader reader = new InputStreamReader(stream, StandardCharsets.UTF_8)) {
+                listener.onStatus("正在加载 " + (main ? "主脚本" : "依赖模块") + "：" + assetPath
+                        + (remoteOverride == null ? "（APK 内置）" : "（远程 Lua "
+                        + ScriptLuaUpdateManager.activeVersion(context) + "）"));
+                StringBuilder source = new StringBuilder();
+                char[] buffer = new char[8192];
+                int read;
+                while ((read = reader.read(buffer)) != -1) source.append(buffer, 0, read);
+                String compatibleSource = LuaSourceCompat.normalizeUnicodeIdentifiers(source.toString());
+                LuaFunction chunk = globals.load(compatibleSource, assetPath, globals).checkfunction();
+                LuaValue value = instructionGate.invoke(chunk, LuaValue.NONE);
+                listener.onStatus("已加载 " + assetPath);
+                return value.isnil() ? LuaValue.TRUE : value;
+            }
         } catch (ScriptExecutionControl.StopRequestedException stopped) { throw stopped; }
         catch (LuaError error) {
             // Keep LuaJ's original stack and source line. Rebuilding the error from

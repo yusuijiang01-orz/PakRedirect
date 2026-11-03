@@ -19,6 +19,7 @@ on:
   push:
     branches:
       - codex/sign-610-localized-candidate
+      - codex-sign-610-lua-runtime
     paths:
       - .github/workflows/build-apk.yml
       - app/build.gradle
