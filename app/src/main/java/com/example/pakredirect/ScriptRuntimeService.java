@@ -571,7 +571,7 @@ public final class ScriptRuntimeService extends Service {
                     mapper.left(320), mapper.top(504), mapper.right(640), mapper.bottom(684),
                     0x00101010, 0.86d, control::checkpoint);
             return match == null ? null : ScriptStartupTerms.templateCenter(
-                    match.x, match.y, template.width(), template.height());
+                    match.x, match.y, template.getWidth(), template.getHeight());
         } finally {
             if (template != sourceTemplate && !template.isRecycled()) template.recycle();
         }
