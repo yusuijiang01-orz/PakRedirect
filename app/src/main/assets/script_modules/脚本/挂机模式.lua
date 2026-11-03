@@ -2305,7 +2305,8 @@ local 登录素材 = {
   ["进入游戏"] = {"素材库/服务器进入游戏按钮.png", 470, 310, 810, 410, 300, 72, 0.78},
   ["登录"] = {"素材库/汉化登录按钮.png", 480, 455, 820, 585, 306, 75, 0.65},
   ["确认"] = {"素材库/汉化角色确认按钮.png", 850, 535, 1150, 600, 203, 57, 0.52},
-  ["返回"] = {"素材库/汉化登录返回按钮.png", 530, 420, 750, 520, 128, 46, 0.62}
+  ["返回"] = {"素材库/汉化登录返回按钮.png", 530, 420, 750, 520, 128, 46, 0.62},
+  ["角色返回"] = {"素材库/汉化登录返回按钮.png", 850, 610, 1150, 690, 128, 46, 0.52}
 }
 local 登录素材查找缓存 = {}
 _ENV["登录_动作阶段"] = nil
@@ -2492,8 +2493,19 @@ function L0_1()
   local recovery = _ENV["登录_角色确认恢复阶段"]
   if recovery == "返回服务器" then
     _ENV["当前任务2"] = "角色确认连续 10 次未识别，返回服务器选择页重试"
-    if _ENV["登录_快速点击"]("@@返回服务器选择并重试", 1000, 643) then
+    local serverX, serverY = _ENV["登录_找素材按钮"]("进入游戏")
+    if serverX ~= nil and serverY ~= nil and serverX >= 580 and serverX <= 700
+        and serverY >= 335 and serverY <= 385 then
       _ENV["登录_角色确认恢复阶段"] = "等待服务器"
+      return true
+    end
+    local backX, backY = _ENV["登录_找素材按钮"]("角色返回")
+    if backX ~= nil and backY ~= nil and backX >= 930 and backX <= 1070
+        and backY >= 610 and backY <= 680
+        and _ENV["登录_快速点击"]("@@角色页返回服务器选择", backX, backY) then
+      _ENV["登录_角色确认恢复阶段"] = "等待服务器"
+    else
+      _ENV["当前任务2"] = "等待识别角色页返回按钮；未识别前不点击其他位置"
     end
     return true
   elseif recovery == "等待服务器" then
