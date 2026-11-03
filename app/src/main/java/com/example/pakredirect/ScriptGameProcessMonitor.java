@@ -60,7 +60,19 @@ final class ScriptGameProcessMonitor {
     }
 
     private State inspectSandbox(Context context) {
-        return inspectSandboxProcess(context);
+        try {
+            if (!((RyluxApplication) context.getApplicationContext()).isBlackBoxReady()) {
+                return State.UNKNOWN;
+            }
+            top.niunaijun.blackbox.entity.am.RunningAppProcessInfo processes =
+                    BActivityManager.get().getRunningAppProcesses(GAME, 0);
+            if (processes == null || processes.mAppProcessInfoList == null) return State.UNKNOWN;
+            if (processes.mAppProcessInfoList.isEmpty()) return State.STOPPED;
+            observedProcessName = processes.mAppProcessInfoList.get(0).processName;
+            return State.RUNNING;
+        } catch (Exception unavailable) {
+            return State.UNKNOWN;
+        }
     }
 
     static State inspectSandboxProcess(Context context) {
@@ -72,7 +84,6 @@ final class ScriptGameProcessMonitor {
                     BActivityManager.get().getRunningAppProcesses(GAME, 0);
             if (processes == null || processes.mAppProcessInfoList == null) return State.UNKNOWN;
             if (processes.mAppProcessInfoList.isEmpty()) return State.STOPPED;
-            observedProcessName = processes.mAppProcessInfoList.get(0).processName;
             return State.RUNNING;
         } catch (Exception unavailable) {
             return State.UNKNOWN;
