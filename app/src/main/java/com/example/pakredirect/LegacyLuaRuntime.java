@@ -420,6 +420,9 @@ final class LegacyLuaRuntime {
         globals.set("findPic", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) { return findImage(args, false); }
         });
+        globals.set("findPicAdaptive", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return findImage(args, false, true); }
+        });
         globals.set("findPicFast", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) { return findImage(args, true); }
         });
@@ -757,11 +760,6 @@ final class LegacyLuaRuntime {
                     if (listener != null) listener.onStatus(retryMessage);
                     return "";
                 }
-                String ocrFailure = ScriptOcrFailurePolicy.failRuntimeIfCircuitOpen(control, error);
-                if (ocrFailure != null) {
-                    if (listener != null) listener.onStatus(ocrFailure);
-                    throw new LuaError(ocrFailure);
-                }
                 throw error;
             } finally {
                 if (filtered != crop) filtered.recycle();
@@ -883,11 +881,6 @@ final class LegacyLuaRuntime {
             if (retryMessage != null) {
                 if (listener != null) listener.onStatus(retryMessage);
                 return table;
-            }
-            String ocrFailure = ScriptOcrFailurePolicy.failRuntimeIfCircuitOpen(control, error);
-            if (ocrFailure != null) {
-                if (listener != null) listener.onStatus(ocrFailure);
-                throw new LuaError(errorLabel + "：" + ocrFailure);
             }
             throw new LuaError(errorLabel + "：" + error.getMessage());
         } finally { crop.recycle(); }
@@ -1048,6 +1041,11 @@ final class LegacyLuaRuntime {
 
     /** Legacy image-match API: (left, top, right, bottom, template, mask, method, threshold). */
     private Varargs findImage(Varargs args, boolean fast) {
+        return findImage(args, fast, false);
+    }
+
+    /** Adaptive UI-template API; returns the detected template center in reference coordinates. */
+    private Varargs findImage(Varargs args, boolean fast, boolean adaptive) {
         control.checkpoint();
         Bitmap screen = frame();
         LegacyCoordinateMapper mapper = mapperFor(screen);
@@ -1057,6 +1055,7 @@ final class LegacyLuaRuntime {
         if (sourceTemplate == null) throw new LuaError("找图模板不存在：" + templatePath);
         Bitmap template = sourceTemplate;
         try {
+            if (adaptive) return findAdaptiveImage(args, fast, screen, mapper, sourceTemplate);
             if (mapper.shouldScaleTemplate(capturedFromCurrentDisplay)) {
                 int scaledWidth = Math.max(1, mapper.toScreenDeltaX(sourceTemplate.getWidth()));
                 int scaledHeight = Math.max(1, mapper.toScreenDeltaY(sourceTemplate.getHeight()));
@@ -1087,6 +1086,46 @@ final class LegacyLuaRuntime {
             if (template != sourceTemplate && !template.isRecycled()) template.recycle();
             if (!sourceTemplate.isRecycled()) sourceTemplate.recycle();
         }
+    }
+
+    private Varargs findAdaptiveImage(Varargs args, boolean fast, Bitmap screen,
+                                      LegacyCoordinateMapper mapper, Bitmap sourceTemplate) {
+        int left = Math.max(0, mapper.left(args.arg(1).todouble()));
+        int top = Math.max(0, mapper.top(args.arg(2).todouble()));
+        int right = mapper.edgeRight(args.arg(3).todouble());
+        int bottom = mapper.edgeBottom(args.arg(4).todouble());
+        int mask = args.narg() >= 6 ? parseColor(args.arg(6).tojstring()) : -1;
+        double threshold = args.narg() >= 8 ? args.arg(8).optdouble(0.95) : 0.95;
+        LegacyImageMatcher.Pixels screenPixels = bitmapPixels(screen);
+        for (double scale : LegacyTemplateScalePlan.candidates(mapper.scaleX(), mapper.scaleY())) {
+            control.checkpoint();
+            int width = Math.max(1, (int) Math.round(sourceTemplate.getWidth() * scale));
+            int height = Math.max(1, (int) Math.round(sourceTemplate.getHeight() * scale));
+            if (right - left < width || bottom - top < height) continue;
+            Bitmap scaled = Bitmap.createScaledBitmap(sourceTemplate, width, height, true);
+            try {
+                LegacyImageMatcher.Match match = LegacyImageMatcher.find(screenPixels,
+                        bitmapPixels(scaled), left, top, right, bottom, mask, threshold,
+                        control::checkpoint);
+                if (match != null) {
+                    int centerX = mapper.toReferenceX(match.x + width / 2d);
+                    int centerY = mapper.toReferenceY(match.y + height / 2d);
+                    return LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(1),
+                            LuaValue.valueOf(centerX), LuaValue.valueOf(centerY)});
+                }
+            } finally {
+                if (scaled != sourceTemplate && !scaled.isRecycled()) scaled.recycle();
+            }
+        }
+        return imageNotFound(fast);
+    }
+
+    private static LegacyImageMatcher.Pixels bitmapPixels(Bitmap bitmap) {
+        return new LegacyImageMatcher.Pixels() {
+            @Override public int width() { return bitmap.getWidth(); }
+            @Override public int height() { return bitmap.getHeight(); }
+            @Override public int getPixel(int x, int y) { return bitmap.getPixel(x, y); }
+        };
     }
 
     private Bitmap loadTemplate(String path) {

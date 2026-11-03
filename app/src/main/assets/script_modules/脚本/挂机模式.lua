@@ -132,22 +132,32 @@ function L0_1()
 end
 _ENV["组队_关闭页面"] = L0_1
 
--- The localized activity window has the same close-button position as the
--- party window. Match its centered title image instead of OCR: this check runs
--- in the shared foreground loop, and a wedged OCR call would stop all gameplay.
+-- Detect the activity modal's actual X button and tap its matched center.
+-- The title-only check and fixed close point were unreliable across DPI and
+-- letterboxed game viewports.
 function L0_1()
   local ok, matched, x, y = pcall(function()
-    return findPic(270, 20, 430, 90,
-        "素材库/活动页面标题.png", "101010", 0, 0.78)
+    return findPicAdaptive(1060, 45, 1260, 180,
+        "素材库/活动页面关闭按钮.png", "101010", 0, 0.70)
   end)
-  return ok and (matched == true or tonumber(matched) ~= nil and tonumber(matched) > 0)
-      and tonumber(x) ~= nil and tonumber(y) ~= nil
+  if not ok or (matched ~= true and (tonumber(matched) == nil or tonumber(matched) <= 0))
+      or tonumber(x) == nil or tonumber(y) == nil then
+    return nil, nil
+  end
+  return math.floor(tonumber(x)), math.floor(tonumber(y))
+end
+_ENV["活动_找关闭按钮"] = L0_1
+
+function L0_1()
+  local x, y = _ENV["活动_找关闭按钮"]()
+  return x ~= nil and y ~= nil
 end
 _ENV["活动_页面已打开"] = L0_1
 
 function L0_1()
-  if not _ENV["活动_页面已打开"]() then return false end
-  _ENV["点击"]("@@关闭活动页面右侧X", 1203, 130, 1000)
+  local x, y = _ENV["活动_找关闭按钮"]()
+  if x == nil or y == nil then return false end
+  _ENV["点击"]("@@关闭活动页面右侧X", x, y, 1000)
   return true
 end
 _ENV["活动_关闭页面"] = L0_1
@@ -1909,11 +1919,11 @@ end
 _ENV["执行返回挂机点"] = L0_1
 
 function L0_1()
-  local matched, x, y = findPic(650, 600, 870, 720,
-      "素材库/汉化服务器确认按钮.png", "101010", 0, 0.84)
+  local matched, x, y = findPicAdaptive(620, 580, 900, 720,
+      "素材库/汉化服务器确认按钮.png", "101010", 0, 0.68)
   if tonumber(matched) == nil or tonumber(matched) <= 0
       or tonumber(x) == nil or tonumber(y) == nil then return false end
-  _ENV["登录_快速点击"]("@@汉化服务器集群确认", x + 102, y + 43)
+  _ENV["登录_快速点击"]("@@汉化服务器集群确认", math.floor(tonumber(x)), math.floor(tonumber(y)))
   return true
 end
 _ENV["登录_汉化选区确认"] = L0_1
@@ -1921,11 +1931,12 @@ _ENV["登录_汉化选区确认"] = L0_1
 -- Localized login controls captured from the Chinese client. These image
 -- templates live in script_modules/脚本/素材库 and are searched in small ROIs.
 local 登录素材 = {
-  ["进入游戏"] = {"素材库/服务器进入游戏按钮.png", 470, 310, 810, 410, 300, 72},
-  ["登录"] = {"素材库/汉化登录按钮.png", 480, 455, 820, 585, 306, 75},
-  ["确认"] = {"素材库/汉化角色确认按钮.png", 950, 510, 1210, 625, 203, 57},
-  ["返回"] = {"素材库/汉化登录返回按钮.png", 530, 420, 750, 520, 128, 46}
+  ["进入游戏"] = {"素材库/服务器进入游戏按钮.png", 470, 310, 810, 410, 300, 72, 0.55},
+  ["登录"] = {"素材库/汉化登录按钮.png", 480, 455, 820, 585, 306, 75, 0.65},
+  ["确认"] = {"素材库/汉化角色确认按钮.png", 850, 510, 1210, 625, 203, 57, 0.68},
+  ["返回"] = {"素材库/汉化登录返回按钮.png", 530, 420, 750, 520, 128, 46, 0.62}
 }
+local 登录素材查找缓存 = {}
 _ENV["登录_动作阶段"] = nil
 _ENV["登录_动作开始时间"] = nil
 _ENV["登录_失败次数"] = 0
@@ -1935,19 +1946,31 @@ _ENV["登录_自动重试终止"] = false
 function L0_1(key)
   local item = 登录素材[key]
   if item == nil then return nil end
-  local matched, x, y = findPic(item[2], item[3], item[4], item[5], item[1], "101010", 0, 0.84)
+  local now = tickCount()
+  local cached = 登录素材查找缓存[key]
+  if cached ~= nil and now - cached.time < 250 then
+    if cached.found then return cached.x, cached.y end
+    return nil, nil
+  end
+  local matched, x, y = findPicAdaptive(item[2], item[3], item[4], item[5],
+      item[1], "101010", 0, item[8])
   if tonumber(matched) == nil or tonumber(matched) <= 0
       or tonumber(x) == nil or tonumber(y) == nil or tonumber(x) < 0 or tonumber(y) < 0 then
+    登录素材查找缓存[key] = {time = now, found = false}
     return nil
   end
-  return math.floor(tonumber(x) + item[6] / 2), math.floor(tonumber(y) + item[7] / 2)
+  local centerX, centerY = math.floor(tonumber(x)), math.floor(tonumber(y))
+  登录素材查找缓存[key] = {time = now, found = true, x = centerX, y = centerY}
+  return centerX, centerY
 end
 _ENV["登录_找素材按钮"] = L0_1
 
 -- Match the selected-server entry button by its captured image. OCRing this
 -- tiny title crop on every login-loop pass can wedge ML Kit on emulator builds.
 function L0_1()
-  if _ENV["界面数据"]["自动登录"] == "false" or _ENV["登录_自动重试终止"] then
+  local uiConfig = _ENV["界面数据"]
+  if (type(uiConfig) == "table" and uiConfig["自动登录"] == "false")
+      or _ENV["登录_自动重试终止"] then
     return false
   end
   local x, y = _ENV["登录_找素材按钮"]("进入游戏")
@@ -1963,11 +1986,13 @@ _ENV["登录_汉化服务器进入"] = L0_1
 function L0_1(name, x, y)
   -- w.tap adds +/-50 ms jitter; passing [550,1450] keeps the final delay
   -- inside the requested 500..1500 ms human-like range.
+  登录素材查找缓存 = {}
   return _ENV["点击"](name, x, y, math.random(550, 1450))
 end
 _ENV["登录_快速点击"] = L0_1
 
 function L0_1()
+  登录素材查找缓存 = {}
   local failures = (tonumber(_ENV["登录_失败次数"]) or 0) + 1
   _ENV["登录_失败次数"] = failures
   _ENV["登录_动作阶段"] = nil
@@ -1987,7 +2012,8 @@ _ENV["登录_记录失败"] = L0_1
 -- localized page may still use OCR when needed, but button taps are grounded
 -- by the saved button templates and do not wait for a full-page OCR pass.
 function L0_1()
-  if _ENV["界面数据"]["自动登录"] == "false" then return false end
+  local uiConfig = _ENV["界面数据"]
+  if type(uiConfig) == "table" and uiConfig["自动登录"] == "false" then return false end
   if _ENV["登录_自动重试终止"] then return false end
   local now = tickCount()
   local retryAt = tonumber(_ENV["登录_重试允许时间"])
@@ -2338,37 +2364,32 @@ function L0_1()
     sleep(1000)
     return false
   end
+  local function 暂缓清包(reason)
+    local now = tonumberEx(tickCount()) or 0
+    _ENV["最近背包内存快照"] = nil
+    _ENV["背包读取来源"] = "暂不可用"
+    _ENV["当前任务2"] = "等待沙箱背包数据：" .. tostring(reason)
+    local lastNotice = tonumberEx(_ENV["背包读取提示时间"])
+    if lastNotice == nil or now - lastNotice >= 15000 then
+      toast("背包数据暂不可用，保留挂机并继续重试：" .. tostring(reason))
+      _ENV["背包读取提示时间"] = now
+    end
+    return nil
+  end
   -- The sell trip may only be triggered by a fresh, validated 610 sandbox
   -- memory snapshot. Do not silently fall back to OCR for weight/free slots:
   -- a wrong reading can send the character away or sell the wrong inventory.
   if type(getSandboxBagSnapshot) ~= "function" then
-    error("自动清包缺少沙箱背包数据接口；已停止脚本，未继续挂机或出售")
+    return 暂缓清包("缺少内存接口")
   end
   local reserveSlots = tonumber(_ENV["背包保留格子"]) or 2
   local reserveWeight = tonumber(_ENV["背包保留重量"]) or 3
-  local snapshotDeadline = tickCount() + 5000
-  local snapshot, snapshotStatus = nil, "WAITING_FOR_SNAPSHOT"
-  repeat
-    local snapshotOk, value = pcall(getSandboxBagSnapshot, reserveSlots, reserveWeight)
-    if not snapshotOk then
-      error("沙箱背包数据读取异常：" .. tostring(value) .. "；已停止脚本，未继续出售")
-    end
-    if type(value) == "table" then
-      snapshotStatus = tostring(value.status or "INVALID_SNAPSHOT")
-      if value.supported == true then
-        snapshot = value
-        break
-      end
-      if snapshotStatus ~= "WAITING_FOR_SNAPSHOT" then
-        error("当前环境不支持可靠的背包内存读取（" .. snapshotStatus
-          .. "）；清包需要 610 沙箱游戏，已停止脚本")
-      end
-    end
-    if tickCount() >= snapshotDeadline then
-      error("等待 610 沙箱背包快照超时；已停止脚本，未使用 OCR 猜测或出售物品")
-    end
-    sleep(250)
-  until false
+  local snapshotOk, snapshot = pcall(getSandboxBagSnapshot, reserveSlots, reserveWeight)
+  if not snapshotOk then return 暂缓清包("读取异常") end
+  if type(snapshot) ~= "table" or snapshot.supported ~= true then
+    local status = type(snapshot) == "table" and tostring(snapshot.status or "未知状态") or "无快照"
+    return 暂缓清包(status)
+  end
 
   local freeSlots = tonumber(snapshot.freeSlots)
   local currentWeight = tonumber(snapshot.currentWeight)
@@ -2378,7 +2399,7 @@ function L0_1()
       or not currentWeight or currentWeight < 0 or currentWeight > 1000000
       or not maxWeight or maxWeight <= 0 or maxWeight > 1000000
       or not ageMs or ageMs < 0 or ageMs > 5000 then
-    error("沙箱背包快照数值无效或已过期；已停止脚本，未触发出售")
+    return 暂缓清包("快照过期或数值无效")
   end
   local 内存背包 = {
     空格 = math.floor(freeSlots),
@@ -2389,7 +2410,7 @@ function L0_1()
   local 需要去大夫 = 内存背包.空格 <= reserveSlots
       or 内存背包.上限 - 内存背包.重量 <= reserveWeight
   if snapshot.shouldVisitDoctor ~= 需要去大夫 then
-    error("沙箱背包触发结果与原始数值不一致；已停止卖货")
+    return 暂缓清包("阈值校验不一致")
   end
   _ENV["最近背包内存快照"] = {
     空格 = 内存背包.空格,
@@ -2560,6 +2581,16 @@ function L0_1()
 end
 
 _ENV["检测背包"] = L0_1
+
+-- Only enter combat when the 610 sandbox memory bridge returned a fresh,
+-- validated snapshot. Unknown inventory state is not treated as "bag is OK".
+function L0_1()
+  local result = _ENV["检测背包"]()
+  if result == false then return "SELL" end
+  if result == nil then return "WAIT" end
+  return "CONTINUE"
+end
+_ENV["挂机_背包状态门控"] = L0_1
 
 function L0_1()
   if _ENV["检测修理装备"] and _ENV["找到"](tz["提示装备需要修理"]) then
@@ -3232,6 +3263,14 @@ function L0_1()
     end
     if _ENV["在主页面"]() then
       print("在主页面")
+      local 背包状态 = _ENV["挂机_背包状态门控"]()
+      if 背包状态 == "WAIT" then
+        _ENV["当前任务2"] = "等待有效沙箱背包数据，暂停攻击并重试"
+        sleep(1000)
+      elseif 背包状态 == "SELL" then
+        toast("背包达到清理阈值，前往大夫")
+        _ENV["去卖货后返回挂机点"]()
+      else
       if _ENV["界面数据"]["是否队长"] == "0" then
         if _ENV["找到"](tz["是否允许队伍申请弹出"]) then
           local rtn, x, y = _ENV["找到"](tz["是否允许队伍申请弹出"])
@@ -3400,12 +3439,9 @@ function L0_1()
         _ENV["执行自动战斗"]()
         _ENV["执行自动补给"]()
       end
+      end
     end
     _ENV["通用关闭"]()
-    if _ENV["检测背包"]() == false then
-      toast("前往卖货")
-      _ENV["去卖货后返回挂机点"]()
-    end
       end
       sleep(1000)
     end

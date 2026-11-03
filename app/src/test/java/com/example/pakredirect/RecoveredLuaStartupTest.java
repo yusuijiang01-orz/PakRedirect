@@ -334,6 +334,7 @@ public final class RecoveredLuaStartupTest {
             @Override public Varargs invoke(Varargs args) { return LuaValue.tableOf(); }
         });
         globals.set("findPic", noMatch());
+        globals.set("findPicAdaptive", noMatch());
         globals.set("findPicFast", noMatch());
         globals.set("cmpColorEx", new TwoArgFunction() {
             @Override public LuaValue call(LuaValue patterns, LuaValue threshold) { return LuaValue.valueOf(0); }

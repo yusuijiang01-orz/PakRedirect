@@ -22,6 +22,7 @@ public class RyluxApplication extends Application {
         try {
             BlackBoxCore core = BlackBoxCore.get();
             core.closeCodeInit();
+            SandboxGameMemoryBridge.registerLifecycleCallbacks();
             core.onBeforeMainApplicationAttach(this, base);
             core.doAttachBaseContext(base, new ClientConfiguration() {
                 @Override

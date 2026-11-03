@@ -230,8 +230,11 @@ public final class ScriptRuntimeService extends Service {
                 bagSnapshotRelay.start();
                 publish("沙箱背包内存读取桥已就绪，等待游戏快照");
             } catch (java.io.IOException failure) {
-                Log.w("RYLUX-Lua", "沙箱背包内存桥不可用，将使用屏幕识别", failure);
-                publish("沙箱内存桥不可用，将使用屏幕识别");
+                Log.e("RYLUX-Lua", "沙箱背包内存桥启动失败；不会继续无背包监控的挂机", failure);
+                routeBridge.close();
+                publish("启动失败：沙箱背包数据桥无法启动，为避免满包后继续攻击，脚本未启动");
+                stopSelf(latestStartId);
+                return;
             }
         } else {
             bagSnapshotRelay.close();

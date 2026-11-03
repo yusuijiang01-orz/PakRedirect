@@ -19,6 +19,7 @@ import java.util.Set;
 import java.util.WeakHashMap;
 
 import top.niunaijun.blackbox.BlackBoxCore;
+import top.niunaijun.blackbox.app.configuration.AppLifecycleCallback;
 
 /** Runs only while a BlackBox game activity is resumed and publishes read-only snapshots. */
 public final class SandboxGameMemoryBridge {
@@ -27,14 +28,40 @@ public final class SandboxGameMemoryBridge {
     private static final String ENDPOINT_FILE = "sandbox-bag-relay.endpoint";
     private static final Object LOCK = new Object();
     private static final Set<Activity> RESUMED_ACTIVITIES = Collections.newSetFromMap(new WeakHashMap<>());
+    private static boolean lifecycleCallbackRegistered;
+    private static String lastPublishStatus = "";
+    private static long lastStatusLogAt;
+    private static final AppLifecycleCallback LIFECYCLE_CALLBACK = new AppLifecycleCallback() {
+        @Override public void onActivityResumed(Activity activity) {
+            onGameActivityResumed(activity);
+        }
+
+        @Override public void onActivityPaused(Activity activity) {
+            onGameActivityPaused(activity);
+        }
+
+        @Override public void onActivityDestroyed(Activity activity) {
+            onGameActivityDestroyed(activity);
+        }
+    };
     private static Thread worker;
 
     private SandboxGameMemoryBridge() { }
+
+    /** Registers inside each BlackBox process so guest activity callbacks can start the publisher. */
+    public static void registerLifecycleCallbacks() {
+        synchronized (LOCK) {
+            if (lifecycleCallbackRegistered) return;
+            BlackBoxCore.get().addAppLifecycleCallback(LIFECYCLE_CALLBACK);
+            lifecycleCallbackRegistered = true;
+        }
+    }
 
     public static void onGameActivityResumed(Activity activity) {
         if (!isGameActivity(activity)) return;
         synchronized (LOCK) {
             RESUMED_ACTIVITIES.add(activity);
+            Log.i(TAG, "Sandbox game activity resumed; bag publisher is active");
             ensureWorkerLocked();
         }
     }
@@ -55,7 +82,10 @@ public final class SandboxGameMemoryBridge {
     private static void deactivate(Activity activity) {
         synchronized (LOCK) {
             if (activity != null) RESUMED_ACTIVITIES.remove(activity);
-            if (RESUMED_ACTIVITIES.isEmpty() && worker != null) worker.interrupt();
+            if (RESUMED_ACTIVITIES.isEmpty() && worker != null) {
+                Log.i(TAG, "No resumed sandbox game activity; bag publisher stopped");
+                worker.interrupt();
+            }
         }
     }
 
@@ -71,7 +101,10 @@ public final class SandboxGameMemoryBridge {
                 Endpoint endpoint = readEndpoint(hostContext);
                 if (endpoint != null) {
                     String payload = SandboxGameMemoryNative.read();
+                    reportStatus(payload);
                     sendSnapshot(endpoint, payload);
+                } else {
+                    reportStatus("WAITING_FOR_RELAY");
                 }
                 Thread.sleep(1_000L);
             } catch (InterruptedException stopped) {
@@ -93,6 +126,20 @@ public final class SandboxGameMemoryBridge {
         worker = new Thread(SandboxGameMemoryBridge::publishLoop, "rylux-sandbox-bag-publisher");
         worker.setDaemon(true);
         worker.start();
+    }
+
+    private static void reportStatus(String payload) {
+        String[] fields = payload == null ? new String[0] : payload.split("\\|", 3);
+        String status = fields.length == 0 ? "NO_STATUS" : fields[0];
+        if (fields.length > 1 && !fields[1].isEmpty()) status += " buildId=" + fields[1];
+        long now = android.os.SystemClock.elapsedRealtime();
+        synchronized (LOCK) {
+            if (!status.equals(lastPublishStatus) || now - lastStatusLogAt >= 30_000L) {
+                lastPublishStatus = status;
+                lastStatusLogAt = now;
+                Log.i(TAG, "Read-only bag snapshot status: " + status);
+            }
+        }
     }
 
     private static Endpoint readEndpoint(Context context) {

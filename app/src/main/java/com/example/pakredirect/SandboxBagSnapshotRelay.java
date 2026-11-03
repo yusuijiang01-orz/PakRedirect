@@ -29,6 +29,7 @@ final class SandboxBagSnapshotRelay implements AutoCloseable {
     private volatile LocalSocket activeClient;
     private volatile Thread acceptThread;
     private volatile int generation;
+    private String lastLoggedStatus = "";
     private String socketName;
     private String token;
 
@@ -118,12 +119,20 @@ final class SandboxBagSnapshotRelay implements AutoCloseable {
             latest = new SandboxBagSnapshot(safeValues, safeValues ? "OK" : "INVALID_VALUES",
                     buildId, safeValues ? freeSlots : -1, safeValues ? currentWeight : -1,
                     safeValues ? maxWeight : -1, SystemClock.elapsedRealtime());
+            logStatus(safeValues ? "OK buildId=" + buildId : "INVALID_VALUES buildId=" + buildId);
             return;
         }
         String status = values.length > 0 ? values[0] : "INVALID_PACKET";
         String buildId = values.length > 1 ? values[1] : "";
         latest = new SandboxBagSnapshot(false, status, buildId, -1, -1, -1,
                 SystemClock.elapsedRealtime());
+        logStatus(status + (buildId.isEmpty() ? "" : " buildId=" + buildId));
+    }
+
+    private void logStatus(String status) {
+        if (status.equals(lastLoggedStatus)) return;
+        lastLoggedStatus = status;
+        Log.i(TAG, "Sandbox game bag reader status: " + status);
     }
 
     private static boolean isSupportedBuildId(String buildId) {
