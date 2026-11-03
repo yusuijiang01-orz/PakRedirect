@@ -550,7 +550,7 @@ public final class ScriptGameAdapter extends AccessibilityService {
         super.onDestroy();
     }
 
-    public Bitmap captureDisplay(long timeoutMs) throws Exception {
+    public synchronized Bitmap captureDisplay(long timeoutMs) throws Exception {
         if (Build.VERSION.SDK_INT < 30) {
             throw new UnsupportedOperationException("系统版本过低：截图需要 Android 11 或更新版本");
         }

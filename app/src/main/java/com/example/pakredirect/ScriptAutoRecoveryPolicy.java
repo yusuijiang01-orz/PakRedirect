@@ -15,6 +15,13 @@ final class ScriptAutoRecoveryPolicy {
                 && restartsInWindow < MAX_RESTARTS_PER_WINDOW;
     }
 
+    static boolean shouldRestartStalledSandbox(boolean enabled, boolean gameWasObserved,
+                                                boolean stopRequested, boolean sandboxTarget,
+                                                int restartsInWindow) {
+        return enabled && gameWasObserved && !stopRequested && sandboxTarget
+                && restartsInWindow < MAX_RESTARTS_PER_WINDOW;
+    }
+
     static long backoffMs(int restartNumber) {
         if (restartNumber <= 1) return 3_000L;
         if (restartNumber == 2) return 8_000L;

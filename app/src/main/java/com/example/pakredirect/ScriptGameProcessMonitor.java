@@ -60,6 +60,10 @@ final class ScriptGameProcessMonitor {
     }
 
     private State inspectSandbox(Context context) {
+        return inspectSandboxProcess(context);
+    }
+
+    static State inspectSandboxProcess(Context context) {
         try {
             if (!((RyluxApplication) context.getApplicationContext()).isBlackBoxReady()) {
                 return State.UNKNOWN;
