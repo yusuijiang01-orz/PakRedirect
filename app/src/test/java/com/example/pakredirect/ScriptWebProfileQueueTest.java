@@ -108,6 +108,7 @@ public final class ScriptWebProfileQueueTest {
         values.put("虚拟屏幕宽度", "720");
         values.put("虚拟屏幕高度", "1280");
         values.put("虚拟屏幕DPI", "480");
+        values.put("超重时原地丢弃低品质装备", "true");
         values.put("开启vpn", "false");
         values.put("出售物品清单", "普通材料\n药品");
         ScriptWebProfileQueue queue = new ScriptWebProfileQueue();

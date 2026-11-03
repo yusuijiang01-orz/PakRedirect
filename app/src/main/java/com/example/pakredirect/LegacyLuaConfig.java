@@ -82,6 +82,7 @@ final class LegacyLuaConfig {
         values.put("出售装备品质_绿色", "false");
         values.put("出售装备品质_黄色", "false");
         values.put("出售装备品质_橙色", "false");
+        values.put("超重时原地丢弃低品质装备", "true");
         values.put("出售装备二次确认", "true");
         values.put("允许出售物品", "false");
         values.put("出售物品清单", "");

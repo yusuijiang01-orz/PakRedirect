@@ -1735,6 +1735,190 @@ public final class RecoveredLuaTaskTest {
                 ocrBagPageCalls.get());
     }
 
+    @Test public void overweightCleanupDropsVerifiedWhiteGearInPlaceBeforeAllowingDoctorRoute() throws Exception {
+        OverweightCleanupHarness harness = createOverweightCleanupHarness("none", true);
+        assertTrue("Lua must see the same snapshot and the exact overloaded condition",
+                harness.globals.load(LuaSourceCompat.normalizeUnicodeIdentifiers(
+                        "return type(_ENV['最近背包内存快照']) == 'table' and _ENV['最近背包内存快照'].需要去大夫 == true and _ENV['最近背包内存快照'].超重 == true"))
+                        .call().toboolean());
+
+        LuaValue result = harness.globals.get("去卖货_准备背包").checkfunction().call();
+        assertTrue("A verified overweight cleanup should unblock the normal doctor route; status="
+                        + harness.globals.get("当前任务2") + "; actions=" + harness.clicks,
+                result.toboolean());
+        assertTrue("The routine must discard only through its explicit item action",
+                harness.clicks.contains("@@丢弃已核验低品质装备"));
+        assertEquals("Only one item is needed to reach the configured 3-weight reserve", 1,
+                harness.dropCount.get());
+        assertEquals("Fresh memory must confirm weight has fallen below the safe target", 197,
+                harness.weight.get());
+        assertTrue("The selected-item detail must close through the safe close control",
+                harness.clicks.contains("@@安全关闭超重物品详情"));
+        assertTrue("The inventory must close after weight is verified", harness.clicks.contains("@@关闭超重清理背包"));
+        assertFalse("No map or doctor action may run before in-place weight relief",
+                harness.clicks.stream().anyMatch(action -> action.contains("大夫") || action.contains("大地图")));
+    }
+
+    @Test public void overweightCleanupPreservesReturnHpGearAndStopsWhenDisabled() throws Exception {
+        OverweightCleanupHarness protectedGear = createOverweightCleanupHarness("回红", true);
+        assertFalse("Return-HP gear must prevent the doctor route until a safe cleanup is possible",
+                protectedGear.globals.get("去卖货_准备背包").checkfunction().call().toboolean());
+        assertEquals("The protected item must never be discarded", 0, protectedGear.dropCount.get());
+
+        OverweightCleanupHarness disabled = createOverweightCleanupHarness("none", false);
+        assertFalse("Disabling emergency discard must keep the overweight character in place",
+                disabled.globals.get("去卖货_准备背包").checkfunction().call().toboolean());
+        assertEquals("Disabled cleanup must not discard any equipment", 0, disabled.dropCount.get());
+        assertFalse("Disabled cleanup must not even open the backpack", disabled.clicks.contains("@@打开超重清理背包"));
+        assertFalse("A disabled or unsafe cleanup must not start doctor navigation",
+                disabled.clicks.stream().anyMatch(action -> action.contains("大夫") || action.contains("大地图")));
+    }
+
+    private static OverweightCleanupHarness createOverweightCleanupHarness(String affix, boolean enabled)
+            throws Exception {
+        OverweightCleanupHarness harness = new OverweightCleanupHarness();
+        Globals globals = JsePlatform.standardGlobals();
+        harness.globals = globals;
+        globals.set("_ENV", globals);
+        globals.set("tickCount", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.valueOf(1_000L); }
+        });
+        OneArgFunction noSleep = new OneArgFunction() {
+            @Override public LuaValue call(LuaValue millis) { return LuaValue.NONE; }
+        };
+        globals.set("sleep", noSleep);
+        VarArgFunction noOp = new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return LuaValue.NONE; }
+        };
+        globals.set("toast", noOp);
+        globals.set("print", noOp);
+        for (String module : Arrays.asList("w.lua", "中控.lua", "通用数据.lua", "挂机模式.lua"))
+            loadModule(globals, scriptRoot().resolve(module), module);
+        globals.set("修改数据库", noOp);
+
+        LuaTable bagPage = new LuaTable();
+        LuaTable gearDetailPage = new LuaTable();
+        LuaTable ordinaryDetailPage = new LuaTable();
+        LuaTable templates = new LuaTable();
+        templates.set("背包页面", bagPage);
+        templates.set("商店选中装备属性页面", gearDetailPage);
+        templates.set("商店选中非装备属性页面", ordinaryDetailPage);
+        globals.set("tz", templates);
+        LuaTable config = new LuaTable();
+        config.set("超重时原地丢弃低品质装备", LuaValue.valueOf(Boolean.toString(enabled)));
+        config.set("出售装备品质_白色", LuaValue.TRUE);
+        config.set("出售装备品质_蓝色", LuaValue.TRUE);
+        config.set("出售装备品质_绿色", LuaValue.FALSE);
+        config.set("出售装备品质_黄色", LuaValue.FALSE);
+        config.set("出售装备品质_橙色", LuaValue.FALSE);
+        config.set("出售装备品质上限", LuaValue.valueOf("0"));
+        config.set("回蓝>=", LuaValue.valueOf("true"));
+        config.set("魔法出招>=", LuaValue.valueOf("true"));
+        config.set("武器出招>=", LuaValue.valueOf("true"));
+        globals.set("界面数据", config);
+        globals.set("背包保留格子", LuaValue.valueOf(2));
+        globals.set("背包保留重量", LuaValue.valueOf(3));
+
+        globals.set("去卖货_卖货_判断是否装备", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.TRUE; }
+        });
+        globals.set("去卖货_卖货_识别装备品质", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.valueOf("白色"); }
+        });
+        globals.set("去卖货_卖货_品质是否允许出售", new TwoArgFunction() {
+            @Override public LuaValue call(LuaValue quality, LuaValue ceiling) {
+                return LuaValue.valueOf(config.get("出售装备品质_" + quality.tojstring()).toboolean());
+            }
+        });
+        globals.set("去卖货_检测回红回内词条", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                return "none".equals(affix) ? LuaValue.FALSE : LuaValue.valueOf(affix);
+            }
+        });
+        globals.set("去卖货_卖货_识别蓝条数量和属性", new ZeroArgFunction() {
+            @Override public LuaValue call() { return new LuaTable(); }
+        });
+        globals.set("去卖货_卖货_识别蓝条数量", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.ZERO; }
+        });
+
+        globals.set("找到", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue target) {
+                if (target.raweq(bagPage)) return LuaValue.valueOf(harness.bagOpen.get());
+                if (target.raweq(gearDetailPage) || target.raweq(ordinaryDetailPage))
+                    return LuaValue.valueOf(harness.itemDetailOpen.get());
+                return LuaValue.FALSE;
+            }
+        });
+        globals.set("在主页面", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.valueOf(!harness.bagOpen.get()); }
+        });
+        globals.set("药品_识别背包页面", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.valueOf(harness.bagOpen.get()); }
+        });
+        globals.set("点击", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                String action = args.arg1().tojstring();
+                harness.clicks.add(action);
+                if ("@@打开超重清理背包".equals(action)) harness.bagOpen.set(true);
+                if ("@@检查超重清理装备".equals(action)) harness.itemDetailOpen.set(true);
+                if ("@@丢弃已核验低品质装备".equals(action)) {
+                    harness.dropCount.incrementAndGet();
+                    harness.weight.set(197);
+                }
+                if ("@@安全关闭超重物品详情".equals(action)) harness.itemDetailOpen.set(false);
+                if ("@@关闭超重清理背包".equals(action)) harness.bagOpen.set(false);
+                return LuaValue.TRUE;
+            }
+        });
+        globals.set("getSandboxBagSnapshot", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                return sandboxBagSnapshot(10, harness.weight.get(), 200, harness.weight.get() > 197);
+            }
+        });
+        globals.set("findPic", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                int x = args.arg(1).toint(), y = args.arg(2).toint();
+                if (x == 666 && y == 147 && harness.firstItemNotYetSelected.compareAndSet(false, true)) {
+                    return LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(-1),
+                            LuaValue.valueOf(-1), LuaValue.valueOf(-1)});
+                }
+                return LuaValue.varargsOf(new LuaValue[]{LuaValue.ONE,
+                        LuaValue.valueOf(x + 1), LuaValue.valueOf(y + 1)});
+            }
+        });
+        globals.set("tomocrtexttable", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                LuaTable rows = new LuaTable();
+                if (args.arg(1).toint() == 1030 && args.arg(2).toint() == 600) {
+                    LuaTable drop = new LuaTable();
+                    drop.set("words", LuaValue.valueOf("丢弃"));
+                    drop.set("score", LuaValue.valueOf(0.95));
+                    drop.set("x", LuaValue.valueOf(1143));
+                    drop.set("y", LuaValue.valueOf(662));
+                    rows.set(1, drop);
+                }
+                return rows;
+            }
+        });
+
+        LuaTable previous = globals.load(LuaSourceCompat.normalizeUnicodeIdentifiers(
+                "return {需要去大夫=true,超重=true,buildId='350ee73d222f974988c13b5917337fb2d96fe68a',保留格子=2,保留重量=3,时间=1000}"))
+                .call().checktable();
+        globals.set("最近背包内存快照", previous);
+        return harness;
+    }
+
+    private static final class OverweightCleanupHarness {
+        private Globals globals;
+        private final List<String> clicks = new ArrayList<>();
+        private final AtomicBoolean bagOpen = new AtomicBoolean();
+        private final AtomicBoolean itemDetailOpen = new AtomicBoolean();
+        private final AtomicBoolean firstItemNotYetSelected = new AtomicBoolean();
+        private final AtomicInteger weight = new AtomicInteger(205);
+        private final AtomicInteger dropCount = new AtomicInteger();
+    }
+
     @Test public void backpackDetectionRetriesWhenBothSlotReadersFailInsteadOfCrashing() throws Exception {
         Globals globals = JsePlatform.standardGlobals();
         globals.set("tickCount", new ZeroArgFunction() {

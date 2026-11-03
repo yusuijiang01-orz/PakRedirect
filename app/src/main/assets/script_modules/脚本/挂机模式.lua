@@ -1537,6 +1537,365 @@ end
 _ENV["大地图_输入大地图"] = L0_1
 require("网页路线")
 
+-- Overweight characters cannot walk to the doctor. Free only verified junk
+-- equipment in place, then re-read the sandbox memory snapshot before routing.
+function L0_1()
+  local config = _ENV["界面数据"] or {}
+  local function isEnabled(value)
+    return value == true or tostring(value) == "true"
+  end
+  local reserveSlots = math.max(0, tonumber(_ENV["背包保留格子"]) or 2)
+  local reserveWeight = math.max(0, tonumber(_ENV["背包保留重量"]) or 3)
+  local function readSnapshot()
+    if type(getSandboxBagSnapshot) ~= "function" then return nil, "缺少内存接口" end
+    local ok, value = pcall(getSandboxBagSnapshot, reserveSlots, reserveWeight)
+    if not ok or type(value) ~= "table" or value.supported ~= true then
+      return nil, "内存快照不可用"
+    end
+    local freeSlots = tonumber(value.freeSlots)
+    local weight = tonumber(value.currentWeight)
+    local maxWeight = tonumber(value.maxWeight)
+    local age = tonumber(value.ageMs)
+    local buildId = tostring(value.buildId or "")
+    local previous = _ENV["最近背包内存快照"]
+    local previousBuildId = type(previous) == "table" and tostring(previous.buildId or "") or ""
+    if freeSlots == nil or freeSlots < 0 or freeSlots > 200
+        or weight == nil or weight < 0 or weight > 1000000
+        or maxWeight == nil or maxWeight <= 0 or maxWeight > 1000000
+        or age == nil or age < 0 or age > 5000
+        or buildId == "" or previousBuildId ~= "" and buildId ~= previousBuildId then
+      return nil, "内存快照过期或版本不匹配"
+    end
+    return {
+      空格 = math.floor(freeSlots),
+      重量 = math.floor(weight),
+      上限 = math.floor(maxWeight),
+      年龄 = age,
+      buildId = buildId,
+      时间 = tickCount()
+    }
+  end
+  local function saveSnapshot(snapshot)
+    _ENV["最近背包内存快照"] = {
+      空格 = snapshot.空格,
+      重量 = snapshot.重量,
+      上限 = snapshot.上限,
+      buildId = snapshot.buildId,
+      时间 = snapshot.时间,
+      保留格子 = reserveSlots,
+      保留重量 = reserveWeight,
+      需要去大夫 = snapshot.空格 <= reserveSlots
+          or snapshot.上限 - snapshot.重量 <= reserveWeight,
+      超重 = snapshot.重量 > snapshot.上限
+    }
+    _ENV["当前背包格子"] = snapshot.空格
+    _ENV["当前背包重量"] = snapshot.重量 .. "/" .. snapshot.上限
+  end
+  local function bagOpen()
+    if type(tz) == "table" and tz["背包页面"] ~= nil
+        and _ENV["找到"](tz["背包页面"]) then
+      return true
+    end
+    return _ENV["药品_识别背包页面"] ~= nil
+        and _ENV["药品_识别背包页面"]() == true
+  end
+  local function itemDetailOpen()
+    if type(tz) ~= "table" then return false end
+    for _, key in ipairs({"商店选中装备属性页面", "商店选中非装备属性页面"}) do
+      if tz[key] ~= nil and _ENV["找到"](tz[key]) then return true end
+    end
+    return false
+  end
+  local function closeItemDetail()
+    if not itemDetailOpen() then return true end
+    -- This is the existing safe close control used by the inventory/shop flow.
+    -- Never tap the item cell a second time: that can invoke a destructive action.
+    _ENV["点击"]("@@安全关闭超重物品详情", 1188, 626, 600)
+    for _ = 1, 10 do
+      sleep(200)
+      if bagOpen() and not itemDetailOpen() then return true end
+    end
+    return false
+  end
+  local function closeBag()
+    if bagOpen() then
+      if not closeItemDetail() then return false end
+      _ENV["点击"]("@@关闭超重清理背包", 1244, 104, 800)
+      for _ = 1, 10 do
+        sleep(200)
+        if _ENV["在主页面"]() then return true end
+      end
+      return false
+    end
+    return _ENV["在主页面"]()
+  end
+  local function setFailure(message, retryMs, leaveOpen)
+    _ENV["当前任务2"] = message
+    local now = tonumberEx(tickCount()) or 0
+    _ENV["超重清理_下次尝试时间"] = now + (retryMs or 15000)
+    local lastNotice = tonumberEx(_ENV["超重清理_上次提示时间"])
+    if lastNotice == nil or now - lastNotice >= 15000 then
+      toast(message)
+      _ENV["超重清理_上次提示时间"] = now
+    end
+    if not leaveOpen then closeBag() end
+    return false
+  end
+  local function normalize(text)
+    return string.lower(tostring(text or "")):gsub("%s+", ""):gsub("　", "")
+      :gsub("，", ""):gsub("。", ""):gsub("？", ""):gsub("%?", "")
+  end
+  local function exactButton(rows, accepted, left, top, right, bottom)
+    local foundX, foundY, count = nil, nil, 0
+    if type(rows) ~= "table" then return nil, nil, 0 end
+    for _, row in pairs(rows) do
+      if type(row) == "table" then
+        local text = normalize(row.words or row.text)
+        local score = tonumber(row.score) or tonumber(row.confidence) or 0
+        local x, y = tonumber(row.x), tonumber(row.y)
+        if accepted[text] and score >= 0.82 and x and y
+            and x >= left and x <= right and y >= top and y <= bottom then
+          foundX, foundY, count = math.floor(x), math.floor(y), count + 1
+        end
+      end
+    end
+    if count == 1 then return foundX, foundY, count end
+    return nil, nil, count
+  end
+  local function findDropButton()
+    local ok, rows = pcall(tomocrtexttable, 1030, 600, 1235, 710)
+    if not ok or type(rows) ~= "table" then return nil, nil end
+    local x, y, count = exactButton(rows, { ["丢弃"] = true, ["vứtbỏ"] = true },
+        1030, 600, 1235, 710)
+    if count ~= 1 then return nil, nil end
+    return x, y
+  end
+  local function readDropConfirmation()
+    local ok, rows = pcall(tomocrtexttable, 260, 300, 1020, 590)
+    if not ok or type(rows) ~= "table" then return false, nil, nil end
+    local prompt = false
+    for _, row in pairs(rows) do
+      if type(row) == "table" then
+        local text = normalize(row.words or row.text)
+        if (string.find(text, "丢弃", 1, true) ~= nil
+              and (string.find(text, "确定", 1, true) ~= nil
+                or string.find(text, "确认", 1, true) ~= nil
+                or string.find(text, "是否", 1, true) ~= nil))
+            or (string.find(text, "vứtbỏ", 1, true) ~= nil
+              and string.find(text, "chắc", 1, true) ~= nil
+              and string.find(text, "muốn", 1, true) ~= nil) then
+          prompt = true
+          break
+        end
+      end
+    end
+    if not prompt then return false, nil, nil end
+    local confirmX, confirmY, confirmCount = exactButton(rows,
+        { ["确定"] = true, ["确认"] = true, ["đồngý"] = true, ["có"] = true, ["yes"] = true },
+        300, 390, 980, 590)
+    local cancelX, cancelY, cancelCount = exactButton(rows,
+        { ["取消"] = true, ["hủy"] = true, ["không"] = true, ["no"] = true },
+        300, 390, 980, 590)
+    if confirmCount ~= 1 or cancelCount ~= 1 then return true, nil, nil end
+    return true, confirmX, confirmY
+  end
+  local function waitForProgress(before, timeoutMs)
+    local attempts = math.max(1, math.floor(timeoutMs / 400))
+    for _ = 1, attempts do
+      sleep(400)
+      local after = readSnapshot()
+      if after and (after.重量 < before.重量 or after.空格 > before.空格) then
+        saveSnapshot(after)
+        return after
+      end
+    end
+    return nil
+  end
+  local function hasConfiguredKeepLine(attributes)
+    local threshold = math.max(0, tonumber(_ENV["保留蓝条数量"]) or 4)
+    if #attributes < threshold then return false end
+    local filters = {
+      {"回蓝", "回蓝>=", "保留回蓝数值"},
+      {"魔法出招", "魔法出招>=", "保留魔法出招数值"},
+      {"武器出招", "武器出招>=", "保留武器出招数值"}
+    }
+    for _, filter in ipairs(filters) do
+      if isEnabled(config[filter[2]]) then
+        local minimum = tonumber(config[filter[3]]) or 0
+        for _, attribute in ipairs(attributes) do
+          if attribute["蓝条属性"] == filter[1]
+              and (tonumber(attribute["蓝条数值"]) or 0) >= minimum then
+            return true
+          end
+        end
+      end
+    end
+    return false
+  end
+  local function safeEquipment()
+    if not itemDetailOpen() then return false end
+    local gearOk, isGear = pcall(_ENV["去卖货_卖货_判断是否装备"])
+    if not gearOk or isGear ~= true then return false end
+    local qualityOk, quality = pcall(_ENV["去卖货_卖货_识别装备品质"])
+    if not qualityOk or quality == nil or quality == "未识别"
+        or not _ENV["去卖货_卖货_品质是否允许出售"](quality, config["出售装备品质上限"]) then
+      return false
+    end
+    local affixOk, protectedAffix = pcall(_ENV["去卖货_检测回红回内词条"])
+    if not affixOk or protectedAffix ~= false then return false end
+    local attributesOk, attributes = pcall(_ENV["去卖货_卖货_识别蓝条数量和属性"])
+    if not attributesOk or type(attributes) ~= "table" then return false end
+    local countOk, lineCount = pcall(_ENV["去卖货_卖货_识别蓝条数量"])
+    if not countOk or tonumber(lineCount) == nil or #attributes ~= tonumber(lineCount) then
+      return false
+    end
+    for _, attribute in ipairs(attributes) do
+      local name = tostring(attribute["蓝条属性"] or "")
+      local value = tonumber(attribute["蓝条数值"])
+      local protectedNames = {
+        ["回红"] = true, ["回血"] = true, ["生命回复"] = true,
+        ["生命恢复"] = true, ["恢复生命"] = true, ["回复生命"] = true,
+        ["回内"] = true, ["内力回复"] = true, ["内力恢复"] = true,
+        ["恢复内力"] = true, ["回复内力"] = true
+      }
+      if name == "" or value == nil or value <= 0 or protectedNames[name] then
+        return false
+      end
+    end
+    return not hasConfiguredKeepLine(attributes)
+  end
+
+  local now = tonumberEx(tickCount()) or 0
+  local retryAt = tonumberEx(_ENV["超重清理_下次尝试时间"])
+  if retryAt ~= nil and now < retryAt then return false end
+  local snapshot, reason = readSnapshot()
+  if not snapshot then return setFailure("超重清理暂停：" .. tostring(reason)) end
+  saveSnapshot(snapshot)
+  if snapshot.重量 <= snapshot.上限 then
+    _ENV["超重清理_下次尝试时间"] = nil
+    return true
+  end
+  local enabled = config["超重时原地丢弃低品质装备"]
+  if enabled ~= nil and not isEnabled(enabled) then
+    return setFailure("已超重：请开启原地清理低品质装备后再前往大夫")
+  end
+
+  if not bagOpen() then
+    if not _ENV["在主页面"]() then
+      return setFailure("已超重：当前页面无法安全打开背包")
+    end
+    _ENV["点击"]("@@打开超重清理背包", 902, 693, 800)
+    for _ = 1, 10 do
+      sleep(200)
+      if bagOpen() then break end
+    end
+    if not bagOpen() then return setFailure("已超重：背包页面未能确认") end
+  end
+
+  local maxDrops = 35
+  local droppedCount = 0
+  while droppedCount < maxDrops do
+    snapshot, reason = readSnapshot()
+    if not snapshot then return setFailure("超重清理暂停：" .. tostring(reason)) end
+    saveSnapshot(snapshot)
+    local targetWeight = math.max(0, snapshot.上限 - reserveWeight)
+    if snapshot.重量 <= targetWeight then
+      if not closeBag() then return setFailure("减重完成但背包未能关闭") end
+      _ENV["超重清理_下次尝试时间"] = nil
+      _ENV["当前任务2"] = "超重已清理，已确认重量 " .. snapshot.重量 .. "/" .. snapshot.上限 .. "，前往大夫"
+      toast("已确认减重，前往大夫")
+      return true
+    end
+
+    local progressed = false
+    local scanFailed = false
+    local tabPositions = {{720, 115}, {842, 115}, {966, 115}}
+    for _, tab in ipairs(tabPositions) do
+      _ENV["点击"]("@@切换超重清理背包页", tab[1], tab[2], 600)
+      sleep(250)
+      if not bagOpen() then
+        scanFailed = true
+        break
+      end
+      for row = 0, 6 do
+        for col = 0, 4 do
+          local left, top = 666 + col * 73, 147 + row * 73
+          local picOk, _, emptyX = pcall(findPic, left, top, left + 60, top + 60,
+              "空格子0.png", "101010", 0, 0.95)
+          if not picOk or tonumber(emptyX) == nil then
+            scanFailed = true
+            break
+          end
+          if tonumber(emptyX) <= 0 then
+            _ENV["点击"]("@@检查超重清理装备", 695 + col * 73, 178 + row * 73, 650)
+            sleep(350)
+            if safeEquipment() then
+              local beforeDrop, beforeReason = readSnapshot()
+              if not beforeDrop then
+                return setFailure("超重清理暂停：" .. tostring(beforeReason))
+              end
+              if beforeDrop.重量 <= math.max(0, beforeDrop.上限 - reserveWeight) then
+                saveSnapshot(beforeDrop)
+                if not closeBag() then return setFailure("减重完成但背包未能关闭") end
+                _ENV["超重清理_下次尝试时间"] = nil
+                return true
+              end
+              local dropX, dropY = findDropButton()
+              if dropX and dropY then
+                _ENV["当前任务2"] = "确认安全的低品质装备，正在原地丢弃"
+                _ENV["点击"]("@@丢弃已核验低品质装备", dropX, dropY, 800)
+                local prompt, confirmX, confirmY = false, nil, nil
+                for _ = 1, 10 do
+                  sleep(250)
+                  prompt, confirmX, confirmY = readDropConfirmation()
+                  if prompt then break end
+                  local immediateProgress = readSnapshot()
+                  if immediateProgress and (immediateProgress.重量 < beforeDrop.重量
+                      or immediateProgress.空格 > beforeDrop.空格) then
+                    snapshot = immediateProgress
+                    break
+                  end
+                end
+                if prompt then
+                  if not confirmX or not confirmY then
+                    return setFailure("丢弃确认弹窗无法唯一识别，已停止操作", 15000, true)
+                  end
+                  _ENV["点击"]("@@确认丢弃已核验装备", confirmX, confirmY, 800)
+                end
+                local afterDrop = snapshot and (snapshot.重量 < beforeDrop.重量
+                    or snapshot.空格 > beforeDrop.空格) and snapshot
+                    or waitForProgress(beforeDrop, 8000)
+                if not afterDrop then
+                  -- The tap may have opened a confirmation/blocked-item dialog.
+                  -- Leave the UI untouched for inspection; never guess another tap.
+                  return setFailure("丢弃后负重未下降，已停止并等待重试", 15000, true)
+                end
+                droppedCount = droppedCount + 1
+                saveSnapshot(afterDrop)
+                progressed = true
+                break
+              end
+            end
+            if itemDetailOpen() and not closeItemDetail() then
+              return setFailure("装备详情未能安全关闭，已停止清理")
+            end
+          end
+        end
+        if scanFailed or progressed then break end
+      end
+      if scanFailed or progressed then break end
+    end
+    if scanFailed then return setFailure("背包或空格状态无法确认，已停止清理") end
+    if not progressed then
+      _ENV["超重清理_下次尝试时间"] = nil
+      return setFailure("已超重无法移动：没有可安全丢弃的勾选品质装备")
+    end
+    snapshot = nil
+  end
+  return setFailure("已超重：单轮清理达到安全上限，等待重试")
+end
+_ENV["去卖货_超重时原地清理低品质装备"] = L0_1
+
 -- The backpack is handled before the merchant route. Sorting can combine
 -- stacks, but does not grant permission to sell items; the shop's existing
 -- equipment protection and explicit item allowlist still decide every sale.
@@ -1548,6 +1907,12 @@ function L0_1()
   -- player is visibly back on the world HUD. The sale still uses its normal
   -- allowlist, rarity checks, and confirmation flow at the shop.
   local snapshot = _ENV["最近背包内存快照"]
+  if type(snapshot) == "table" and snapshot.需要去大夫 == true
+      and snapshot.超重 == true then
+    -- Never start map navigation while the live 610 snapshot says the player
+    -- exceeds maximum load. The in-place cleanup must prove fresh weight relief.
+    return _ENV["去卖货_超重时原地清理低品质装备"]()
+  end
   if type(snapshot) == "table" and snapshot.需要去大夫 == true
       and snapshot.buildId == "350ee73d222f974988c13b5917337fb2d96fe68a"
       and snapshot.保留格子 == (tonumber(_ENV["背包保留格子"]) or 2)
@@ -2420,7 +2785,8 @@ function L0_1()
     时间 = tickCount(),
     保留格子 = reserveSlots,
     保留重量 = reserveWeight,
-    需要去大夫 = 需要去大夫
+    需要去大夫 = 需要去大夫,
+    超重 = 内存背包.重量 > 内存背包.上限
   }
   _ENV["背包读取来源"] = "游戏内存"
   _ENV["当前背包格子"] = 内存背包.空格

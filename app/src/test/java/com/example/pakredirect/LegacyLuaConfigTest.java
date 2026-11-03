@@ -40,6 +40,7 @@ public final class LegacyLuaConfigTest {
         assertEquals("2", LegacyLuaConfig.defaults().get("队员找不到队长组队就回家次数"));
         assertEquals("true", LegacyLuaConfig.defaults().get("保护装备不出售"));
         assertEquals("false", LegacyLuaConfig.defaults().get("出售装备"));
+        assertEquals("true", LegacyLuaConfig.defaults().get("超重时原地丢弃低品质装备"));
         assertEquals("0", LegacyLuaConfig.defaults().get("出售装备品质上限"));
         assertEquals("true", LegacyLuaConfig.defaults().get("出售装备二次确认"));
         assertEquals("false", LegacyLuaConfig.defaults().get("允许出售物品"));
