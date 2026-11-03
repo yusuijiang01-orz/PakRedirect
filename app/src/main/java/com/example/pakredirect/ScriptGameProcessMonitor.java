@@ -19,6 +19,7 @@ final class ScriptGameProcessMonitor {
     private long observedAtMillis;
     private long lastClassifiedExitMillis;
     private String observedProcessName;
+    private String unresponsiveBlackBoxProcessName;
     private State lastExitState = State.UNKNOWN;
     private boolean pendingCrashDetected;
 
@@ -28,6 +29,7 @@ final class ScriptGameProcessMonitor {
         lastExitState = State.STOPPED;
         currentlyRunning = false;
         pendingCrashDetected = false;
+        unresponsiveBlackBoxProcessName = null;
     }
 
     State inspect(Context context, String targetMode) {
@@ -69,10 +71,71 @@ final class ScriptGameProcessMonitor {
             if (processes == null || processes.mAppProcessInfoList == null) return State.UNKNOWN;
             if (processes.mAppProcessInfoList.isEmpty()) return State.STOPPED;
             observedProcessName = processes.mAppProcessInfoList.get(0).processName;
+            unresponsiveBlackBoxProcessName = findUnresponsiveBlackBoxProcess(context);
+            if (unresponsiveBlackBoxProcessName != null) {
+                return markSandboxAnrObserved();
+            }
             return State.RUNNING;
         } catch (Exception unavailable) {
             return State.UNKNOWN;
         }
+    }
+
+    private State markSandboxAnrObserved() {
+        // BlackBox may still report the guest as running after Android marks
+        // its :pN host process ANR. Treat that as a crash-recovery signal.
+        observedRunningProcess = true;
+        currentlyRunning = true;
+        lastExitState = State.CRASHED;
+        return State.CRASHED;
+    }
+
+    boolean hasUnresponsiveBlackBoxProcess() {
+        return unresponsiveBlackBoxProcessName != null;
+    }
+
+    String getUnresponsiveBlackBoxProcessName() {
+        return unresponsiveBlackBoxProcessName;
+    }
+
+    private static String findUnresponsiveBlackBoxProcess(Context context) {
+        ActivityManager manager = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+        if (manager == null) return null;
+        List<ActivityManager.ProcessErrorStateInfo> errors;
+        try {
+            errors = manager.getProcessesInErrorState();
+        } catch (RuntimeException unavailable) {
+            return null;
+        }
+        if (errors == null) return null;
+        int appUid = context.getApplicationInfo().uid;
+        String packageName = context.getPackageName();
+        for (ActivityManager.ProcessErrorStateInfo error : errors) {
+            if (error != null && isBlackBoxProxyAnr(packageName, appUid,
+                    error.processName, error.uid, error.condition)) {
+                return error.processName;
+            }
+        }
+        return null;
+    }
+
+    static boolean isBlackBoxProxyAnr(String packageName, int appUid,
+                                      String processName, int processUid, int condition) {
+        return processUid == appUid
+                && condition == ActivityManager.ProcessErrorStateInfo.NOT_RESPONDING
+                && isBlackBoxProxyProcessName(packageName, processName);
+    }
+
+    static boolean isBlackBoxProxyProcessName(String packageName, String processName) {
+        if (packageName == null || processName == null) return false;
+        String prefix = packageName + ":p";
+        if (!processName.startsWith(prefix)) return false;
+        String slot = processName.substring(prefix.length());
+        if (slot.isEmpty()) return false;
+        for (int i = 0; i < slot.length(); i++) {
+            if (!Character.isDigit(slot.charAt(i))) return false;
+        }
+        return true;
     }
 
     static State inspectSandboxProcess(Context context) {
@@ -96,6 +159,7 @@ final class ScriptGameProcessMonitor {
         if (manager == null) return State.UNKNOWN;
         String packageName = ScriptToolsActivity.TARGET_MODE_DESKTOP.equals(targetMode)
                 ? GAME : context.getPackageName();
+        boolean sandboxTarget = !ScriptToolsActivity.TARGET_MODE_DESKTOP.equals(targetMode);
         try {
             List<ApplicationExitInfo> exits = manager.getHistoricalProcessExitReasons(packageName, 0, 12);
             if (exits == null) return State.UNKNOWN;
@@ -103,7 +167,9 @@ final class ScriptGameProcessMonitor {
             for (ApplicationExitInfo exit : exits) {
                 if (exit == null || exit.getTimestamp() < observedAtMillis - 2_000L) continue;
                 String exitedProcess = exit.getProcessName();
-                if (observedProcessName != null && exitedProcess != null
+                if (sandboxTarget) {
+                    if (!isBlackBoxProxyProcessName(context.getPackageName(), exitedProcess)) continue;
+                } else if (observedProcessName != null && exitedProcess != null
                         && !observedProcessName.equals(exitedProcess)) continue;
                 if (latest == null || exit.getTimestamp() > latest.getTimestamp()) latest = exit;
             }

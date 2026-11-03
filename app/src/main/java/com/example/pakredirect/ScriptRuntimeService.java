@@ -339,11 +339,14 @@ public final class ScriptRuntimeService extends Service {
                             return;
                         }
                     }
-                    if (stalledSandbox) {
+                    boolean sandboxNeedsStop = ScriptToolsActivity.TARGET_MODE_SANDBOX
+                            .equals(targetMode) && (stalledSandbox
+                            || processState == ScriptGameProcessMonitor.State.CRASHED);
+                    if (sandboxNeedsStop) {
                         try {
                             if (!stopSandboxGameForRecovery(runControl)) {
                                 IllegalStateException stopFailure = new IllegalStateException(
-                                        "已检测到沙箱画面卡死，但 BlackBox 未能确认游戏进程已停止；已中止重启以避免叠加启动");
+                                        "已检测到沙箱游戏卡死/无响应，但 BlackBox 未能确认游戏进程已停止；已中止重启以避免叠加启动");
                                 if (runControl.fail(stopFailure)) reportFailure(stopFailure);
                                 return;
                             }
@@ -426,11 +429,24 @@ public final class ScriptRuntimeService extends Service {
                 if (processState == ScriptGameProcessMonitor.State.RUNNING) {
                     gameObserved.set(true);
                 } else if (processState == ScriptGameProcessMonitor.State.CRASHED
+                        && sandboxTarget && processMonitor.hasUnresponsiveBlackBoxProcess()) {
+                    // A newly observed BlackBox ANR is itself proof that the
+                    // configured guest was running, even if the watcher missed
+                    // its last healthy sample.
+                    gameObserved.set(true);
+                }
+                if (processState == ScriptGameProcessMonitor.State.CRASHED
                         && gameObserved.get()) {
                     GameProcessExitedException crashed = new GameProcessExitedException();
                     watchdogFailure.compareAndSet(null, crashed);
+                    if (sandboxTarget && processMonitor.hasUnresponsiveBlackBoxProcess()) {
+                        Log.w("RYLUX-Lua", "BlackBox guest process is not responding: "
+                                + processMonitor.getUnresponsiveBlackBoxProcessName());
+                    }
                     if (runControl.fail(crashed)) {
-                        publish("检测到游戏崩溃/无响应，正在按自动登录设置恢复");
+                        publish(sandboxTarget && processMonitor.hasUnresponsiveBlackBoxProcess()
+                                ? "检测到沙箱游戏无响应（Android ANR），正在自动恢复登录"
+                                : "检测到游戏崩溃/无响应，正在按自动登录设置恢复");
                     }
                     return;
                 }
