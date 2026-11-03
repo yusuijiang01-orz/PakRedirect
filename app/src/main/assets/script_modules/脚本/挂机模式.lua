@@ -2302,9 +2302,9 @@ _ENV["登录_汉化选区确认"] = L0_1
 -- Localized login controls captured from the Chinese client. These image
 -- templates live in script_modules/脚本/素材库 and are searched in small ROIs.
 local 登录素材 = {
-  ["进入游戏"] = {"素材库/服务器进入游戏按钮.png", 470, 310, 810, 410, 300, 72, 0.55},
+  ["进入游戏"] = {"素材库/服务器进入游戏按钮.png", 470, 240, 810, 350, 300, 72, 0.55},
   ["登录"] = {"素材库/汉化登录按钮.png", 480, 455, 820, 585, 306, 75, 0.65},
-  ["确认"] = {"素材库/汉化角色确认按钮.png", 850, 510, 1210, 625, 203, 57, 0.68},
+  ["确认"] = {"素材库/汉化角色确认按钮.png", 850, 405, 1150, 520, 203, 57, 0.68},
   ["返回"] = {"素材库/汉化登录返回按钮.png", 530, 420, 750, 520, 128, 46, 0.62}
 }
 local 登录素材查找缓存 = {}
@@ -2320,7 +2320,8 @@ function L0_1(key)
   if item == nil then return nil end
   local now = tickCount()
   local cached = 登录素材查找缓存[key]
-  if cached ~= nil and now - cached.time < 250 then
+  if key ~= "进入游戏" and key ~= "确认"
+      and cached ~= nil and now - cached.time < 250 then
     if cached.found then return cached.x, cached.y end
     return nil, nil
   end
@@ -2361,7 +2362,7 @@ function L0_1()
     return false
   end
   local x, y = _ENV["登录_找素材按钮"]("进入游戏")
-  if x == nil or y == nil then return false end
+  if x == nil or y == nil or x < 580 or x > 700 or y < 270 or y > 325 then return false end
   local now = tickCount()
   if not _ENV["登录_允许页面动作"]("服务器进入游戏", now) then return true end
   _ENV["登录_快速点击"]("@@进入已选服务器", x, y)
@@ -2396,6 +2397,9 @@ function L0_1(page, now)
     actions = {}
     _ENV["登录_页面动作记录"] = actions
   end
+  -- A transition to the other page starts a fresh retry window.
+  if page == "服务器进入游戏" then actions["角色确认"] = nil end
+  if page == "角色确认" then actions["服务器进入游戏"] = nil end
   actions[page] = now or tickCount()
   _ENV["登录_动作阶段"] = page
   _ENV["登录_动作开始时间"] = actions[page]
@@ -2463,7 +2467,8 @@ _ENV["登录_汉化账号确认"] = L0_1
 function L0_1()
   _ENV["登录_自动重试终止"] = false
   local confirmX, confirmY = _ENV["登录_找素材按钮"]("确认")
-  if confirmX == nil or confirmY == nil then return false end
+  if confirmX == nil or confirmY == nil or confirmX < 930 or confirmX > 1070
+      or confirmY < 430 or confirmY > 500 then return false end
   local now = tickCount()
   if not _ENV["登录_允许页面动作"]("角色确认", now) then return true end
   _ENV["登录_快速点击"]("@@汉化角色确认", confirmX, confirmY)
@@ -2538,6 +2543,8 @@ function L0_1()
   -- Treat the visible page as the source of truth. This makes manual taps,
   -- app relaunches, and server timeouts that return to account login recover
   -- without waiting for or trusting an obsolete linear stage.
+  -- Character selection takes precedence over similarly colored server controls.
+  if _ENV["登录_汉化角色确认"]() then return true end
   local termsX, termsY = _ENV["登录_找条款同意按钮"]()
   if termsX ~= nil and _ENV["登录_允许页面动作"]("使用条款", now) then
     _ENV["登录_快速点击"]("@@同意使用条款", termsX, termsY)
@@ -2551,7 +2558,6 @@ function L0_1()
     return true
   end
   if _ENV["登录_汉化账号确认"]() then return true end
-  if _ENV["登录_汉化角色确认"]() then return true end
 
   -- Clear transient action state as soon as the in-world HUD is confirmed.
   local ok, inWorld = pcall(function() return _ENV["在主页面"]() end)
