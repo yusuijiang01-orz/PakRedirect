@@ -512,44 +512,50 @@ public final class ScriptRuntimeService extends Service {
     }
 
     private void waitForFirstUseTermsIfNeeded() throws Exception {
-        // The consent control is a fixed image asset. Detect it by template so
-        // startup does not consume or poison the dynamic-text OCR pipeline.
+        // The consent control is a fixed image asset. Detect and tap only this
+        // known button so startup does not depend on the dynamic-text OCR path.
         Bitmap template;
         try (InputStream input = getAssets().open(STARTUP_AGREE_TEMPLATE)) {
             template = BitmapFactory.decodeStream(input);
         }
         if (template == null) throw new IllegalStateException("使用条款按钮模板无法读取，脚本已停止");
         try {
-            control.checkpoint();
-            Bitmap frame = captureStartupFrame(30_000L, 5_000L);
-            try {
-                if (!isStartupAgreeButtonVisible(frame, template)) {
-                    publish("未检测到使用条款确认按钮，交由 Lua 流程继续");
+            for (int attempt = 1; attempt <= 3; attempt++) {
+                control.checkpoint();
+                Bitmap frame = captureStartupFrame(30_000L, 5_000L);
+                ScriptStartupTerms.Tap tap;
+                try {
+                    tap = findStartupAgreeButton(frame, template);
+                } finally {
+                    if (!frame.isRecycled()) frame.recycle();
+                }
+                if (tap == null) {
+                    publish(attempt == 1 ? "未检测到使用条款确认按钮，继续自动登录流程"
+                            : "使用条款页已关闭，继续自动登录流程");
                     return;
                 }
-            } finally {
-                if (!frame.isRecycled()) frame.recycle();
+                publish("检测到使用条款页，正在点击“同意”（" + attempt + "/3）");
+                boolean clicked = ScriptGameAdapter.requireConnected(control)
+                        .tap(tap.x, tap.y, 100L, 5_000L);
+                if (!clicked) throw new IllegalStateException("使用条款页已识别，但点击“同意”未成功");
+                control.sleep(1_000L);
             }
-            publish("检测到使用条款确认按钮，请在游戏界面手动阅读并确认；脚本不会代点");
-            while (true) {
-                control.sleep(1_500L);
-                Bitmap nextFrame = captureStartupFrame(30_000L, 5_000L);
-                try {
-                    if (!isStartupAgreeButtonVisible(nextFrame, template)) {
-                        publish("使用条款按钮已消失，继续自动登录流程");
-                        return;
-                    }
-                } finally {
-                    if (!nextFrame.isRecycled()) nextFrame.recycle();
+            Bitmap verifyFrame = captureStartupFrame(30_000L, 5_000L);
+            try {
+                if (findStartupAgreeButton(verifyFrame, template) != null) {
+                    throw new IllegalStateException("已重试 3 次点击使用条款“同意”，页面仍未关闭");
                 }
+                publish("使用条款页已关闭，继续自动登录流程");
+            } finally {
+                if (!verifyFrame.isRecycled()) verifyFrame.recycle();
             }
         } finally {
             if (!template.isRecycled()) template.recycle();
         }
     }
 
-    private boolean isStartupAgreeButtonVisible(Bitmap frame, Bitmap sourceTemplate) {
-        if (frame == null || frame.isRecycled()) return false;
+    private ScriptStartupTerms.Tap findStartupAgreeButton(Bitmap frame, Bitmap sourceTemplate) {
+        if (frame == null || frame.isRecycled()) return null;
         LegacyCoordinateMapper mapper = new LegacyCoordinateMapper(
                 1280, 720, frame.getWidth(), frame.getHeight());
         int templateWidth = Math.max(1, mapper.toScreenDeltaX(sourceTemplate.getWidth()));
@@ -564,7 +570,8 @@ public final class ScriptRuntimeService extends Service {
             LegacyImageMatcher.Match match = LegacyImageMatcher.find(screenPixels, templatePixels,
                     mapper.left(320), mapper.top(504), mapper.right(640), mapper.bottom(684),
                     0x00101010, 0.86d, control::checkpoint);
-            return match != null;
+            return match == null ? null : ScriptStartupTerms.templateCenter(
+                    match.x, match.y, template.width(), template.height());
         } finally {
             if (template != sourceTemplate && !template.isRecycled()) template.recycle();
         }

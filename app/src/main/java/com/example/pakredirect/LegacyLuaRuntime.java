@@ -752,8 +752,16 @@ final class LegacyLuaRuntime {
                 return acceptedText.toString();
             } catch (Exception error) {
                 rethrowIfStopped();
-                String ocrFailure = failForOcrUnavailable(error);
-                if (ocrFailure != null) throw new LuaError(ocrFailure);
+                String retryMessage = ScriptOcrFailurePolicy.retryMessage(error);
+                if (retryMessage != null) {
+                    if (listener != null) listener.onStatus(retryMessage);
+                    return "";
+                }
+                String ocrFailure = ScriptOcrFailurePolicy.failRuntimeIfCircuitOpen(control, error);
+                if (ocrFailure != null) {
+                    if (listener != null) listener.onStatus(ocrFailure);
+                    throw new LuaError(ocrFailure);
+                }
                 throw error;
             } finally {
                 if (filtered != crop) filtered.recycle();
@@ -871,16 +879,18 @@ final class LegacyLuaRuntime {
             return table;
         } catch (Exception error) {
             rethrowIfStopped();
-            String ocrFailure = failForOcrUnavailable(error);
-            if (ocrFailure != null) throw new LuaError(errorLabel + "：" + ocrFailure);
+            String retryMessage = ScriptOcrFailurePolicy.retryMessage(error);
+            if (retryMessage != null) {
+                if (listener != null) listener.onStatus(retryMessage);
+                return table;
+            }
+            String ocrFailure = ScriptOcrFailurePolicy.failRuntimeIfCircuitOpen(control, error);
+            if (ocrFailure != null) {
+                if (listener != null) listener.onStatus(ocrFailure);
+                throw new LuaError(errorLabel + "：" + ocrFailure);
+            }
             throw new LuaError(errorLabel + "：" + error.getMessage());
         } finally { crop.recycle(); }
-    }
-
-    private String failForOcrUnavailable(Throwable error) {
-        String message = ScriptOcrFailurePolicy.failRuntimeIfUnavailable(control, error);
-        if (message != null && listener != null) listener.onStatus(message);
-        return message;
     }
 
     private void installUiApi() {

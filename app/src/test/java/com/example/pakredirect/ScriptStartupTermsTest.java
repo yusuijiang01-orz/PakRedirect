@@ -32,6 +32,14 @@ public final class ScriptStartupTermsTest {
         assertFalse(ScriptStartupTerms.isTermsTitle("Quy định sử dụng"));
     }
 
+    @Test public void templateMatchTapsButtonCenterInScreenshotCoordinates() {
+        ScriptStartupTerms.Tap tap = ScriptStartupTerms.templateCenter(400, 630, 160, 48);
+        assertNotNull(tap);
+        assertEquals(480, tap.x);
+        assertEquals(654, tap.y);
+        assertNull(ScriptStartupTerms.templateCenter(400, 630, 0, 48));
+    }
+
     @Test public void rejectsGenericDialogAndIncompleteTermsBody() {
         assertNull(ScriptStartupTerms.findAgreeTap(Arrays.asList(
                 line("提示", 800, 240), line("是否继续游戏？", 800, 470),

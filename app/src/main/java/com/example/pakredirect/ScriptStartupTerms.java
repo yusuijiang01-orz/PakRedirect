@@ -77,6 +77,12 @@ final class ScriptStartupTerms {
         return new Tap(agree.x, agree.y);
     }
 
+    /** Converts a matched button template's top-left into its screen-space center. */
+    static Tap templateCenter(int left, int top, int templateWidth, int templateHeight) {
+        if (templateWidth <= 0 || templateHeight <= 0) return null;
+        return new Tap(left + templateWidth / 2, top + templateHeight / 2);
+    }
+
     static boolean isLocalizedLoginPage(List<Line> lines) {
         if (lines == null) return false;
         StringBuilder pageText = new StringBuilder();
