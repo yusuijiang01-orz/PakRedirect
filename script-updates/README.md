@@ -1,15 +1,17 @@
-# RYLUX Lua updates
+# RYLUX Lua 脚本更新
 
-The client checks `manifest.json` when the user starts the script. It downloads only listed Lua modules, validates UTF-8, byte size, and SHA-256, stages the complete release, then switches the active version atomically. If the network or manifest is unavailable, the client keeps using its last verified Lua version or the Lua assets packaged in the APK.
+脚本工作台启动脚本时读取 `manifest.json`。客户端只下载清单列出的 Lua 模块，校验 UTF-8、文件长度和 SHA-256 后，再原子切换到该版本。网络或清单异常时，继续使用上次校验通过的版本；首次联网失败时使用 APK 内置脚本。
 
-## Release rules
+## 发布规则
 
-- Use an immutable release directory: `releases/<version>/`.
-- Increment `version` for every change. Never replace files under an already published version.
-- List only top-level Lua modules from the runtime allowlist. Omitted modules continue using the APK-bundled version.
-- Update `manifest.json` only after every release file is present and its byte count and SHA-256 have been checked.
-- The client retains the active release, its previous release, and several recent cached versions.
+- 每次修改都新建 `releases/<版本号>/`，版本号递增，例如 `2026.11.03.2`。
+- 已发布的版本目录不可覆盖或删除。修改清单只改变当前版本指针，不会改写旧版本。
+- `manifest.json` 只列需要覆盖的顶层 Lua 模块；未列出的模块继续使用 APK 内置版本。
+- 发布前按真实文件字节数和 SHA-256 填写清单。客户端会拒绝 UTF-8、长度或哈希不匹配的文件。
+- 客户端保留当前版本、前一版本和近期缓存版本。仓库中的历史版本也应长期保留。
 
-## Rollback
+## 回退
 
-To roll back, point `manifest.json` at the previous immutable release by restoring its version and file list. This is a normal Git commit; clients switch on their next script start. Do not delete old release directories. The APK contains a fallback copy if no verified remote version is available.
+把根目录 `manifest.json` 的 `version` 和 `files` 改回目标历史版本对应的值，然后提交并推送。客户端下次启动脚本时会下载并切换到该版本；若网络不可用，则继续使用当前已校验版本。仓库预置的 `2026.11.03.0` 是本次远程更新前的脚本，可作为首个回退点。
+
+远程 Lua 更新器需要先随一次 RYLUX APK 安装到客户端。此后只更新 Lua 和清单，无需为 Lua 改动重建 APK。
