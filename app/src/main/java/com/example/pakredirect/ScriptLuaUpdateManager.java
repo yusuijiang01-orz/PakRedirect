@@ -176,7 +176,7 @@ public final class ScriptLuaUpdateManager {
         for (String base : new String[]{GITEE_BASE, GITHUB_BASE}) {
             HttpURLConnection connection = null;
             try {
-                connection = open(base + "/manifest.json");
+                connection = open(base + "/manifest.json?rylux_rev=" + System.currentTimeMillis());
                 if (connection.getResponseCode() != HttpURLConnection.HTTP_OK) {
                     throw new IllegalStateException("HTTP " + connection.getResponseCode());
                 }
