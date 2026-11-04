@@ -1,4 +1,9 @@
+warning: in the working copy of 'Bcore/src/main/java/top/niunaijun/blackbox/core/IOCore.java', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'Bcore/src/main/java/top/niunaijun/blackbox/utils/NativeUtils.java', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'Bcore/src/main/java/top/niunaijun/blackbox/core/IOCore.java', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'Bcore/src/main/java/top/niunaijun/blackbox/utils/NativeUtils.java', LF will be replaced by CRLF the next time Git touches it
 diff --git a/Bcore/src/main/java/top/niunaijun/blackbox/core/IOCore.java b/Bcore/src/main/java/top/niunaijun/blackbox/core/IOCore.java
+index bf4d3ed..6bd47c7 100644
 --- a/Bcore/src/main/java/top/niunaijun/blackbox/core/IOCore.java
 +++ b/Bcore/src/main/java/top/niunaijun/blackbox/core/IOCore.java
 @@ -1,5 +1,6 @@
@@ -8,11 +13,10 @@ diff --git a/Bcore/src/main/java/top/niunaijun/blackbox/core/IOCore.java b/Bcore
  import android.annotation.SuppressLint;
  import android.content.Context;
  import android.content.pm.ApplicationInfo;
-@@ -112,6 +113,18 @@ public class IOCore {
-             int systemUserId = BlackBoxCore.getHostUserId();
+@@ -115,6 +116,18 @@ public class IOCore {
              rule.put(String.format("/data/data/%s/lib", packageName), packageInfo.nativeLibraryDir);
              rule.put(String.format("/data/user/%d/%s/lib", systemUserId, packageName), packageInfo.nativeLibraryDir);
-+
+ 
 +            // Some games derive the legacy native-library path from sourceDir.
 +            // Redirect the virtual install path to the ABI-specific extracted libs.
 +            if (!TextUtils.isEmpty(packageInfo.sourceDir) && !TextUtils.isEmpty(packageInfo.nativeLibraryDir)) {
@@ -24,23 +28,22 @@ diff --git a/Bcore/src/main/java/top/niunaijun/blackbox/core/IOCore.java b/Bcore
 +                            + " -> " + packageInfo.nativeLibraryDir);
 +                }
 +            }
- 
++
              rule.put(String.format("/data/data/%s", packageName), packageInfo.dataDir);
              rule.put(String.format("/data/user/%d/%s", systemUserId, packageName), packageInfo.dataDir);
+ 
 diff --git a/Bcore/src/main/java/top/niunaijun/blackbox/utils/NativeUtils.java b/Bcore/src/main/java/top/niunaijun/blackbox/utils/NativeUtils.java
+index f21b8fd..3b83a73 100644
 --- a/Bcore/src/main/java/top/niunaijun/blackbox/utils/NativeUtils.java
 +++ b/Bcore/src/main/java/top/niunaijun/blackbox/utils/NativeUtils.java
-@@ -12,6 +12,8 @@
- import java.io.OutputStream;
- import java.util.Enumeration;
- import java.util.zip.ZipEntry;
- import java.util.zip.ZipFile;
+@@ -1,5 +1,6 @@
+ package top.niunaijun.blackbox.utils;
  
 +import top.niunaijun.blackbox.BlackBoxCore;
-+
- public class NativeUtils {
-@@ -23,12 +25,22 @@
-         if (!nativeLibDir.exists()) {
+ import android.os.Build;
+ import android.util.Log;
+ 
+@@ -25,11 +26,21 @@ public class NativeUtils {
              nativeLibDir.mkdirs();
          }
          try (ZipFile zipfile = new ZipFile(apk.getAbsolutePath())) {
