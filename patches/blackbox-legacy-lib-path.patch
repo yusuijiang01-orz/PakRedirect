@@ -30,23 +30,16 @@ diff --git a/Bcore/src/main/java/top/niunaijun/blackbox/core/IOCore.java b/Bcore
 diff --git a/Bcore/src/main/java/top/niunaijun/blackbox/utils/NativeUtils.java b/Bcore/src/main/java/top/niunaijun/blackbox/utils/NativeUtils.java
 --- a/Bcore/src/main/java/top/niunaijun/blackbox/utils/NativeUtils.java
 +++ b/Bcore/src/main/java/top/niunaijun/blackbox/utils/NativeUtils.java
-@@ -1,7 +1,8 @@
- package top.niunaijun.blackbox.utils;
- 
- import android.os.Build;
- import android.util.Log;
- 
- import java.io.BufferedInputStream;
-@@ -14,6 +15,8 @@ import java.io.OutputStream;
+@@ -12,6 +12,8 @@
+ import java.io.OutputStream;
  import java.util.Enumeration;
  import java.util.zip.ZipEntry;
  import java.util.zip.ZipFile;
  
 +import top.niunaijun.blackbox.BlackBoxCore;
 +
- 
  public class NativeUtils {
-@@ -21,12 +24,20 @@ public class NativeUtils {
+@@ -23,12 +25,22 @@
          if (!nativeLibDir.exists()) {
              nativeLibDir.mkdirs();
          }
