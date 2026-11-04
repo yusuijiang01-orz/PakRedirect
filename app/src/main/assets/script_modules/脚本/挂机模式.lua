@@ -1591,6 +1591,14 @@ function L0_1()
     _ENV["当前背包格子"] = snapshot.空格
     _ENV["当前背包重量"] = snapshot.重量 .. "/" .. snapshot.上限
   end
+  local function needsEmergencyClear(snapshot)
+    return snapshot.空格 <= reserveSlots
+        or snapshot.上限 - snapshot.重量 <= reserveWeight
+  end
+  local function hasMovementRoom(snapshot)
+    return snapshot.空格 > reserveSlots
+        and snapshot.上限 - snapshot.重量 > reserveWeight
+  end
   local function bagOpen()
     if type(tz) == "table" and tz["背包页面"] ~= nil
         and _ENV["找到"](tz["背包页面"]) then
@@ -1771,13 +1779,13 @@ function L0_1()
   local snapshot, reason = readSnapshot()
   if not snapshot then return setFailure("超重清理暂停：" .. tostring(reason)) end
   saveSnapshot(snapshot)
-  if snapshot.重量 <= snapshot.上限 then
+  if not needsEmergencyClear(snapshot) then
     _ENV["超重清理_下次尝试时间"] = nil
     return true
   end
   local enabled = config["超重时原地丢弃低品质装备"]
   if enabled ~= nil and not isEnabled(enabled) then
-    return setFailure("已超重：请开启原地清理低品质装备后再前往大夫")
+    return setFailure("背包已满：请开启原地清理低品质装备")
   end
 
   if not bagOpen() then
@@ -1798,12 +1806,11 @@ function L0_1()
     snapshot, reason = readSnapshot()
     if not snapshot then return setFailure("超重清理暂停：" .. tostring(reason)) end
     saveSnapshot(snapshot)
-    local targetWeight = math.max(0, snapshot.上限 - reserveWeight)
-    if snapshot.重量 <= targetWeight then
+    if hasMovementRoom(snapshot) then
       if not closeBag() then return setFailure("减重完成但背包未能关闭") end
       _ENV["超重清理_下次尝试时间"] = nil
-      _ENV["当前任务2"] = "超重已清理，已确认重量 " .. snapshot.重量 .. "/" .. snapshot.上限 .. "，前往大夫"
-      toast("已确认减重，前往大夫")
+      _ENV["当前任务2"] = "背包已腾出空间，前往大夫"
+      toast("背包已腾出空间，前往大夫")
       return true
     end
 
@@ -1834,7 +1841,7 @@ function L0_1()
               if not beforeDrop then
                 return setFailure("超重清理暂停：" .. tostring(beforeReason))
               end
-              if beforeDrop.重量 <= math.max(0, beforeDrop.上限 - reserveWeight) then
+              if hasMovementRoom(beforeDrop) then
                 saveSnapshot(beforeDrop)
                 if not closeBag() then return setFailure("减重完成但背包未能关闭") end
                 _ENV["超重清理_下次尝试时间"] = nil
@@ -1888,7 +1895,7 @@ function L0_1()
     if scanFailed then return setFailure("背包或空格状态无法确认，已停止清理") end
     if not progressed then
       _ENV["超重清理_下次尝试时间"] = nil
-      return setFailure("已超重无法移动：没有可安全丢弃的勾选品质装备")
+      return setFailure("背包已满/超重：没有可安全丢弃的勾选品质装备")
     end
     snapshot = nil
   end
@@ -1907,10 +1914,9 @@ function L0_1()
   -- player is visibly back on the world HUD. The sale still uses its normal
   -- allowlist, rarity checks, and confirmation flow at the shop.
   local snapshot = _ENV["最近背包内存快照"]
-  if type(snapshot) == "table" and snapshot.需要去大夫 == true
-      and snapshot.超重 == true then
-    -- Never start map navigation while the live 610 snapshot says the player
-    -- exceeds maximum load. The in-place cleanup must prove fresh weight relief.
+  if type(snapshot) == "table" and snapshot.需要去大夫 == true then
+    -- Clear verified junk in place on either threshold. A full slot count can
+    -- also prevent movement, even when the weight counter is still below max.
     return _ENV["去卖货_超重时原地清理低品质装备"]()
   end
   if type(snapshot) == "table" and snapshot.需要去大夫 == true

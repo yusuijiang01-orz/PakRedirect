@@ -1,12 +1,12 @@
 {
   "schema": 1,
   "module": "rylux-lua",
-  "version": "2026.11.04.11",
+  "version": "2026.11.04.12",
   "files": [
     {
       "name": "挂机模式.lua",
-      "size": 164704,
-      "sha256": "17d4efe54535a3f13deb93bfd11dcd6cd605a31a45b6c10234e02e845fae3494"
+      "size": 164787,
+      "sha256": "2d3dc0b1927742ef86716f22b3c928a9c059866978ff029632309a7964d65720"
     }
   ]
 }
