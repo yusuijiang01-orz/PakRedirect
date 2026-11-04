@@ -2440,20 +2440,21 @@ function L0_1()
   local now = tickCount()
   -- Tepaylink's current Vietnamese account page exposes a wide, solid-blue
   -- native login button. Its label is not the old Chinese image template, so
-  -- match the stable button fill first; the seven spaced samples reject the
-  -- small blue checkboxes and other unrelated controls without OCR.
+  -- match the wide, solid button fill in its actual lower-screen location.
+  -- The long horizontal sample line excludes the small blue checkboxes.
   local loginX, loginY
   local cached = _ENV["登录_账号按钮缓存"]
   if type(cached) == "table" and now - (tonumber(cached.time) or 0) < 250 then
     if cached.found then loginX, loginY = cached.x, cached.y end
   else
     local ok, buttonX, buttonY = pcall(function()
-      return findMultiColor(150, 532, 760, 548, "2A9CF5-181818",
-        "40|0|2A9CF5-181818|100|0|2A9CF5-181818|170|0|2A9CF5-181818|240|0|2A9CF5-181818|310|0|2A9CF5-181818|380|0|2A9CF5-181818|450|0|2A9CF5-181818")
+      return findMultiColor(410, 628, 445, 650, "2A9CF5-101010",
+        "35|12|2A9CF5-101010|75|12|2A9CF5-101010|115|12|2A9CF5-101010|155|12|2A9CF5-101010|195|12|2A9CF5-101010|235|12|2A9CF5-101010|275|12|2A9CF5-101010|315|12|2A9CF5-101010|355|12|2A9CF5-101010|395|12|2A9CF5-101010|435|12|2A9CF5-101010")
     end)
     buttonX, buttonY = tonumber(buttonX), tonumber(buttonY)
-    if ok and buttonX ~= nil and buttonY ~= nil and buttonX >= 150 and buttonX <= 300 then
-      loginX, loginY = math.floor(buttonX + 288), math.floor(buttonY + 18)
+    if ok and buttonX ~= nil and buttonY ~= nil and buttonX >= 410 and buttonX <= 445
+        and buttonY >= 628 and buttonY <= 650 then
+      loginX, loginY = math.floor(buttonX + 220), math.floor(buttonY + 40)
       _ENV["登录_账号按钮缓存"] = {time = now, found = true, x = loginX, y = loginY}
     else
       _ENV["登录_账号按钮缓存"] = {time = now, found = false}
