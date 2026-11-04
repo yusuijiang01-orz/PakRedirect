@@ -2357,12 +2357,12 @@ function L0_1(page, now)
   _ENV["登录_动作阶段"] = page
   _ENV["登录_动作开始时间"] = actions[page]
   local shortName = ({
-    ["使用条款"] = "条款已点击",
-    ["服务器进入游戏"] = "服务器已点击",
-    ["角色确认"] = "角色已确认",
-    ["账号登录"] = "登录已点击"
+    ["使用条款"] = "条款后复查",
+    ["服务器进入游戏"] = "服务器后复查",
+    ["角色确认"] = "角色后复查",
+    ["账号登录"] = "账号后复查"
   })[page] or page
-  _ENV["当前任务2"] = "登录 · " .. shortName .. "，复查页面"
+  _ENV["当前任务2"] = shortName
 end
 _ENV["登录_记录页面动作"] = L0_1
 
@@ -2375,7 +2375,7 @@ function L0_1()
   local backoff = math.min(500 * (2 ^ math.min(failures - 1, 4)), 8000)
   _ENV["登录_自动重试终止"] = false
   _ENV["登录_重试允许时间"] = tickCount() + backoff
-  _ENV["当前任务2"] = "登录 · 页面重试 " .. failures
+  _ENV["当前任务2"] = "重试 " .. failures
 end
 _ENV["登录_记录失败"] = L0_1
 
@@ -2450,6 +2450,10 @@ function L0_1()
   local held = false
   local holdOk = pcall(function() keepCapture(); held = true end)
   local ok, page, x, y = pcall(function()
+    local activityX, activityY = _ENV["活动_找关闭按钮"]()
+    if activityX ~= nil and activityY ~= nil then
+      return "活动弹窗", activityX, activityY
+    end
     if _ENV["在主页面"]() then return "游戏主界面" end
     local termsX, termsY = _ENV["登录_找条款同意按钮"]()
     if termsX ~= nil then return "使用条款", termsX, termsY end
@@ -2498,6 +2502,7 @@ function L0_1()
   _ENV["登录_自动重试终止"] = false
   local uiConfig = _ENV["界面数据"]
   if type(uiConfig) == "table" and uiConfig["自动登录"] == "false" then return false end
+  _ENV["当前任务1"] = "登录"
 
   local now = tickCount()
   local retryAt = tonumber(_ENV["登录_重试允许时间"])
@@ -2515,8 +2520,15 @@ function L0_1()
     _ENV["登录_页面动作记录"] = {}
     _ENV["登录_连接提示开始时间"] = nil
     _ENV["登录_连接提示最后看到"] = nil
-    _ENV["当前任务2"] = "游戏中 · 开始挂机"
+    _ENV["当前任务1"] = "挂机"
+    _ENV["当前任务2"] = "进入地图"
     return false
+  end
+
+  if page == "活动弹窗" then
+    _ENV["当前任务2"] = "关活动"
+    _ENV["登录_快速点击"]("@@关闭活动页面右侧X", x, y)
+    return true
   end
 
   local roleLocked = _ENV["登录_等待角色确认"] == true
@@ -2546,7 +2558,7 @@ function L0_1()
     if _ENV["登录_连接提示开始时间"] == nil then
       _ENV["登录_连接提示开始时间"] = now
     end
-    _ENV["当前任务2"] = "登录 · 关闭连接提示"
+    _ENV["当前任务2"] = "关连接提示"
     if now - _ENV["登录_连接提示开始时间"] >= 700 then
       _ENV["登录_快速点击"]("@@登录超时关闭提示", x, y)
       _ENV["登录_连接提示开始时间"] = nil
@@ -2579,7 +2591,7 @@ function L0_1()
         _ENV["登录_角色确认扫描次数"] = 0
         _ENV["登录_记录页面动作"]("服务器进入游戏", now)
       else
-        _ENV["当前任务2"] = "登录 · 等待角色页"
+        _ENV["当前任务2"] = "等角色页"
       end
       return true
     end
@@ -2593,14 +2605,14 @@ function L0_1()
         end
       elseif page == "角色返回" then
         if _ENV["登录_快速点击"]("@@角色页返回服务器选择", x, y) then
-          _ENV["当前任务2"] = "登录 · 正在返回服务器页"
+          _ENV["当前任务2"] = "回服务器"
         end
       elseif page == "角色页面" then
         if _ENV["登录_快速点击"]("@@角色页返回服务器选择", 1085, 640) then
-          _ENV["当前任务2"] = "登录 · 正在返回服务器页"
+          _ENV["当前任务2"] = "回服务器"
         end
       else
-        _ENV["当前任务2"] = "登录 · 等待服务器页"
+        _ENV["当前任务2"] = "等服务器"
       end
       return true
     end
@@ -2617,22 +2629,22 @@ function L0_1()
           _ENV["登录_角色确认恢复阶段"] = "等待服务器"
         end
       else
-        _ENV["当前任务2"] = "登录 · 识别角色页，准备重试"
+        _ENV["当前任务2"] = "识别角色页"
       end
       return true
     end
 
     if page ~= "角色返回" and page ~= "角色页面" then
-      _ENV["当前任务2"] = "登录 · 等待角色页"
+      _ENV["当前任务2"] = "等角色页"
       return true
     end
     local attempt = (tonumber(_ENV["登录_角色确认扫描次数"]) or 0) + 1
     _ENV["登录_角色确认扫描次数"] = attempt
-    _ENV["当前任务2"] = "登录 · 找角色确认 " .. attempt .. "/10"
+    _ENV["当前任务2"] = "确认 " .. attempt .. "/10"
     if attempt >= 10 then
       _ENV["登录_角色确认扫描次数"] = 0
       _ENV["登录_角色确认恢复阶段"] = "返回服务器"
-      _ENV["当前任务2"] = "登录 · 10 次未识别，返回服务器"
+      _ENV["当前任务2"] = "回服务器"
     end
     return true
   end
@@ -2667,13 +2679,13 @@ function L0_1()
     end
     return true
   elseif page == "角色返回" then
-    _ENV["当前任务2"] = "登录 · 等待角色确认"
+    _ENV["当前任务2"] = "等角色确认"
     return true
   end
 
   -- Unknown/loading screens stay inside the login loop. Never send combat,
   -- route or inventory touches to a page that has not been identified.
-  _ENV["当前任务2"] = "登录 · 识别当前页面"
+  _ENV["当前任务2"] = "识别页面"
   return true
 end
 _ENV["登录_判断一轮"] = L0_1
