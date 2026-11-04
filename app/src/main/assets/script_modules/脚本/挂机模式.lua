@@ -2475,6 +2475,10 @@ function L0_1()
         and roleBackY >= 610 and roleBackY <= 680 then
       return "角色返回", roleBackX, roleBackY
     end
+    local rolePageOk, rolePageFound = pcall(function()
+      return _ENV["找到"](tz["选角色页面"])
+    end)
+    if rolePageOk and rolePageFound then return "角色页面" end
     local returnX, returnY = _ENV["登录_找素材按钮"]("返回")
     if returnX ~= nil then return "连接提示", returnX, returnY end
     return "未知页面"
@@ -2587,6 +2591,14 @@ function L0_1()
           _ENV["登录_角色确认扫描次数"] = 0
           _ENV["登录_记录页面动作"]("服务器进入游戏", now)
         end
+      elseif page == "角色返回" then
+        if _ENV["登录_快速点击"]("@@角色页返回服务器选择", x, y) then
+          _ENV["当前任务2"] = "登录 · 正在返回服务器页"
+        end
+      elseif page == "角色页面" then
+        if _ENV["登录_快速点击"]("@@角色页返回服务器选择", 1085, 640) then
+          _ENV["当前任务2"] = "登录 · 正在返回服务器页"
+        end
       else
         _ENV["当前任务2"] = "登录 · 等待服务器页"
       end
@@ -2600,13 +2612,17 @@ function L0_1()
         if _ENV["登录_快速点击"]("@@角色页返回服务器选择", x, y) then
           _ENV["登录_角色确认恢复阶段"] = "等待服务器"
         end
+      elseif page == "角色页面" then
+        if _ENV["登录_快速点击"]("@@角色页返回服务器选择", 1085, 640) then
+          _ENV["登录_角色确认恢复阶段"] = "等待服务器"
+        end
       else
         _ENV["当前任务2"] = "登录 · 识别角色页，准备重试"
       end
       return true
     end
 
-    if page ~= "角色返回" then
+    if page ~= "角色返回" and page ~= "角色页面" then
       _ENV["当前任务2"] = "登录 · 等待角色页"
       return true
     end
