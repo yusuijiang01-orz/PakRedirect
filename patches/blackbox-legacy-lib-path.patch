@@ -30,31 +30,46 @@ diff --git a/Bcore/src/main/java/top/niunaijun/blackbox/core/IOCore.java b/Bcore
 diff --git a/Bcore/src/main/java/top/niunaijun/blackbox/utils/NativeUtils.java b/Bcore/src/main/java/top/niunaijun/blackbox/utils/NativeUtils.java
 --- a/Bcore/src/main/java/top/niunaijun/blackbox/utils/NativeUtils.java
 +++ b/Bcore/src/main/java/top/niunaijun/blackbox/utils/NativeUtils.java
-@@ -1,6 +1,5 @@
+@@ -1,7 +1,8 @@
  package top.niunaijun.blackbox.utils;
  
--import android.os.Build;
+ import android.os.Build;
  import android.util.Log;
  
  import java.io.BufferedInputStream;
-@@ -25,9 +24,15 @@ public class NativeUtils {
+@@ -14,6 +15,8 @@ import java.io.OutputStream;
+ import java.util.Enumeration;
+ import java.util.zip.ZipEntry;
+ import java.util.zip.ZipFile;
+ 
++import top.niunaijun.blackbox.BlackBoxCore;
++
+ 
+ public class NativeUtils {
+@@ -21,12 +24,20 @@ public class NativeUtils {
+         if (!nativeLibDir.exists()) {
              nativeLibDir.mkdirs();
          }
          try (ZipFile zipfile = new ZipFile(apk.getAbsolutePath())) {
 -            if (findAndCopyNativeLib(zipfile, Build.CPU_ABI, nativeLibDir)) {
 -                return;
--            }
++            String[] processAbis = BlackBoxCore.is64Bit()
++                    ? Build.SUPPORTED_64_BIT_ABIS : Build.SUPPORTED_32_BIT_ABIS;
++            if (processAbis == null || processAbis.length == 0) {
++                processAbis = new String[]{Build.CPU_ABI};
+             }
 -
 -            findAndCopyNativeLib(zipfile, "armeabi", nativeLibDir);
-+            String preferredAbi = AbiUtils.getPreferredAbi(apk);
-+            String[] processAbis = AbiUtils.getProcessAbis();
-+            Log.i(TAG, "Native ABI selection: process64="
-+                    + top.niunaijun.blackbox.BlackBoxCore.is64Bit()
++            Log.i(TAG, "Native ABI selection: process64=" + BlackBoxCore.is64Bit()
 +                    + ", supported=" + java.util.Arrays.toString(processAbis)
-+                    + ", selected=" + preferredAbi
 +                    + ", target=" + nativeLibDir.getAbsolutePath());
-+            if (preferredAbi != null && findAndCopyNativeLib(zipfile, preferredAbi, nativeLibDir)) return;
 +            for (String abi : processAbis) {
-+                if (!abi.equals(preferredAbi) && findAndCopyNativeLib(zipfile, abi, nativeLibDir)) return;
++                if (abi != null && !abi.isEmpty() && findAndCopyNativeLib(zipfile, abi, nativeLibDir)) {
++                    Log.i(TAG, "Selected native ABI: " + abi);
++                    return;
++                }
 +            }
++            Log.w(TAG, "No native libraries matched the current process ABI list");
          } finally {
+             Log.d(TAG, "Done! +" + (System.currentTimeMillis() - startTime) + "ms");
+         }
