@@ -30,6 +30,8 @@ import java.io.FileOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
@@ -87,14 +89,25 @@ final class LegacyLuaRuntime {
     }
 
     void run() throws Exception {
-        luaSourceVersion = RemoteLuaScriptStore.currentVersion(context);
-        RemoteLuaScriptStore.refreshInBackground(context);
+        CountDownLatch remoteLuaRefresh = RemoteLuaScriptStore.refreshInBackground(context);
         globals = JsePlatform.standardGlobals();
         instructionGate = new LuaInstructionGate(globals, control);
         restrictDangerousLibraries();
         installHostApi();
         try {
             control.attachCurrentThread();
+            listener.onStatus("检查 Lua 更新");
+            try {
+                remoteLuaRefresh.await(5, TimeUnit.SECONDS);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                control.checkpoint();
+                throw interrupted;
+            }
+            control.checkpoint();
+            luaSourceVersion = RemoteLuaScriptStore.currentVersion(context);
+            listener.onStatus(luaSourceVersion.isEmpty()
+                    ? "加载内置 Lua" : "加载 Lua v" + luaSourceVersion);
             loadModule("脚本/封神榜.lua", true);
         } finally {
             for (Thread thread : threads) control.cancelWorker(thread);

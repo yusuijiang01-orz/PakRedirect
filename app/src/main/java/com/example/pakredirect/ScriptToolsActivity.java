@@ -254,6 +254,7 @@ public final class ScriptToolsActivity extends Activity {
     }
 
     private void buildUi() {
+        RemoteLuaScriptStore.refreshInBackground(this);
         tabPages.clear();
         tabButtons.clear();
         LinearLayout screen = new LinearLayout(this);

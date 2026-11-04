@@ -1,7 +1,12 @@
 package com.example.pakredirect;
 
 import android.content.Context;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.net.NetworkInfo;
 import android.net.Uri;
+import android.os.Build;
 import android.util.AtomicFile;
 import android.util.Log;
 
@@ -25,6 +30,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 import java.util.function.Consumer;
 
 /** Fetches an immutable, versioned Lua bundle and keeps the last known-good copy. */
@@ -33,6 +39,7 @@ final class RemoteLuaScriptStore {
     private static final Object REFRESH_LOCK = new Object();
     private static boolean refreshInProgress;
     private static long lastRefreshAttemptAt;
+    private static CountDownLatch refreshFinished = new CountDownLatch(0);
     private static final String RAW_ROOT =
             "https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/rylux-lua-live/lua-live/";
     private static final String MANIFEST_URL = RAW_ROOT + "manifest.json";
@@ -48,28 +55,68 @@ final class RemoteLuaScriptStore {
 
     private RemoteLuaScriptStore() {}
 
-    static void refreshInBackground(Context sourceContext) {
+    static CountDownLatch refreshInBackground(Context sourceContext) {
+        Context context = sourceContext.getApplicationContext();
         synchronized (REFRESH_LOCK) {
             long now = System.currentTimeMillis();
-            if (refreshInProgress || now - lastRefreshAttemptAt < 30_000L) return;
+            if (refreshInProgress || now - lastRefreshAttemptAt < 30_000L) {
+                return refreshFinished;
+            }
+        }
+        if (!hasUsableNetwork(context)) return new CountDownLatch(0);
+
+        final CountDownLatch finished;
+        synchronized (REFRESH_LOCK) {
+            long now = System.currentTimeMillis();
+            if (refreshInProgress || now - lastRefreshAttemptAt < 30_000L) {
+                return refreshFinished;
+            }
             refreshInProgress = true;
             lastRefreshAttemptAt = now;
+            finished = new CountDownLatch(1);
+            refreshFinished = finished;
         }
-        Context context = sourceContext.getApplicationContext();
         try {
             Thread worker = new Thread(() -> {
                 try {
                     refresh(context, message -> Log.i(TAG, message));
                 } finally {
-                    synchronized (REFRESH_LOCK) { refreshInProgress = false; }
+                    finishBackgroundRefresh(finished);
                 }
             }, "RYLUX-RemoteLua");
             worker.setDaemon(true);
             worker.start();
         } catch (RuntimeException error) {
-            synchronized (REFRESH_LOCK) { refreshInProgress = false; }
+            finishBackgroundRefresh(finished);
             Log.w(TAG, "Unable to start background Lua update", error);
         }
+        return finished;
+    }
+
+    private static boolean hasUsableNetwork(Context context) {
+        try {
+            ConnectivityManager manager = (ConnectivityManager) context.getSystemService(
+                    Context.CONNECTIVITY_SERVICE);
+            if (manager == null) return false;
+            if (Build.VERSION.SDK_INT >= 23) {
+                Network network = manager.getActiveNetwork();
+                NetworkCapabilities capabilities = network == null
+                        ? null : manager.getNetworkCapabilities(network);
+                return capabilities != null
+                        && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                        && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+            }
+            NetworkInfo networkInfo = manager.getActiveNetworkInfo();
+            return networkInfo != null && networkInfo.isConnected();
+        } catch (SecurityException error) {
+            Log.w(TAG, "Unable to inspect network state", error);
+            return false;
+        }
+    }
+
+    private static void finishBackgroundRefresh(CountDownLatch finished) {
+        finished.countDown();
+        synchronized (REFRESH_LOCK) { refreshInProgress = false; }
     }
 
     static String refresh(Context sourceContext, Consumer<String> status) {
