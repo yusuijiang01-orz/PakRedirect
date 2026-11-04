@@ -6,11 +6,11 @@ on:
       version_name:
         description: 'Version name for this test build'
         required: true
-        default: '2.5.4-test'
+        default: '2.5.7-test'
       version_code:
         description: 'Monotonically increasing Android versionCode'
         required: true
-        default: '128'
+        default: '131'
       publish_release:
         description: 'Publish GitHub and Gitee releases after building (leave off for a test build)'
         required: true
@@ -22,6 +22,7 @@ on:
     paths:
       - .github/workflows/build-apk.yml
       - app/build.gradle
+      - patches/blackbox-legacy-lib-path.patch
       - app/src/main/**
       - app/src/main/java/com/example/pakredirect/RyluxAdaptiveLayoutFix.java
       - app/src/main/java/com/example/pakredirect/RyluxHomeNavigationPolish.java
@@ -37,8 +38,8 @@ jobs:
       contents: write
 
     env:
-      RYLUX_VERSION_NAME: ${{ inputs.version_name || '2.5.4-test' }}
-      RYLUX_VERSION_CODE: ${{ inputs.version_code || '128' }}
+      RYLUX_VERSION_NAME: ${{ inputs.version_name || '2.5.7-test' }}
+      RYLUX_VERSION_CODE: ${{ inputs.version_code || '131' }}
       RYLUX_KEYSTORE_B64: ${{ secrets.RYLUX_KEYSTORE_B64 }}
       RYLUX_KEYSTORE_PASSWORD: ${{ secrets.RYLUX_KEYSTORE_PASSWORD }}
       RYLUX_KEY_ALIAS: ${{ secrets.RYLUX_KEY_ALIAS }}
@@ -57,6 +58,9 @@ jobs:
       - name: Apply BlackBox foreground activity query patch
         shell: bash
         run: git -C vendor/BlackBoxReborn apply "$GITHUB_WORKSPACE/patches/blackbox-foreground-top-activity.patch"
+      - name: Apply BlackBox legacy native library path compatibility
+        shell: bash
+        run: git -C vendor/BlackBoxReborn apply "$GITHUB_WORKSPACE/patches/blackbox-legacy-lib-path.patch"
 
       - name: Check Gitee release credential
         if: inputs.publish_release

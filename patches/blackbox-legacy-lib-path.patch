@@ -1,0 +1,60 @@
+diff --git a/Bcore/src/main/java/top/niunaijun/blackbox/core/IOCore.java b/Bcore/src/main/java/top/niunaijun/blackbox/core/IOCore.java
+--- a/Bcore/src/main/java/top/niunaijun/blackbox/core/IOCore.java
++++ b/Bcore/src/main/java/top/niunaijun/blackbox/core/IOCore.java
+@@ -1,5 +1,6 @@
+ package top.niunaijun.blackbox.core;
+ 
++import android.util.Log;
+ import android.annotation.SuppressLint;
+ import android.content.Context;
+ import android.content.pm.ApplicationInfo;
+@@ -112,6 +113,18 @@ public class IOCore {
+             int systemUserId = BlackBoxCore.getHostUserId();
+             rule.put(String.format("/data/data/%s/lib", packageName), packageInfo.nativeLibraryDir);
+             rule.put(String.format("/data/user/%d/%s/lib", systemUserId, packageName), packageInfo.nativeLibraryDir);
++
++            // Some games derive the legacy native-library path from sourceDir.
++            // Redirect the virtual install path to the ABI-specific extracted libs.
++            if (!TextUtils.isEmpty(packageInfo.sourceDir) && !TextUtils.isEmpty(packageInfo.nativeLibraryDir)) {
++                File installDir = new File(packageInfo.sourceDir).getParentFile();
++                if (installDir != null) {
++                    File legacyArmLibDir = new File(installDir, "lib/arm");
++                    rule.put(legacyArmLibDir.getAbsolutePath(), packageInfo.nativeLibraryDir);
++                    Log.i(TAG, "Legacy native path mapped: " + legacyArmLibDir
++                            + " -> " + packageInfo.nativeLibraryDir);
++                }
++            }
+ 
+             rule.put(String.format("/data/data/%s", packageName), packageInfo.dataDir);
+             rule.put(String.format("/data/user/%d/%s", systemUserId, packageName), packageInfo.dataDir);
+diff --git a/Bcore/src/main/java/top/niunaijun/blackbox/utils/NativeUtils.java b/Bcore/src/main/java/top/niunaijun/blackbox/utils/NativeUtils.java
+--- a/Bcore/src/main/java/top/niunaijun/blackbox/utils/NativeUtils.java
++++ b/Bcore/src/main/java/top/niunaijun/blackbox/utils/NativeUtils.java
+@@ -1,6 +1,5 @@
+ package top.niunaijun.blackbox.utils;
+ 
+-import android.os.Build;
+ import android.util.Log;
+ 
+ import java.io.BufferedInputStream;
+@@ -25,9 +24,15 @@ public class NativeUtils {
+             nativeLibDir.mkdirs();
+         }
+         try (ZipFile zipfile = new ZipFile(apk.getAbsolutePath())) {
+-            if (findAndCopyNativeLib(zipfile, Build.CPU_ABI, nativeLibDir)) {
+-                return;
+-            }
+-
+-            findAndCopyNativeLib(zipfile, "armeabi", nativeLibDir);
++            String preferredAbi = AbiUtils.getPreferredAbi(apk);
++            String[] processAbis = AbiUtils.getProcessAbis();
++            Log.i(TAG, "Native ABI selection: process64="
++                    + top.niunaijun.blackbox.BlackBoxCore.is64Bit()
++                    + ", supported=" + java.util.Arrays.toString(processAbis)
++                    + ", selected=" + preferredAbi
++                    + ", target=" + nativeLibDir.getAbsolutePath());
++            if (preferredAbi != null && findAndCopyNativeLib(zipfile, preferredAbi, nativeLibDir)) return;
++            for (String abi : processAbis) {
++                if (!abi.equals(preferredAbi) && findAndCopyNativeLib(zipfile, abi, nativeLibDir)) return;
++            }
+         } finally {
