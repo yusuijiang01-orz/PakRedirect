@@ -1,11 +1,11 @@
 {
   "schema": 1,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "files": [
     {
       "path": "脚本/封神榜.lua",
-      "size": 13901,
-      "git_blob_sha1": "82d6625b8ce266aae79a5599636217e3b96b6264"
+      "size": 13983,
+      "git_blob_sha1": "2c6bb50f1dd6bd8cd91a9ee4a904fbb4af055a40"
     },
     {
       "path": "脚本/挂机模式.lua",
