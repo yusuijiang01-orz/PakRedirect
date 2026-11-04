@@ -2186,6 +2186,92 @@ function L0_1()
             _ENV["需要去挂机点一次"] = true
             return false
           end
+          -- Do not call the merchant trip successful just because the scan
+          -- routine returned. Close the identified shop and verify the live
+          -- 610 bag snapshot has cleared both configured thresholds first.
+          local closeOk = pcall(function()
+            if _ENV["找到"](tz["商店卖货确定页面"]) then
+              _ENV["点击"]("@@安全取消未完成卖货确认", 714, 497, 600)
+              sleep(200)
+            end
+            if _ENV["找到"](tz["商店选中装备属性页面"])
+                or _ENV["找到"](tz["商店选中非装备属性页面"]) then
+              _ENV["点击"]("@@安全关闭卖货物品详情", 1188, 626, 600)
+              sleep(200)
+            end
+            if _ENV["找到"](tz["商店页面"]) then
+              _ENV["点击"]("@@关闭卖货商店后核验背包", 1244, 104, 700)
+            end
+          end)
+          local mainReady = false
+          if closeOk then
+            for _ = 1, 10 do
+              if _ENV["在主页面"]() then
+                mainReady = true
+                break
+              end
+              sleep(150)
+            end
+          end
+          if not closeOk or not mainReady then
+            _ENV["当前任务2"] = "商店未关闭，暂不返回挂机点"
+            _ENV["需要去挂机点一次"] = true
+            toast("商店状态未确认，稍后重试")
+            return false
+          end
+          local reserveSlots = math.max(0, tonumber(_ENV["背包保留格子"]) or 2)
+          local reserveWeight = math.max(0, tonumber(_ENV["背包保留重量"]) or 3)
+          local verifiedBag, needsDoctor = nil, nil
+          for _ = 1, 8 do
+            local snapshotOk, snapshot = pcall(getSandboxBagSnapshot,
+                reserveSlots, reserveWeight)
+            if snapshotOk and type(snapshot) == "table" and snapshot.supported == true then
+              local freeSlots = tonumber(snapshot.freeSlots)
+              local weight = tonumber(snapshot.currentWeight)
+              local maxWeight = tonumber(snapshot.maxWeight)
+              local ageMs = tonumber(snapshot.ageMs)
+              local buildId = tostring(snapshot.buildId or "")
+              local prior = _ENV["最近背包内存快照"]
+              local priorBuildId = type(prior) == "table" and tostring(prior.buildId or "") or ""
+              if freeSlots and freeSlots >= 0 and freeSlots <= 200
+                  and weight and weight >= 0 and maxWeight and maxWeight > 0
+                  and ageMs and ageMs >= 0 and ageMs <= 5000 and buildId ~= ""
+                  and (priorBuildId == "" or priorBuildId == buildId) then
+                local low = freeSlots <= reserveSlots
+                    or maxWeight - weight <= reserveWeight
+                if snapshot.shouldVisitDoctor == low then
+                  verifiedBag, needsDoctor = {
+                    空格 = math.floor(freeSlots),
+                    重量 = math.floor(weight),
+                    上限 = math.floor(maxWeight),
+                    buildId = buildId,
+                    时间 = tickCount(),
+                    保留格子 = reserveSlots,
+                    保留重量 = reserveWeight,
+                    需要去大夫 = low,
+                    超重 = weight > maxWeight
+                  }, low
+                  if not low then break end
+                end
+              end
+            end
+            sleep(250)
+          end
+          if not verifiedBag then
+            _ENV["当前任务2"] = "卖货后背包数据未确认，保留卖货任务"
+            _ENV["需要去挂机点一次"] = true
+            toast("背包数据未确认，暂不返回挂机点")
+            return false
+          end
+          _ENV["最近背包内存快照"] = verifiedBag
+          _ENV["当前背包格子"] = verifiedBag.空格
+          _ENV["当前背包重量"] = verifiedBag.重量 .. "/" .. verifiedBag.上限
+          if needsDoctor then
+            _ENV["当前任务2"] = "卖货后仍达清理阈值，稍后重试"
+            _ENV["需要去挂机点一次"] = true
+            toast("背包仍满或负重不足，稍后继续清理")
+            return false
+          end
           已到商店 = true
           break
         end
