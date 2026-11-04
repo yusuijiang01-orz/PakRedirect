@@ -53,6 +53,7 @@ final class LegacyLuaRuntime {
     private final ScriptRuntimeLog runtimeLog;
     private final SandboxBagSnapshotRelay bagSnapshotRelay;
     private final AtomicBoolean captureHeld = new AtomicBoolean(false);
+    private String luaSourceVersion = "";
     private final CopyOnWriteArrayList<Thread> threads = new CopyOnWriteArrayList<>();
     private final ScriptHudStatus hudStatus = new ScriptHudStatus();
     private volatile Bitmap latestFrame;
@@ -86,6 +87,8 @@ final class LegacyLuaRuntime {
     }
 
     void run() throws Exception {
+        luaSourceVersion = RemoteLuaScriptStore.currentVersion(context);
+        RemoteLuaScriptStore.refreshInBackground(context);
         globals = JsePlatform.standardGlobals();
         instructionGate = new LuaInstructionGate(globals, control);
         restrictDangerousLibraries();
@@ -1295,7 +1298,7 @@ final class LegacyLuaRuntime {
 
     private LuaValue loadModule(String assetPath, boolean main) {
         control.checkpoint();
-        try (InputStream stream = context.getAssets().open(ASSET_ROOT + assetPath);
+        try (InputStream stream = RemoteLuaScriptStore.open(context, assetPath, luaSourceVersion);
              InputStreamReader reader = new InputStreamReader(stream, StandardCharsets.UTF_8)) {
             listener.onStatus("正在加载 " + (main ? "主脚本" : "依赖模块") + "：" + assetPath);
             StringBuilder source = new StringBuilder();
