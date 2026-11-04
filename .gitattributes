@@ -1,2 +1,0 @@
-*.apk filter=lfs diff=lfs merge=lfs -text
-patches/*.patch whitespace=-blank-at-eol

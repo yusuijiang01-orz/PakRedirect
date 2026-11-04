@@ -1,0 +1,61 @@
+{
+  "schema": 1,
+  "version": "1.0.0",
+  "files": [
+    {
+      "path": "脚本/封神榜.lua",
+      "size": 13901,
+      "git_blob_sha1": "82d6625b8ce266aae79a5599636217e3b96b6264"
+    },
+    {
+      "path": "脚本/挂机模式.lua",
+      "size": 158202,
+      "git_blob_sha1": "bce2f1b7a1b5900e740629ba1fce264707a57267"
+    },
+    {
+      "path": "脚本/网页路线.lua",
+      "size": 14576,
+      "git_blob_sha1": "b8dcdd6e7572dc3cfb4328e43e00a9fa6fd0024f"
+    },
+    {
+      "path": "脚本/通用数据.lua",
+      "size": 34021,
+      "git_blob_sha1": "b142dd5f169025b009794c0f3ac6b2ade415bf6c"
+    },
+    {
+      "path": "脚本/中控.lua",
+      "size": 11852,
+      "git_blob_sha1": "4cb4e42c04b59a31281fb378e143d7ddc60b2863"
+    },
+    {
+      "path": "脚本/登录无障碍.lua",
+      "size": 2587,
+      "git_blob_sha1": "d0956f6bf10ab19f0bff3b520444181933b55fe9"
+    },
+    {
+      "path": "脚本/tomocr.lua",
+      "size": 4677,
+      "git_blob_sha1": "1e15d0a60e334204e4c5f48a4ed1adf8841ed7dc"
+    },
+    {
+      "path": "脚本/TURING_VIP.lua",
+      "size": 201255,
+      "git_blob_sha1": "703f81c170c19ae2906da583f19cb8b4489e7a2d"
+    },
+    {
+      "path": "脚本/w.lua",
+      "size": 38335,
+      "git_blob_sha1": "00b08c8053a6d26ad7b48405b417853cd6b83675"
+    },
+    {
+      "path": "插件/opPlugin.lua",
+      "size": 557274,
+      "git_blob_sha1": "dd746b55cabc0fd24d46c1c8d39748d2002755e3"
+    },
+    {
+      "path": "插件/自定义库.lua",
+      "size": 250,
+      "git_blob_sha1": "c8730ec259763d8a80d7c678af9ceb9c0bd855b3"
+    }
+  ]
+}
