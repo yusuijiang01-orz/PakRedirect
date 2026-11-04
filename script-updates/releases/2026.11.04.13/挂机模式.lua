@@ -1,0 +1,4010 @@
+local L0_1, L1_1
+
+local function 采集检测点颜色和(检测点)
+  keepCapture()
+  local ok, colornumber = pcall(function()
+    local sum = 0
+    for i = 1, #检测点 do
+      sum = sum + getPixelColor(检测点[i][1], 检测点[i][2], 1)
+    end
+    return sum
+  end)
+  releaseCapture()
+  if not ok then
+    error(colornumber, 0)
+  end
+  return colornumber
+end
+
+function L0_1()
+  if _ENV["上次检测卡死"] == nil or tickCount() - _ENV["上次检测卡死"] > 5000 then
+    if _ENV["没有变化次数"] == nil then
+      _ENV["没有变化次数"] = 0
+    end
+    local 检测点 = {}
+    local a, b, c, d = 387, 60, 1218, 465
+    for x = a, c, 10 do
+      for y = b, d, 10 do
+        table.insert(检测点, {x, y})
+      end
+    end
+    local colornumber = 采集检测点颜色和(检测点)
+    print(colornumber)
+    if _ENV["上次检测点色值"] == colornumber then
+      _ENV["没有变化次数"] = _ENV["没有变化次数"] + 1
+      if _ENV["没有变化次数"] >= 10 then
+        toast("长时间没变化")
+        sleep(1000)
+        _ENV["没有变化次数"] = 0
+        return true
+      end
+    else
+      toast("没有卡死")
+      _ENV["没有变化次数"] = 0
+    end
+    _ENV["上次检测卡死"] = tickCount()
+    _ENV["上次检测点色值"] = colornumber
+  else
+  end
+end
+
+_ENV["检测卡死"] = L0_1
+
+function L0_1()
+  if _ENV["检测寻路完成_寻路没有变化次数"] == nil then
+    _ENV["检测寻路完成_寻路没有变化次数"] = 0
+  end
+  local 检测点 = {}
+  local a, b, c, d = 1132, 168, 1196, 189
+  for x = a, c, 10 do
+    for y = b, d, 10 do
+      table.insert(检测点, {x, y})
+    end
+  end
+  local colornumber = 采集检测点颜色和(检测点)
+  if _ENV["检测寻路完成_上次检测寻路点色值"] == colornumber then
+    _ENV["检测寻路完成_寻路没有变化次数"] = _ENV["检测寻路完成_寻路没有变化次数"] + 1
+    if _ENV["检测寻路完成_已观察移动"]
+        and _ENV["检测寻路完成_寻路没有变化次数"] >= 3 then
+      toast("寻路完成")
+      sleep(1000)
+      _ENV["检测寻路完成_寻路没有变化次数"] = 0
+      _ENV["检测寻路完成_已观察移动"] = false
+      return true
+    end
+  else
+    if _ENV["检测寻路完成_上次检测寻路点色值"] ~= nil then
+      _ENV["检测寻路完成_已观察移动"] = true
+    end
+    _ENV["检测寻路完成_寻路没有变化次数"] = 0
+  end
+  _ENV["检测寻路完成_上次检测寻路点色值"] = colornumber
+end
+
+_ENV["检测寻路完成"] = L0_1
+
+function L0_1()
+  if _ENV["检测挂机长时间不移动_上次检测寻路"] == nil or tickCount() - _ENV["检测挂机长时间不移动_上次检测寻路"] > 1000 then
+    if _ENV["检测挂机长时间不移动_寻路没有变化次数"] == nil then
+      _ENV["检测挂机长时间不移动_寻路没有变化次数"] = 0
+    end
+    local 检测点 = {}
+    local a, b, c, d = 1124, 166, 1201, 193
+    local a, b, c, d = 1131, 169, 1196, 190
+    for x = a, c, 10 do
+      for y = b, d, 10 do
+        table.insert(检测点, {x, y})
+      end
+    end
+    local colornumber = 采集检测点颜色和(检测点)
+    print(colornumber)
+    if _ENV["检测挂机长时间不移动_上次检测寻路点色值"] == colornumber then
+      _ENV["检测挂机长时间不移动_寻路没有变化次数"] = _ENV["检测挂机长时间不移动_寻路没有变化次数"] + 1
+      if _ENV["检测挂机长时间不移动_寻路没有变化次数"] >= tonumberEx(_ENV["界面数据"]["挂机不移动秒"]) then
+        toast("挂机长时间不移动")
+        sleep(1000)
+        _ENV["检测挂机长时间不移动_寻路没有变化次数"] = 0
+        return true
+      end
+    else
+      _ENV["检测挂机长时间不移动_寻路没有变化次数"] = 0
+    end
+    _ENV["检测挂机长时间不移动_上次检测寻路"] = tickCount()
+    _ENV["检测挂机长时间不移动_上次检测寻路点色值"] = colornumber
+  else
+  end
+end
+
+_ENV["检测挂机长时间不移动"] = L0_1
+
+-- Only use the recovered image templates in the foreground loop. OCR here
+-- used to run on every pass and could wedge the shared Lua runtime on idle HUD.
+function L0_1()
+  return _ENV["找到"](tz["组队_附近玩家页面"])
+      or _ENV["找到"](tz["组队_附近队伍页面"])
+end
+_ENV["组队_页面已打开"] = L0_1
+
+function L0_1()
+  if not _ENV["组队_页面已打开"]() then return false end
+  _ENV["点击"]("@@关闭队伍页面", 1203, 130, 1000)
+  return true
+end
+_ENV["组队_关闭页面"] = L0_1
+
+-- Detect the activity modal's actual X button and tap its matched center.
+-- The title-only check and fixed close point were unreliable across DPI and
+-- letterboxed game viewports.
+function L0_1()
+  local ok, matched, x, y = pcall(function()
+    return findPicAdaptive(1060, 45, 1260, 180,
+        "素材库/活动页面关闭按钮.png", "101010", 0, 0.70)
+  end)
+  if not ok or (matched ~= true and (tonumber(matched) == nil or tonumber(matched) <= 0))
+      or tonumber(x) == nil or tonumber(y) == nil then
+    return nil, nil
+  end
+  return math.floor(tonumber(x)), math.floor(tonumber(y))
+end
+_ENV["活动_找关闭按钮"] = L0_1
+
+function L0_1()
+  local x, y = _ENV["活动_找关闭按钮"]()
+  return x ~= nil and y ~= nil
+end
+_ENV["活动_页面已打开"] = L0_1
+
+function L0_1()
+  local x, y = _ENV["活动_找关闭按钮"]()
+  if x == nil or y == nil then return false end
+  _ENV["点击"]("@@关闭活动页面右侧X", x, y, 1000)
+  return true
+end
+_ENV["活动_关闭页面"] = L0_1
+
+function L0_1()
+  local 返回值 = false
+  local tt1 = tickCount()
+  local t1 = _ENV["取上次点击时间"]()
+  -- Recover the modal before running screenshot-heavy health checks. If one of
+  -- those checks fails, the localized party window must still get a close attempt.
+  _ENV["活动_关闭页面"]()
+  _ENV["组队_关闭页面"]()
+  if _ENV["找到"]("@@登录横竖不对", tz["登录横竖不对"]) then
+    keyPress("home")
+    sleep(1000)
+  end
+  if _ENV["检测卡死"]() then
+    stopApp(_ENV["游戏包名"])
+    sleep(4000)
+    返回值 = true
+  end
+  if _ENV["找到"](tz["提示掉线"]) or _ENV["找到"](tz["提示下载出现问题"]) or _ENV["找到"](tz["提示服务器维护中"]) or _ENV["找到"](tz["提示账号使用中"]) then
+    toast("提示掉线 下载出现问题 服务器维护中 提示账号使用中 重启游戏")
+    stopApp(_ENV["游戏包名"])
+    sleep(4000)
+    返回值 = true
+  end
+  if not appIsRunning(_ENV["游戏包名"]) then
+    _ENV["当前任务2"] = "游戏没有开启 开一次vpn"
+    _ENV["开启vpn函数"]()
+    sleep(1000)
+    toast("启动游戏")
+    _ENV["需要去挂机点一次"] = true
+    runApp(_ENV["游戏包名"])
+    sleep(4000)
+    返回值 = true
+  end
+  if frontAppName() ~= _ENV["游戏包名"] then
+    _ENV["当前任务2"] = "游戏没有开启 开一次vpn"
+    _ENV["开启vpn函数"]()
+    sleep(1000)
+    toast("启动游戏")
+    _ENV["需要去挂机点一次"] = true
+    runApp(_ENV["游戏包名"])
+    sleep(4000)
+    返回值 = true
+  end
+  if _ENV["找到"](tz["负重满了提示"]) then
+    toast("负重满了提示")
+  end
+  _ENV["找到点击"]("@@行为设置页面关闭按钮", tz["行为设置页面关闭按钮"])
+  _ENV["找到点击"]("@@不更新", tz["新版本更新按钮"], {
+    735,
+    448,
+    1000
+  })
+  _ENV["找到点击"]("@@拍卖行页面", tz["拍卖行页面"], {
+    1200,
+    127,
+    1000
+  })
+  _ENV["找到点击"]("@@死亡有时候弹出", tz["死亡有时候弹出"])
+  if _ENV["找到"]("@@提示或拒绝", tz["弹出提示或拒绝"]) then
+    sleep(500)
+    _ENV["找到点击"]("@@是否加入其他人队伍弹出", tz["是否加入其他人队伍弹出"], {
+      755,
+      411,
+      1000
+    })
+  end
+  print("通用处理用时" .. tickCount() - tt1)
+  if t1 < _ENV["取上次点击时间"]() then
+    返回值 = true
+  end
+  return 返回值
+end
+
+_ENV["通用处理"] = L0_1
+
+function L0_1()
+  if _ENV["找到"](tz["对话页面"]) then
+    if _ENV["找到"](tz["对话进入商店按钮"]) then
+      _ENV["点击"]("@@关闭对话 不去商店", 1233, 421, 1000)
+    else
+      _ENV["点击"]("@@关闭对话", 892, 652, 1000)
+    end
+  end
+  if _ENV["找到"](tz["商店买货确定页面"]) then
+    _ENV["点击"]("@@关闭商店买货确定页面", 914, 198, 1000)
+  end
+  if _ENV["找到"](tz["商店卖货确定页面"]) then
+    _ENV["点击"]("@@关闭商店卖货确定页面", 714, 497, 1000)
+  end
+  if _ENV["找到"](tz["商店选中装备属性页面"]) or _ENV["找到"](tz["商店选中非装备属性页面"]) then
+    _ENV["点击"]("@@关闭商店选中装备属性页面", 1188, 626, 1000)
+  end
+  if _ENV["找到"](tz["签到页面"]) then
+    _ENV["点击"]("@@关闭签到页面", 1198, 119, 1000)
+  end
+  if _ENV["找到"](tz["背包页面"]) or _ENV["药品_识别背包页面"] ~= nil and _ENV["药品_识别背包页面"]() then
+    _ENV["点击"]("@@关闭背包", 1244, 104, 1000)
+  end
+  if _ENV["找到"](tz["商店页面"]) then
+    _ENV["点击"]("@@关闭商店", 1244, 104, 1000)
+  end
+  if _ENV["大地图页面已打开"]() then
+    _ENV["点击"]("@@关闭大地图", 1239, 40, 1000)
+  end
+  if _ENV["找到"](tz["确定输入内容"]) then
+    _ENV["点击"]("@@关闭输入内容", 85, 190, 1000)
+  end
+  if _ENV["找到"](tz["自动设置页面"]) or _ENV["药品_识别自动设置页面"] ~= nil and _ENV["药品_识别自动设置页面"]() then
+    _ENV["点击"]("@@自动设置页面 关闭", 1234, 54, 2000)
+  end
+end
+
+_ENV["通用关闭"] = L0_1
+
+function L0_1(目标区)
+  for i = 1, 2 do
+    if 目标区 == "1" or 目标区 == "2" or 目标区 == "3" or 目标区 == "4" then
+      _ENV["点击"](165, 201, 1000)
+      _ENV["点击"](540, 230, 1000)
+    end
+    if 目标区 == "5" or 目标区 == "6" then
+      _ENV["点击"](165, 201, 1000)
+      _ENV["点击"](984, 237, 1000)
+    end
+    if 目标区 == "7" then
+      _ENV["点击"](165, 201, 1000)
+      _ENV["点击"](537, 323, 1000)
+    end
+    if 目标区 == "8" then
+      _ENV["点击"](165, 201, 1000)
+      _ENV["点击"](999, 327, 1000)
+    end
+    if 目标区 == "9" then
+      _ENV["点击"](165, 201, 1000)
+      _ENV["点击"](542, 414, 1000)
+    end
+  end
+  _ENV["点击"]("@@确定", 755, 662, 2000)
+end
+
+_ENV["登录_选区"] = L0_1
+
+function L0_1(a, b, c, d)
+  local x = -1
+  local y = -1
+  x, y = findMultiColor(a, b, c, d, "8c2829-111111", "3|-7|a53031-111111|4|-12|842829-111111|1|-16|ad3031-111111|-1|-22|842421-111111|-4|-17|c67173-111111|-8|-12|bd494a-111111|-9|-10|b53431-111111|-7|-4|842429-111111|-6|-2|8c2829-111111|-2|-3|942829-111111|-1|-13|a52c31-111111|-1|-20|8c2829-111111|-5|-10|f7d7d6-111111|-5|-12|e7b2b5-111111|-3|-28|ad6531-111111|-2|-28|ad6531-111111|0|-27|b56d31-111111|-1|-29|9c5929-111111|-2|-23|7b2421-111111|-2|-19|9c2c29-111111|0|-13|a52c31-111111", 0, 0.9)
+  if x ~= -1 and y ~= -1 then
+    return "小红"
+  end
+  local x = -1
+  local y = -1
+  x, y = findMultiColor(a, b, c, d, "8c2829-111111", "-1|-1|942d29-111111|-5|-4|ad3d3a-111111|-1|-14|b5494a-111111|0|-17|942829-111111|4|-11|a42d29-111111|7|-4|a43131-111111|3|-6|ad3131-111111|-2|-7|efcece-111111|-2|-8|e6b2b5-111111|-1|-24|845529-111111|1|-25|a45d31-111111|4|-24|845129-111111|4|-23|ad6d31-111111|1|-22|ad8142-111111|5|-11|ad3131-111111|7|-6|a43131-111111|2|2|9c2d29-111111|-1|-3|a4393a-111111|2|-9|ad3131-111111|66|63|291410-111111", 0, 0.9)
+  if x ~= -1 and y ~= -1 then
+    return "小红"
+  end
+  local x = -1
+  local y = -1
+  x, y = findMultiColor(a, b, c, d, "943431-111111", "-5|-1|942829-111111|-9|-5|942829-111111|-12|-10|b54142-111111|-10|-18|a52c31-111111|0|-20|7b2421-111111|3|-18|842021-111111|4|-14|9c3031-111111|2|-7|b5595a-111111|-4|-9|ce797b-111111|-7|-13|dea2a5-111111|-9|-16|d69a9c-111111|-4|-25|b58e42-111111|-6|-27|b58e4a-111111|-9|-25|a57931-111111|-7|-23|9c6d31-111111|-2|-24|9c6529-111111|-3|-27|9c6529-111111|-2|-17|943439-111111|-6|-8|c67173-111111|-5|-1|942829-111111|-8|-1|942829-111111|-3|-1|8c2829-111111|1|-3|ad5552-111111", 0, 0.9)
+  if x ~= -1 and y ~= -1 then
+    return "大红"
+  end
+  local x = -1
+  local y = -1
+  x, y = findMultiColor(a, b, c, d, "3151a5-111111", "-2|5|3155a5-111111|-3|7|29458c-111111|-6|8|213c73-111111|-9|2|294994-111111|-11|-1|395dad-111111|-10|-4|849ad6-444444|-7|-9|8c9ece-111111|-5|-11|3151a5-111111|-8|-4|d6dbef-111111|-9|1|294d9c-111111|-5|5|294d9c-111111|-2|-2|294d9c-111111|-3|-10|3155a5-111111|-4|-15|214184-111111|-5|-17|213c7b-111111|-6|-20|b57939-111111|-7|-20|b5824a-111111|-5|-21|ad6531-111111|-5|-23|211c18-111111|-5|-21|ad6531-111111|-4|-20|b56931-111111|-5|-21|ad6531-111111|-6|-22|a55d31-111111|-6|-23|211c18-111111", 0, 0.9)
+  if x ~= -1 and y ~= -1 then
+    return "小蓝"
+  end
+  -- Localized inventory medicine icons are smaller than the old pixel
+  -- signature and their stack count is drawn beside the bottle. Match a
+  -- masked bottle template only inside a single inventory cell.
+  if type(findPic) == "function" and c - a >= 60 and c - a <= 80 and d - b >= 60 and d - b <= 80 then
+    local matched, mx, my = findPic(a, b, c, d,
+        "素材库/汉化红药瓶图标.png", "101010", 0, 0.65)
+    mx, my = tonumber(mx), tonumber(my)
+    if (matched == true or tonumber(matched) == 1)
+        and mx ~= nil and my ~= nil and mx >= a and mx <= c and my >= b and my <= d then
+      return "小红"
+    end
+    local matched, mx, my = findPic(a, b, c, d,
+        "素材库/汉化蓝药瓶图标.png", "101010", 0, 0.88)
+    mx, my = tonumber(mx), tonumber(my)
+    if (matched == true or tonumber(matched) == 1)
+        and mx ~= nil and my ~= nil and mx >= a and mx <= c and my >= b and my <= d then
+      return "小蓝"
+    end
+  end
+  local x = -1
+  local y = -1
+  x, y = findMultiColor(a, b, c, d, "3155a4-111111", "-5|6|294d9c-111111|-7|6|294d9c-111111|-12|2|294994-111111|-13|-2|4265b5-111111|-11|-5|738ed6-111111|-10|-3|cedbef-111111|-8|-9|849ace-111111|-8|-15|214184-111111|-5|-13|29498c-111111|-5|-13|29498c-111111|-8|-21|ad6931-111111|-6|-21|ad6531-111111|-5|-21|ad6931-111111", 0, 0.9)
+  if x ~= -1 and y ~= -1 then
+    return "小蓝"
+  end
+  -- The localized HUD overlays the potion stack count across most of the
+  -- quickslot icon. Match the small, still-visible blue bottle patch instead
+  -- of requiring the unobscured Vietnamese-era bottle silhouette.
+  if c - a <= 55 and d - b <= 55 and b >= 280 and b <= 350 then
+    x, y = findMultiColor(a, b, c, d, "294d9c-222222", "2|0|294d9c-222222|0|2|294d9c-222222|2|2|3151a5-222222|0|4|3151a5-222222|2|4|3151a5-222222", 0, 0.9)
+    if x ~= -1 and y ~= -1 then
+      return "小蓝"
+    end
+  end
+  local x = -1
+  local y = -1
+  x, y = findMultiColor(a, b, c, d, "ad7d39-111111", "-1|-1|634921-111111|2|-2|b58e4a-111111|6|-1|9c6929-111111|7|0|9c7131-111111|4|1|ad8639-111111|2|0|ceb263-111111|1|1|ad8639-111111|7|2|945d29-111111|9|5|213c7b-111111|12|10|29458c-111111|12|14|31519c-111111|11|18|526dad-111111|10|22|5269ad-111111|7|26|21346b-111111|3|27|21346b-111111|0|25|294184-111111|-3|20|213c84-111111|-5|17|395db5-111111|-5|13|294d9c-111111|-4|8|3959a5-111111|-2|8|5271b5-111111|-1|11|e7eff7-111111|2|16|94a6d6-111111|5|14|6382c6-111111|3|9|637dbd-111111|0|9|9caad6-111111|0|12|cedbef-111111|0|15|94aad6-111111|4|18|4261a5-111111|9|11|315194-111111", 0, 0.9)
+  if x ~= -1 and y ~= -1 then
+    return "大蓝"
+  end
+  return ""
+end
+
+_ENV["检测背包_识别红蓝数量_识别红蓝"] = L0_1
+
+function L0_1()
+  hideToast()
+  sleep(500)
+  local 药品信息 = {}
+  local 数量识别有效 = true
+  for yy = 149, 575, 71 do
+    for xx = 670, 1035, 71 do
+      if 1024 < xx then
+      else
+        local 物品类型 = _ENV["检测背包_识别红蓝数量_识别红蓝"](xx, yy, xx + 68, yy + 72)
+        if 物品类型 == "" then
+        else
+          local 数量文本 = tomocrtextall(xx - 20 + 808 - 792, yy + 189 - 149, xx + 68 + 840 - 880, yy + 72 + 214 - 221)
+          数量文本 = tostring(数量文本 or "")
+          数量文本 = string.gsub(数量文本, "%s+", "")
+          药品信息[物品类型] = 数量文本
+          if string.match(数量文本, "^%d+$") == nil then
+            数量识别有效 = false
+          end
+        end
+      end
+    end
+  end
+  return 药品信息, 数量识别有效
+end
+
+_ENV["检测背包_识别红蓝数量"] = L0_1
+
+function L0_1(出售种类)
+  hideToast()
+  sleep(500)
+  local 药品信息 = {}
+  for yy = 149, 575, 71 do
+    for xx = 670, 1035, 71 do
+      if 1024 < xx then
+      else
+        local 物品类型 = _ENV["检测背包_识别红蓝数量_识别红蓝"](xx, yy, xx + 68, yy + 72)
+        if 物品类型:find("红") and 出售种类:find("红") or 物品类型:find("蓝") and 出售种类:find("蓝") then
+          _ENV["点击"]("@@点击" .. 出售种类, xx + 15, yy + 15, 1000)
+          _ENV["点击"]("@@点击出售" .. 出售种类, 933, 350, 1000)
+          _ENV["点击"]("@@点击确认" .. 出售种类, 544, 496, 1000)
+        end
+      end
+    end
+  end
+  return 药品信息
+end
+
+_ENV["去商店_卖货_出售红蓝"] = L0_1
+
+function L0_1(要做的处理, 当前处理的药数量)
+  local 购买数量 = 0
+  if 要做的处理 == "买蓝" then
+    购买数量 = tonumberEx(_ENV["界面数据"]["购买蓝的数量"])
+    if 购买数量 < 1 then
+      toast("蓝药购买数量小于1，已跳过")
+      return false
+    end
+    _ENV["点击"]("@@点蓝", 394, 139, 1000)
+    _ENV["点击"]("@@购买", 927, 351, 1000)
+  end
+  if 要做的处理 == "买红" then
+    购买数量 = tonumberEx(_ENV["界面数据"]["购买红的数量"])
+    if 购买数量 < 1 then
+      toast("红药购买数量小于1，已跳过")
+      return false
+    end
+    _ENV["点击"]("@@点红", 142, 139, 1000)
+    _ENV["点击"]("@@购买", 927, 351, 1000)
+  end
+  if _ENV["找到"](tz["商店买货确定页面"]) then
+    -- The captured purchase dialog opens with quantity 0, so reaching N
+    -- requires N increments before the final confirmation.
+    for i = 1, tonumber(购买数量) do
+      _ENV["点击"]("@@购买+1", 773, 356, 500)
+    end
+    _ENV["点击"]("@@确定购买数量", 545, 495, 1000)
+    return true
+  end
+  toast("购买确认界面未出现，跳过购买")
+  return false
+end
+
+_ENV["去商店_卖货_购买红蓝"] = L0_1
+
+function L0_1()
+  local index, x, y = findColor(797, 90, 1013, 130, "ffff00-111111|ffff00-111111|ffff00-111111|f7f700-111111", 0, 0.9)
+  if 0 < x then
+    return "黄色"
+  end
+  local index, x, y = findColor(797, 90, 1013, 130, "00ff00-111111|00e700-111111|00ff00-111111|00f700-111111|00c600-111111|00ff00-111111|00ff00-111111|00d200-111111|00ff00-111111", 0, 0.9)
+  if 0 < x then
+    return "绿色"
+  end
+  local index, x, y = findColor(797, 90, 1013, 130, "efa23a-111111|efa231-111111|e69e3a-111111|e69e3a-111111|e69a31-111111|e69a31-111111|f7aa3a-111111|c58629-111111|c58629-111111", 0, 0.9)
+  if 0 < x then
+    return "橙色"
+  end
+  local index, x, y = findColor(797, 90, 1013, 130, "5a5def-111111|6361ff-111111|4a79ff-111111|4388ff-111111", 0, 0.9)
+  if 0 < x then
+    return "蓝色"
+  end
+  local index, x, y = findColor(797, 90, 1013, 130, "ffffff-111111|f7f7f7-111111|eeeeee-111111|dedede-111111", 0, 0.9)
+  if 0 < x then
+    return "白色"
+  end
+  return "未识别"
+end
+
+_ENV["去卖货_卖货_识别装备品质"] = L0_1
+
+function L0_1(装备品质, 出售装备品质上限)
+  local 品质配置键 = {
+    ["白色"] = "出售装备品质_白色",
+    ["蓝色"] = "出售装备品质_蓝色",
+    ["绿色"] = "出售装备品质_绿色",
+    ["黄色"] = "出售装备品质_黄色",
+    ["橙色"] = "出售装备品质_橙色"
+  }
+  local data = _ENV["界面数据"] or {}
+  local 有新品质配置 = false
+  for _, key in pairs(品质配置键) do
+    if data[key] ~= nil and tostring(data[key]) ~= "" then
+      有新品质配置 = true
+      break
+    end
+  end
+  if 有新品质配置 then
+    local key = 品质配置键[装备品质]
+    return key ~= nil and (data[key] == true or tostring(data[key]) == "true")
+  end
+  local 上限 = tonumberEx(出售装备品质上限)
+  if 上限 == nil then 上限 = 0 end
+  if 装备品质 == "白色" then
+    return 上限 >= 1
+  end
+  if 装备品质 == "绿色" then
+    return 上限 >= 2
+  end
+  return false
+end
+
+_ENV["去卖货_卖货_品质是否允许出售"] = L0_1
+
+function L0_1()
+  return _ENV["去卖货_卖货_识别装备品质"]() ~= "白色"
+end
+
+_ENV["去卖货_卖货_判断是否稀有装备"] = L0_1
+
+function L0_1()
+  local x, y = findMultiColor(682, 225, 1047, 663, "e7e700-111111", "57|-1|e7e300-111111|37|12|cecb00-111111|40|4|efef00-111111|40|8|e7e300-111111|31|0|e7eb00-111111|20|9|bdbe00-111111|23|8|f7f300-111111|13|-1|ffff00-111111|14|1|ffff00-111111|-30|-1|dedf00-111111|-31|0|e7e700-111111|-27|12|cecb00-111111|-26|0|eff300-111111|-27|8|e7e700-111111|-47|-1|dee300-111111|-44|7|ffff00-111111|9|7|efef00-111111|-53|5|bdbe00-111111|-57|-3|f7f300-111111", 0, 0.9)
+  if x ~= -1 and y ~= -1 then
+    return true
+  end
+  return false
+end
+
+_ENV["去卖货_卖货_判断是否装备"] = L0_1
+
+function L0_1()
+  keepCapture()
+  local 蓝条数量 = 0
+  local a, b, c, d = 688, 240, 1005, 658
+  for i = 1, 10 do
+    local index, x, y = findColor(a, b, c, d, "6361ff-222222|6361ff-222222|6361ff-222222|3a3994-222222", 0, 0.9)
+    print(index, x, y)
+    if 0 < x then
+      b = y + 26
+      print(x, y)
+      蓝条数量 = 蓝条数量 + 1
+    else
+      break
+    end
+  end
+  releaseCapture()
+  return 蓝条数量
+end
+
+_ENV["去卖货_卖货_识别蓝条数量"] = L0_1
+
+function L0_1(a, b, c, d)
+  local x = -1
+  local y = -1
+  x, y = findMultiColor(a, b, c, d, "5a5def-111111", "0|4|5a5def-111111|-1|12|5a5def-111111|58|17|4a49b5-111111|37|18|5a5def-111111|70|11|6365ff-111111|70|6|6365ff-111111|65|6|6365ff-111111|65|8|6365ff-111111|66|10|6365ff-111111|66|11|6365ff-111111|66|12|6365ff-111111|67|13|635def-111111|68|13|5a5def-111111|67|4|5a5def-111111|68|4|5a5def-111111|31|12|5a5def-111111|31|9|5a5def-111111|31|6|5a5def-111111|30|4|6361f7-111111|29|4|5255de-111111|27|4|635def-111111|26|4|6365ff-111111|26|6|6365ff-111111|26|9|6365ff-111111|26|12|6365ff-111111", 0, 0.9)
+  if x ~= -1 and y ~= -1 then
+    return "回蓝"
+  end
+  local x = -1
+  local y = -1
+  x, y = findMultiColor(a, b, c, d, "6361f7-111111", "3|5|6365ff-111111|5|12|6361f7-111111|0|12|5a5def-111111|5|1|6365ff-111111|132|11|5251d6-111111|131|2|6361f7-111111|130|16|6361f7-111111|88|11|6361ff-111111|85|1|6b65ff-111111|97|0|5251d6-111111|98|8|6361f7-111111|94|11|6361ff-111111|94|5|6361ff-111111|88|11|6361ff-111111|107|1|6365ff-111111|107|8|6365ff-111111|110|8|6361ff-111111|116|0|6365ff-111111|116|4|6365ff-111111|116|12|6365ff-111111|121|11|5a5def-111111|121|6|5a59e6-111111|119|4|5255de-111111", 0, 0.9)
+  if x ~= -1 and y ~= -1 then
+    return "武器出招"
+  end
+  local x = -1
+  local y = -1
+  x, y = findMultiColor(a, b, c, d, "5a59e7-111111", "-2|6|6361f7-111111|-1|0|5a59e7-111111|-79|7|6365ff-111111|-81|12|6361f7-111111|-81|0|6361ff-111111|-76|0|6361f7-111111|61|14|6365ff-111111|62|11|393c9c-111111|60|6|5255d6-111111|61|3|393894-111111|56|-1|6361f7-111111|55|0|5251ce-111111|43|1|5a59e7-111111|43|4|5a59e7-111111|43|8|5a59e7-111111|43|11|5a59e7-111111|35|4|6365ff-111111|34|8|5a5def-111111|34|12|5a5def-111111|33|15|101021-111111|71|12|6361f7-111111|72|8|4a49b5-111111|72|4|393c94-111111|71|1|4a4dc6-111111", 0, 0.9)
+  if x ~= -1 and y ~= -1 then
+    return "魔法出招"
+  end
+  local ok, rows = pcall(tomocrtexttable, a, b, c, d)
+  if ok and type(rows) == "table" then
+    local text = ""
+    for _, row in pairs(rows) do
+      if type(row) == "table" then
+        local score = tonumber(row.score) or tonumber(row.confidence) or 0
+        if score >= 0.6 then
+          text = text .. tostring(row.words or row.text or "")
+        end
+      end
+    end
+    text = text:gsub("%s", ""):gsub("　", "")
+    local protectedTerms = {
+      {"回红", {"回红", "回血", "生命回复", "生命恢复", "恢复生命", "回复生命"}},
+      {"回内", {"回内", "内力回复", "内力恢复", "恢复内力", "回复内力", "hồinội", "hồiphụcnộilực"}},
+      {"回蓝", {"回蓝", "法力回复", "法力恢复", "恢复法力", "回复法力"}},
+      {"武器出招", {"武器出招"}},
+      {"魔法出招", {"魔法出招"}}
+    }
+    for _, item in ipairs(protectedTerms) do
+      for _, term in ipairs(item[2]) do
+        if string.find(text, term, 1, true) then return item[1] end
+      end
+    end
+  end
+  return ""
+end
+
+_ENV["去卖货_卖货_识别蓝条数量和属性_识别蓝条属性"] = L0_1
+
+function L0_1()
+  local ok, rows = pcall(tomocrtexttable, 663, 230, 1050, 658)
+  if not ok or type(rows) ~= "table" then return nil end
+  local text, readable = "", false
+  for _, row in pairs(rows) do
+    if type(row) == "table" then
+      local words = tostring(row.words or row.text or "")
+      text = text .. words
+      if words:gsub("%s", ""):gsub("　", "") ~= ""
+          and (tonumber(row.score) or tonumber(row.confidence) or 0) >= 0.55 then
+        readable = true
+      end
+    end
+  end
+  text = text:gsub("%s", ""):gsub("　", "")
+  local redTerms = {"回红", "回血", "生命回复", "生命恢复", "恢复生命", "回复生命"}
+  local innerTerms = {"回内", "内力回复", "内力恢复", "恢复内力", "回复内力", "hồinội", "hồiphụcnộilực"}
+  for _, term in ipairs(redTerms) do
+    if string.find(text, term, 1, true) then return "回红" end
+  end
+  for _, term in ipairs(innerTerms) do
+    if string.find(text, term, 1, true) then return "回内" end
+  end
+  if readable then return false end
+  return nil
+end
+_ENV["去卖货_检测回红回内词条"] = L0_1
+
+function L0_1(a, b, c, d)
+  local function 文字识别库()
+    local 识别库 = {}
+
+    识别库[1] = "0|7,15|1&uV&t0EW0S03&&p&y"
+    识别库[2] = "0|7,15|3&y&&q02W0U06V&m&m"
+    识别库[3] = "1|3,15|200u07&&"
+    识别库[4] = "1|4,15|G0200&&t&&"
+    识别库[5] = "1|4,15|G0600&&&&#"
+    识别库[6] = "1|4,15|G0600&&t&&"
+    识别库[7] = "2|7,15|002S1#0VWES7Z&mRu3"
+    识别库[8] = "2|7,15|3W7u3y0xWSUF3&WPm0"
+    识别库[9] = "2|7,15|3W7y3y0&WUSF3&WRu0"
+    识别库[10] = "2|7,15|1W2y1#0&WUS7Z&mRu3"
+    识别库[11] = "2|7,15|3W7y1#0&WUSFZ&mRu3"
+    识别库[12] = "3|7,15|30Su3q06WWSE6&&pny"
+    识别库[13] = "3|6,15|O3c0EW0S43nmpxy"
+    识别库[14] = "3|7,15|30Su1q03WWUE6VVnWm"
+    识别库[15] = "4|7,15|07W3a3WWu67&&&&m0W"
+    识别库[16] = "4|7,15|07W3i1mWu67&&&&m0m"
+    识别库[17] = "5|6,15|&ZcSEX0S83XWq7y"
+    识别库[18] = "5|7,15|7yC&ZqC6X0S82X&m7y"
+    识别库[19] = "5|6,15|y1qC6X0C82Xnm5q"
+    识别库[20] = "5|7,15|7ySxXq83X0SC6W&m1m"
+    识别库[21] = "6|7,15|1&u&&sC6X0SC2v&o7y"
+    识别库[22] = "6|7,15|1&uV&sE6X0S83n&p7y"
+    识别库[23] = "7|5,15|400W3yFy&m700"
+    识别库[24] = "7|6,15|W040EWV&&m&0400"
+    识别库[25] = "7|6,15|W040FW&&&m&0400"
+    识别库[26] = "8|7,15|3py&vqC2WWUE6VVm0u"
+    识别库[27] = "8|7,15|1Xy&&sE6WWSC3&&pny"
+    识别库[28] = "9|7,15|1y8&ns66WGS23&&p&y"
+    识别库[29] = "4|8,15|0S0FWF470m&&t&&0600W"
+    识别库[30] = "6|7,15|1&y&&qC3X0SC2u&m3u"
+    识别库[31] = "0|8,15|7&Z&&S0#01G0B&&F&m10"
+    识别库[32] = "1|4,15|80300V&&&&"
+    识别库[33] = "9|6,15|Vnc66WGS23uvp&y"
+    识别库[34] = "9|7,15|3yC&nq23WGU66V&m&m"
+    识别库[35] = "5|7,15|7yS&XqC6X0SC2X&m7y"
+    识别库[36] = "8|7,15|3ny&&sE3WWUE3&&nny"
+    识别库[37] = "8|7,15|3ny&&qE2WWUE2&&nXy"
+    识别库[38] = "1|4,15|G0700&&&Ts"
+    识别库[39] = "0|7,15|0&yV&x03m0A01V&v&#"
+    识别库[40] = "0|7,15|3&y&&q02W0S02&&n&u"
+    识别库[41] = "6|7,15|0&mV&tEEX0SC3nxp7y"
+    识别库[42] = "1|4,15|G0700&&zLK"
+    识别库[43] = "0|7,15|1lu&&q02W0S02d#H&y"
+    识别库[44] = "5|6,15|VntE7mWE41mmQ3#"
+    识别库[45] = "1|4,15|G0700&&xkw"
+    识别库[46] = "8|7,15|3ny&&qC3WWUE2V&m1u"
+    识别库[47] = "4|8,15|0E0Fm7Y3WG&&&&&0300G"
+    识别库[48] = "0|8,15|F&3&#u0q03W0V&#V&W20"
+    识别库[49] = "5|7,15|3#4&n#63mWE41m&u3#"
+    识别库[50] = "1|4,15|G0700&&#xk"
+    识别库[51] = "6|7,14|0Vu&&iSU41X0SU&3#"
+    识别库[52] = "0|7,15|1&u&&s06W0S03&&p&y"
+    识别库[53] = "6|7,15|3&y&&q82X0SC6u&m1m"
+    识别库[54] = "6|7,15|1&yV&w61mWA61O&u1y"
+    识别库[55] = "+|6,7|42F&yG8"
+    识别库[56] = "+|6,7|421dyO8"
+    识别库[57] = "+|5,7|21dyO8"
+    识别库[58] = "+|6,7|42FvmG8"
+    识别库[59] = "3|7,15|1WES1w01mGA73V&umO"
+    识别库[60] = "3|7,15|30Su3s07WWSE3&&pny"
+    识别库[61] = "3|7,15|30Oe2q06WWCA2&&omi"
+    识别库[62] = "7|6,15|W0400W3yFu&W700"
+    识别库[63] = "2|7,15|1m3U0x0VGFE7nVu9y1"
+    识别库[64] = "1|4,15|803W0&&wgg"
+    识别库[65] = "9|7,15|1#6Uuw11m8B33F&mVu"
+    识别库[66] = "5|7,15|3#Evm#41mWE63G&m0m"
+    return 识别库
+  end
+
+  _ENV["加载结果"] = TURING["字库_加载六十四进制识别字库"](文字识别库())
+  TURING["来源_获取屏幕像素"](a, b, c, d)
+  TURING["滤镜_彩色_二值化"]("FF6563-202020|DE5552-202020")
+  TURING["切割_范围投影切割"](1, 1)
+  local 切割数据 = TURING["切割_获取切割字符数据"]()
+  local 识别结果 = TURING["识别"](85)
+  if 识别结果 ~= nil and 识别结果 ~= "" then
+    local arr = splitStr(识别结果, "+")
+    if #arr == 2 then
+      return tonumberEx(arr[2])
+    end
+  end
+  return 0
+end
+
+_ENV["去卖货_卖货_识别蓝条数量和属性_识别蓝条数值"] = L0_1
+
+function L0_1()
+  local 装备蓝条属性数组 = {}
+  keepCapture()
+  local 蓝条数量 = 0
+  local a, b, c, d = 688, 240, 1005, 658
+  for i = 1, 10 do
+    local index, x, y = findColor(a, b, c, d, "6361ff-222222|6361ff-222222|6361ff-222222|3a3994-222222", 0, 0.9)
+    if 0 < x then
+      b = y + 26
+      蓝条数量 = 蓝条数量 + 1
+      local aa, bb, cc, dd = 663, y - 8, 1050, y + 26
+      local 蓝条属性 = _ENV["去卖货_卖货_识别蓝条数量和属性_识别蓝条属性"](aa, bb, cc, dd)
+      local 蓝条数值 = _ENV["去卖货_卖货_识别蓝条数量和属性_识别蓝条数值"](aa, bb, cc, dd)
+      table.insert(装备蓝条属性数组, {
+        ["蓝条属性"] = 蓝条属性,
+        ["蓝条数值"] = 蓝条数值
+      })
+    else
+      break
+    end
+  end
+  releaseCapture()
+  if 4 <= #装备蓝条属性数组 then
+  end
+  return 装备蓝条属性数组
+end
+
+_ENV["去卖货_卖货_识别蓝条数量和属性"] = L0_1
+
+function L0_1(要做的处理, 当前处理的药数量)
+  if 要做的处理 == "卖蓝" then
+    _ENV["去商店_卖货_出售红蓝"](要做的处理)
+    return true
+  end
+  if 要做的处理 == "卖红" then
+    _ENV["去商店_卖货_出售红蓝"](要做的处理)
+    return true
+  end
+  if 要做的处理 == "买蓝" then
+    local 已购买 = _ENV["去商店_卖货_购买红蓝"](要做的处理, 当前处理的药数量)
+    if 已购买 then _ENV["买了一次蓝"] = true end
+    return 已购买 == true
+  end
+  if 要做的处理 == "买红" then
+    local 已购买 = _ENV["去商店_卖货_购买红蓝"](要做的处理, 当前处理的药数量)
+    if 已购买 then _ENV["买了一次红"] = true end
+    return 已购买 == true
+  end
+  return false
+end
+
+_ENV["去卖货_卖货_执行红蓝处理"] = L0_1
+
+function L0_1(a, b, c, d)
+  local ok, rows = pcall(tomocrtexttable, a, b, c, d)
+  if not ok or type(rows) ~= "table" then
+    return nil
+  end
+  local bestValue = nil
+  local bestScore = 0
+  local conflict = false
+  for i = 1, #rows do
+    local row = rows[i]
+    local text = tostring(row["words"] or row["text"] or "")
+    text = string.gsub(text, "%s+", "")
+    local value = tonumber(text)
+    local score = tonumber(row["score"]) or tonumber(row["confidence"]) or 0
+    if value ~= nil and value >= 0 and score >= 0.8 then
+      if score > bestScore then
+        bestValue = value
+        bestScore = score
+        conflict = false
+      elseif score == bestScore and bestValue ~= value then
+        conflict = true
+      end
+    end
+  end
+  if conflict then
+    return nil
+  end
+  return bestValue
+end
+
+_ENV["去卖货_识别物品数量"] = L0_1
+
+function L0_1(a, b, c, d, 最低置信度)
+  a, b, c, d = a or 620, b or 80, c or 780, d or 135
+  最低置信度 = tonumber(最低置信度) or 0.8
+  local ok, rows = pcall(tomocrtexttable, a, b, c, d)
+  if not ok or type(rows) ~= "table" then
+    return ""
+  end
+  local bestName = ""
+  local bestScore = 0
+  local ambiguous = false
+  for i = 1, #rows do
+    local row = rows[i]
+    local name = tostring(row["words"] or row["text"] or "")
+    name = string.gsub(name, "^%s*(.-)%s*$", "%1")
+    local score = tonumber(row["score"]) or tonumber(row["confidence"]) or 0
+    if name ~= "" and score >= 最低置信度 then
+      if score > bestScore then
+        bestName = name
+        bestScore = score
+        ambiguous = false
+      elseif score == bestScore and name ~= bestName then
+        ambiguous = true
+      end
+    end
+  end
+  return ambiguous and "" or bestName
+end
+
+_ENV["去卖货_识别物品名称"] = L0_1
+
+function L0_1(物品名称, 当前数量)
+  local 配置 = _ENV["界面数据"] or {}
+  if 配置["允许出售物品"] ~= "true" then
+    return false, "出售物品未启用"
+  end
+  local 名称 = tostring(物品名称 or "")
+  名称 = string.gsub(名称, "^%s*(.-)%s*$", "%1")
+  if 名称 == "" then
+    return false, "无法可靠识别物品名称"
+  end
+  local 清单 = tostring(配置["出售物品清单"] or "")
+  清单 = string.gsub(清单, "\r\n", "\n")
+  清单 = string.gsub(清单, "\r", "\n")
+  清单 = string.gsub(清单, ",", "\n")
+  清单 = string.gsub(清单, "，", "\n")
+  清单 = string.gsub(清单, ";", "\n")
+  清单 = string.gsub(清单, "；", "\n")
+  local 在清单中 = false
+  for 清单名称 in string.gmatch(清单 .. "\n", "(.-)\n") do
+    清单名称 = string.gsub(清单名称, "^%s*(.-)%s*$", "%1")
+    if 清单名称 ~= "" and 清单名称 == 名称 then
+      在清单中 = true
+      break
+    end
+  end
+  if not 在清单中 then
+    return false, "物品不在出售清单中"
+  end
+  local 数量 = tonumber(当前数量)
+  if 数量 == nil or 数量 < 0 then
+    return false, "无法可靠识别物品数量"
+  end
+  local 阈值 = tonumber(配置["出售物品数量阈值"])
+  if 阈值 == nil or 阈值 < 0 then
+    return false, "出售数量阈值无效"
+  end
+  if 数量 <= 阈值 then
+    return false, "物品数量未超过出售阈值"
+  end
+  return true, "符合出售规则"
+end
+
+_ENV["去卖货_判断普通物品出售资格"] = L0_1
+
+function L0_1(物品名称, 当前数量)
+  local 配置 = _ENV["界面数据"] or {}
+  if 配置["允许购买物品"] ~= "true" then
+    return false, 0, "购买物品未启用"
+  end
+  local 名称 = tostring(物品名称 or "")
+  名称 = string.gsub(名称, "^%s*(.-)%s*$", "%1")
+  if 名称 == "" then
+    return false, 0, "无法可靠识别物品名称"
+  end
+  local 清单 = tostring(配置["购买物品清单"] or "")
+  清单 = string.gsub(清单, "\r\n", "\n")
+  清单 = string.gsub(清单, "\r", "\n")
+  清单 = string.gsub(清单, ",", "\n")
+  清单 = string.gsub(清单, "，", "\n")
+  清单 = string.gsub(清单, ";", "\n")
+  清单 = string.gsub(清单, "；", "\n")
+  local 在清单中 = false
+  for 清单名称 in string.gmatch(清单 .. "\n", "(.-)\n") do
+    清单名称 = string.gsub(清单名称, "^%s*(.-)%s*$", "%1")
+    if 清单名称 ~= "" and 清单名称 == 名称 then
+      在清单中 = true
+      break
+    end
+  end
+  if not 在清单中 then
+    return false, 0, "物品不在购买清单中"
+  end
+  local 数量 = tonumber(当前数量)
+  if 数量 == nil or 数量 < 0 or 数量 % 1 ~= 0 then
+    return false, 0, "无法可靠识别物品数量"
+  end
+  local 阈值 = tonumber(配置["购买物品数量阈值"])
+  if 阈值 == nil or 阈值 < 0 or 阈值 % 1 ~= 0 then
+    return false, 0, "购买数量阈值无效"
+  end
+  if 数量 >= 阈值 then
+    return false, 0, "物品数量已达到购买阈值"
+  end
+  local 每次购买数量 = tonumber(配置["每次购买数量"])
+  if 每次购买数量 == nil or 每次购买数量 < 1 or 每次购买数量 % 1 ~= 0 then
+    return false, 0, "每次购买数量无效"
+  end
+  return true, math.min(math.floor(每次购买数量), math.floor(阈值 - 数量)), "符合购买规则"
+end
+
+_ENV["去卖货_判断普通物品购买资格"] = L0_1
+
+function L0_1(清单文本)
+  local 结果 = {}
+  local 已加入 = {}
+  local 清单 = tostring(清单文本 or "")
+  清单 = string.gsub(清单, "\r\n", "\n")
+  清单 = string.gsub(清单, "\r", "\n")
+  清单 = string.gsub(清单, ",", "\n")
+  清单 = string.gsub(清单, "，", "\n")
+  清单 = string.gsub(清单, ";", "\n")
+  清单 = string.gsub(清单, "；", "\n")
+  for 名称 in string.gmatch(清单 .. "\n", "(.-)\n") do
+    名称 = string.gsub(名称, "^%s*(.-)%s*$", "%1")
+    if 名称 ~= "" and not 已加入[名称] then
+      table.insert(结果, 名称)
+      已加入[名称] = true
+    end
+  end
+  return 结果
+end
+
+_ENV["去卖货_解析购买物品清单"] = L0_1
+
+local 商品名称别名 = {
+  ["天权冠"] = {"Thiên Quyền Quán", "Thiên Quyn Quán", "Thion Quyn Quen"},
+  ["云中冠"] = {"Vân Trung Quán"},
+  ["广成冠"] = {"Quảng Thành Quán", "Qung Thành Quán"},
+  ["天权道袍"] = {"Thiên Quyền Đạo", "Thiên Quyn Đo"},
+  ["云中道袍"] = {"Vân Trung Đạo Bào", "Vân Trung Đo Bào"},
+  ["广成道袍"] = {"Quảng Thành Đạo", "Quàng Thành Đo"},
+  ["天权令"] = {"Thiên Quyền lệnh", "Thiên Quyn lnh"},
+  ["云中令"] = {"Vân Trung lệnh", "Vân Trung lnh"},
+  ["广成令"] = {"Quảng Thành lệnh", "Qung Thành lnh"},
+  ["天权巾"] = {"Thiên Quyền Cân", "Thiên Quyn Cân"},
+  ["回城符"] = {"Hồi thành phù", "Hi thành phù"}
+}
+
+function L0_1(目标名称, 识别名称)
+  local 目标 = string.gsub(tostring(目标名称 or ""), "^%s*(.-)%s*$", "%1")
+  local 识别 = string.gsub(tostring(识别名称 or ""), "^%s*(.-)%s*$", "%1")
+  if 目标 == "" or 识别 == "" then
+    return false
+  end
+  if 目标 == 识别 then
+    return true
+  end
+  for _, 别名 in ipairs(商品名称别名[目标] or {}) do
+    if 识别 == 别名 then
+      return true
+    end
+  end
+  return false
+end
+
+_ENV["去卖货_商品名称匹配"] = L0_1
+
+function L0_1(目标名称)
+  for page = 1, 2 do
+    local ok, rows = pcall(tomocrtexttable, 90, 95, 610, 575)
+    if ok and type(rows) == "table" then
+      local bestX, bestY, bestScore = nil, nil, 0
+      local ambiguous = false
+      for i = 1, #rows do
+        local row = rows[i]
+        local name = tostring(row["words"] or row["text"] or "")
+        name = string.gsub(name, "^%s*(.-)%s*$", "%1")
+        local score = tonumber(row["score"]) or tonumber(row["confidence"]) or 0
+        local x, y = tonumber(row["x"]), tonumber(row["y"])
+        -- Catalog text in the captured game screenshot is readable but small;
+        -- purchase safety comes from exact allowlist plus the separately checked
+        -- detail/confirmation titles, so accept a lower catalog-only threshold.
+        if _ENV["去卖货_商品名称匹配"](目标名称, name) and score >= 0.7 and x ~= nil and y ~= nil
+            and x >= 90 and x <= 610 and y >= 100 and y < 570 then
+          if score > bestScore then
+            bestX, bestY, bestScore = x, y, score
+            ambiguous = false
+          elseif score == bestScore and (x ~= bestX or y ~= bestY) then
+            ambiguous = true
+          end
+        end
+      end
+      if bestX ~= nil and not ambiguous then
+        return bestX, bestY
+      end
+    end
+    if page == 1 then
+      _ENV["点击"]("@@商店下一页", 442, 617, 800)
+      sleep(300)
+    end
+  end
+  _ENV["点击"]("@@商店下一页", 442, 617, 800)
+  return nil, nil
+end
+
+_ENV["去卖货_定位商店商品"] = L0_1
+
+function L0_1(目标名称, 当前数量)
+  if not _ENV["找到"](tz["商店页面"]) then
+    return false
+  end
+  local 是否允许, 购买数量, 购买原因 = _ENV["去卖货_判断普通物品购买资格"](目标名称, 当前数量)
+  if not 是否允许 or 购买数量 < 1 then
+    toast("跳过购买" .. tostring(目标名称) .. "：" .. tostring(购买原因))
+    return false
+  end
+  local 商品文字x, 商品文字y = _ENV["去卖货_定位商店商品"](目标名称)
+  if 商品文字x == nil then
+    toast("商店页未能唯一识别商品：" .. tostring(目标名称))
+    return false
+  end
+
+  -- The captured shop is a 2-column, 5-row catalog. Tap the corresponding
+  -- icon, then re-read the detail title before invoking the purchase action.
+  local 商品列 = nil
+  if 商品文字x < 350 then
+    商品列 = 1
+  elseif 商品文字x >= 357 then
+    商品列 = 2
+  else
+    return false
+  end
+  local 商品行 = nil
+  if 商品文字y < 190 then 商品行 = 1
+  elseif 商品文字y < 287 then 商品行 = 2
+  elseif 商品文字y < 383 then 商品行 = 3
+  elseif 商品文字y < 480 then 商品行 = 4
+  else 商品行 = 5 end
+  local 商品x = 商品列 == 1 and 144 or 396
+  local 商品y = ({147, 244, 340, 436, 530})[商品行]
+  _ENV["点击"]("@@选择购买物品", 商品x, 商品y, 800)
+  sleep(300)
+  if not _ENV["去卖货_商品名称匹配"](目标名称,
+      _ENV["去卖货_识别物品名称"](nil, nil, nil, nil, 0.7)) then
+    toast("商品详情名称不匹配，取消购买")
+    return false
+  end
+
+  _ENV["点击"]("@@购买", 927, 351, 800)
+  for i = 1, 5 do
+    if _ENV["找到"](tz["商店买货确定页面"]) then
+      local 确认物品名称 = _ENV["去卖货_识别物品名称"](550, 255, 730, 300, 0.7)
+      local 确认数量 = _ENV["去卖货_识别物品数量"](665, 345, 710, 375)
+      if not _ENV["去卖货_商品名称匹配"](目标名称, 确认物品名称) or 确认数量 ~= 0 then
+        toast("购买确认内容不符，取消本次购买")
+        return false
+      end
+      for ii = 1, 购买数量 do
+        _ENV["点击"]("@@购买+1", 773, 356, 500)
+      end
+      local 最终数量 = _ENV["去卖货_识别物品数量"](665, 345, 710, 375)
+      if not _ENV["找到"](tz["商店买货确定页面"]) or 最终数量 ~= 购买数量 then
+        toast("购买数量未能核对，取消本次购买")
+        return false
+      end
+      _ENV["点击"]("@@确定购买数量", 545, 495, 1000)
+      return true
+    end
+    sleep(200)
+  end
+  toast("购买确认界面未出现，跳过购买")
+  return false
+end
+
+_ENV["去卖货_购买普通物品"] = L0_1
+
+function L0_1()
+  if not _ENV["找到"](tz["商店卖货确定页面"]) then
+    return true
+  end
+  if _ENV["界面数据"]["出售装备二次确认"] == "true" then
+    toast("请在游戏中确认或取消装备出售")
+    for i = 1, 120 do
+      sleep(500)
+      if not _ENV["找到"](tz["商店卖货确定页面"]) then
+        return true
+      end
+    end
+    toast("装备出售确认超时，停止后续卖货")
+    _ENV["点击"]("@@关闭商店卖货确定页面", 714, 497, 1000)
+    return false
+  end
+  _ENV["点击"]("@@确定卖掉", 537, 494, 1000)
+  return true
+end
+
+_ENV["去卖货_处理装备出售确认"] = L0_1
+
+function L0_1()
+  local 格子x = 0
+  local 格子y = 0
+  local 当前普通物品数量 = nil
+  local 当前背包购买目标数量 = {}
+  local 当前背包目标数量未知 = {}
+  local 背包目标名称识别失败 = false
+  local 本轮发生出售 = false
+  local 待确认出售类型 = nil
+  -- The legacy script used to enter equipment sales unconditionally. Keep the
+  -- workbench's protective defaults authoritative: only scan/sell gear when the
+  -- user explicitly enables sales and has not enabled the protection switch.
+  local 出售装备品质上限 = tonumberEx(_ENV["界面数据"]["出售装备品质上限"])
+  if 出售装备品质上限 == nil then 出售装备品质上限 = 0 end
+  local 有勾选出售品质 = false
+  for _, 品质 in ipairs({"白色", "蓝色", "绿色", "黄色", "橙色"}) do
+    if _ENV["去卖货_卖货_品质是否允许出售"](品质, 出售装备品质上限) then
+      有勾选出售品质 = true
+      break
+    end
+  end
+  local 允许出售装备 = _ENV["界面数据"]["出售装备"] == "true"
+    and _ENV["界面数据"]["保护装备不出售"] ~= "true"
+    and 有勾选出售品质
+  local 允许出售普通物品 = _ENV["界面数据"]["允许出售物品"] == "true"
+    and tostring(_ENV["界面数据"]["出售物品清单"] or "") ~= ""
+  local 允许购买普通物品 = _ENV["界面数据"]["允许购买物品"] == "true"
+    and tostring(_ENV["界面数据"]["购买物品清单"] or "") ~= ""
+  local 购买物品名称列表 = _ENV["去卖货_解析购买物品清单"](_ENV["界面数据"]["购买物品清单"])
+  local 购买目标名称集合 = {}
+  for _, 名称 in ipairs(购买物品名称列表) do 购买目标名称集合[名称] = true end
+  local function 记录背包购买目标(名称, 数量)
+    名称 = string.gsub(tostring(名称 or ""), "^%s*(.-)%s*$", "%1")
+    if 名称 == "" then
+      背包目标名称识别失败 = true
+      return false
+    end
+    if 购买目标名称集合[名称] then
+      if 数量 == nil or 数量 < 0 then
+        当前背包目标数量未知[名称] = true
+      else
+        当前背包购买目标数量[名称] = (当前背包购买目标数量[名称] or 0) + 数量
+      end
+    end
+    return true
+  end
+  local 需要扫描背包物品 = 允许出售装备 or 允许出售普通物品 or 允许购买普通物品
+  local 当前任务3 = 需要扫描背包物品 and "扫描物品" or "买卖药"
+  _ENV["买了一次蓝"] = false
+  _ENV["买了一次红"] = false
+  for i = 1, 200 do
+    local 本轮点击背包格 = false
+    local 本轮背包名称已识别 = false
+    if _ENV["找到"](tz["对话页面"]) then
+      _ENV["点击"]("@@关对话", 1229, 422, 1000)
+    end
+    if _ENV["找到"](tz["商店卖货确定页面"]) then
+      if 待确认出售类型 == "装备" and 允许出售装备 then
+        if not _ENV["去卖货_处理装备出售确认"]() then return end
+        待确认出售类型 = nil
+      elseif 待确认出售类型 == "普通物品" and 允许出售普通物品 then
+        _ENV["点击"]("@@确定卖掉", 537, 494, 1000)
+        待确认出售类型 = nil
+      else
+        -- A sale dialog can survive from a prior screen or be raised for a
+        -- different selected item. Never treat its mere presence as approval.
+        _ENV["点击"]("@@关闭商店卖货确定页面", 714, 497, 1000)
+        待确认出售类型 = nil
+      end
+    end
+    if _ENV["找到"](tz["商店买货确定页面"]) then
+      _ENV["点击"]("@@确定购买", 537, 494, 1000)
+    end
+    if 当前任务3 == "扫描物品" then
+      if _ENV["找到"](tz["商店页面"]) then
+        print(695 + 格子x * 73, 178 + 格子y * 73)
+        if 695 + 格子x * 73 > 1016 then
+          格子x = 0
+          格子y = 格子y + 1
+        end
+        if 178 + 格子y * 73 > 640 then
+          当前任务3 = "买卖药"
+        else
+          local xx, yy = 666 + 格子x * 73, 147 + 格子y * 73
+          local rtn, x, y = findPic(xx, yy, xx + 60, yy + 60, "空格子0.png", "101010", 0, 0.95)
+          if 0 < x then
+            toast("跳过格子" .. 1 + 格子x + 格子y * 5)
+          else
+            当前普通物品数量 = nil
+            if 允许出售普通物品 or 允许购买普通物品 then
+              当前普通物品数量 = _ENV["去卖货_识别物品数量"](xx - 4, yy + 40, xx + 28, yy + 65)
+            end
+            本轮点击背包格 = true
+            _ENV["点击"]("@@点装备" .. 1 + 格子x + 格子y * 5, 695 + 格子x * 73, 178 + 格子y * 73, 800)
+          end
+          格子x = 格子x + 1
+        end
+      end
+      if _ENV["找到"](tz["商店选中装备属性页面"]) then
+        hideToast()
+        sleep(200)
+        local 当前背包物品名称 = _ENV["去卖货_识别物品名称"]()
+        本轮背包名称已识别 = 记录背包购买目标(当前背包物品名称, 当前普通物品数量)
+        local 装备品质 = _ENV["去卖货_卖货_识别装备品质"]()
+        local 是否稀有 = not 允许出售装备
+          or not _ENV["去卖货_卖货_品质是否允许出售"](装备品质, 出售装备品质上限)
+        local 装备蓝条属性数组 = _ENV["去卖货_卖货_识别蓝条数量和属性"]()
+        local 蓝条数量 = #装备蓝条属性数组
+        local 回红回内识别结果 = _ENV["去卖货_检测回红回内词条"]()
+        local 含回红回内词条 = 回红回内识别结果 == "回红" or 回红回内识别结果 == "回内"
+        local 含未识别词条 = 回红回内识别结果 == nil
+        for _, 属性 in ipairs(装备蓝条属性数组) do
+          if 属性["蓝条属性"] == "回红" or 属性["蓝条属性"] == "回内" then
+            含回红回内词条 = true
+          elseif 属性["蓝条属性"] == nil or 属性["蓝条属性"] == "" then
+            含未识别词条 = true
+          end
+        end
+        if 含回红回内词条 then
+          toast("装备有回红/回内词条，保留")
+        elseif 含未识别词条 then
+          toast("装备词条无法确认，保留")
+        elseif 装备品质 == "未识别" then
+          toast("装备品质无法确认，保留")
+        elseif 是否稀有 then
+          toast("稀有装备 保留")
+        elseif 蓝条数量 >= _ENV["保留蓝条数量"] then
+          local 是否符合详细属性值要求 = _ENV["界面数据"]["回蓝>="] == "false" and _ENV["界面数据"]["魔法出招>="] == "false" and _ENV["界面数据"]["武器出招>="] == "false"
+          if _ENV["界面数据"]["回蓝>="] == "true" then
+            for ii = 1, #装备蓝条属性数组 do
+              if 装备蓝条属性数组[ii]["蓝条属性"] == "回蓝" and 装备蓝条属性数组[ii]["蓝条数值"] >= tonumber(_ENV["界面数据"]["保留回蓝数值"]) then
+                是否符合详细属性值要求 = true
+                break
+              end
+            end
+          end
+          if _ENV["界面数据"]["魔法出招>="] == "true" then
+            for ii = 1, #装备蓝条属性数组 do
+              if 装备蓝条属性数组[ii]["蓝条属性"] == "魔法出招" and 装备蓝条属性数组[ii]["蓝条数值"] >= tonumber(_ENV["界面数据"]["保留魔法出招数值"]) then
+                是否符合详细属性值要求 = true
+                break
+              end
+            end
+          end
+          if _ENV["界面数据"]["武器出招>="] == "true" then
+            for ii = 1, #装备蓝条属性数组 do
+              if 装备蓝条属性数组[ii]["蓝条属性"] == "武器出招" and 装备蓝条属性数组[ii]["蓝条数值"] >= tonumber(_ENV["界面数据"]["保留武器出招数值"]) then
+                是否符合详细属性值要求 = true
+                break
+              end
+            end
+          end
+          local 提示属性 = "蓝条数量" .. #装备蓝条属性数组 .. "\n"
+          for iii = 1, #装备蓝条属性数组 do
+            提示属性 = 提示属性 .. 装备蓝条属性数组[iii]["蓝条属性"] .. 装备蓝条属性数组[iii]["蓝条数值"] .. "\n"
+          end
+          if 是否符合详细属性值要求 then
+            toast(提示属性 .. " 保留")
+          else
+            toast(提示属性 .. " 卖掉")
+            本轮发生出售 = true
+            待确认出售类型 = "装备"
+            _ENV["点击"]("@@卖1", 1155, 353, 1000)
+            for i = 1, 3 do
+              if _ENV["找到"](tz["商店卖货确定页面"]) then
+                if not _ENV["去卖货_处理装备出售确认"]() then return end
+                待确认出售类型 = nil
+                break
+              end
+              sleep(500)
+            end
+          end
+        else
+          toast(蓝条数量 .. "/" .. _ENV["保留蓝条数量"] .. " 卖掉")
+          本轮发生出售 = true
+          待确认出售类型 = "装备"
+          _ENV["点击"]("@@卖1", 1155, 353, 1000)
+          for i = 1, 3 do
+            if _ENV["找到"](tz["商店卖货确定页面"]) then
+              if not _ENV["去卖货_处理装备出售确认"]() then return end
+              待确认出售类型 = nil
+              break
+            end
+            sleep(500)
+          end
+        end
+        _ENV["点击"]("@@关掉选中物品", 1184, 638, 800)
+      elseif _ENV["找到"](tz["商店选中非装备属性页面"]) then
+        local 当前背包物品名称 = _ENV["去卖货_识别物品名称"]()
+        本轮背包名称已识别 = 记录背包购买目标(当前背包物品名称, 当前普通物品数量)
+        if _ENV["找到"](tz["商店选中特殊物品属性页面"]) then
+          local 是否允许出售, 出售原因 = _ENV["去卖货_判断普通物品出售资格"](当前背包物品名称, 当前普通物品数量)
+          if 是否允许出售 then
+            本轮发生出售 = true
+            待确认出售类型 = "普通物品"
+            _ENV["点击"]("@@出售特殊物品", 935, 354, 1000)
+            for i = 1, 3 do
+              if _ENV["找到"](tz["商店卖货确定页面"]) then
+                _ENV["点击"]("@@确定卖掉", 537, 494, 800)
+                待确认出售类型 = nil
+                break
+              end
+              sleep(500)
+            end
+          else
+            toast("保留特殊物品：" .. tostring(出售原因))
+          end
+          _ENV["点击"]("@@关掉非装备物品", 1184, 638, 800)
+        else
+          _ENV["点击"]("@@关掉非装备物品", 1184, 638, 800)
+        end
+      end
+      if 本轮点击背包格 and 允许购买普通物品 and not 本轮背包名称已识别 then
+        背包目标名称识别失败 = true
+      end
+    end
+    if 当前任务3 == "买卖药" and _ENV["找到"](tz["商店页面"]) then
+      _ENV["点击"]("@@初始化选中", 1164, 315, 1000)
+      if _ENV["药品数量识别有效"] == true then
+      if _ENV["界面数据"]["购买小红"] == "true" and _ENV["小红数量"] + _ENV["大红数量"] < tonumber(_ENV["界面数据"]["红的数量低于"]) then
+        toast(string.format("%d %d %d %d 红太少", _ENV["小红数量"], _ENV["大红数量"], _ENV["小蓝数量"], _ENV["大蓝数量"]))
+        sleep(1000)
+        _ENV["去卖货_卖货_执行红蓝处理"]("买红")
+      end
+      if _ENV["界面数据"]["购买小蓝"] == "true" and _ENV["小蓝数量"] + _ENV["大蓝数量"] < tonumber(_ENV["界面数据"]["蓝的数量低于"]) then
+        toast(string.format("%d %d %d %d 蓝太少", _ENV["小红数量"], _ENV["大红数量"], _ENV["小蓝数量"], _ENV["大蓝数量"]))
+        sleep(1000)
+        _ENV["去卖货_卖货_执行红蓝处理"]("买蓝")
+      end
+      if _ENV["界面数据"]["出售全部红"] == "true" and _ENV["小红数量"] + _ENV["大红数量"] > tonumber(_ENV["界面数据"]["红的数量高于"]) then
+        toast(string.format("%d %d %d %d 红太多", _ENV["小红数量"], _ENV["大红数量"], _ENV["小蓝数量"], _ENV["大蓝数量"]))
+        sleep(1000)
+        _ENV["去卖货_卖货_执行红蓝处理"]("卖红")
+      end
+      if _ENV["界面数据"]["出售全部蓝"] == "true" and _ENV["小蓝数量"] + _ENV["大蓝数量"] > tonumber(_ENV["界面数据"]["蓝的数量高于"]) then
+        toast(string.format("%d %d %d %d 蓝太多", _ENV["小红数量"], _ENV["大红数量"], _ENV["小蓝数量"], _ENV["大蓝数量"]))
+        sleep(1000)
+        _ENV["去卖货_卖货_执行红蓝处理"]("卖蓝")
+      end
+      elseif _ENV["界面数据"]["购买小红"] == "true" or _ENV["界面数据"]["购买小蓝"] == "true"
+          or _ENV["界面数据"]["出售全部红"] == "true" or _ENV["界面数据"]["出售全部蓝"] == "true" then
+        toast("药品数量未可靠识别，跳过药品买卖")
+      end
+      if 允许购买普通物品 then
+        if 背包目标名称识别失败 or 本轮发生出售 then
+          toast("背包库存未能可靠核对，跳过普通物品购买")
+        else
+          for _, 商品名称 in ipairs(购买物品名称列表) do
+            if 商品名称 == "小红" or 商品名称 == "大红" or 商品名称 == "小蓝" or 商品名称 == "大蓝" then
+              toast("红蓝药请使用补给设置购买，跳过通用购买：" .. 商品名称)
+            elseif 当前背包目标数量未知[商品名称] then
+              toast("物品数量未能可靠识别，跳过购买：" .. 商品名称)
+            elseif _ENV["去卖货_购买普通物品"](商品名称, 当前背包购买目标数量[商品名称] or 0) then
+              return
+            end
+          end
+        end
+      end
+      当前任务3 = "修装备"
+    end
+    if 当前任务3 == "修装备" and _ENV["找到"](tz["商店页面"]) then
+      _ENV["点击"]("@@修理1", 136, 615, 2000)
+      _ENV["点击"]("@@修理2", 472, 622, 2000)
+      break
+    end
+    sleep(500)
+  end
+  _ENV["买了一次蓝"] = false
+  _ENV["买了一次红"] = false
+end
+
+_ENV["去卖货_卖货"] = L0_1
+
+function L0_1()
+  _ENV["检测寻路完成_上次检测寻路点色值"] = nil
+  _ENV["检测寻路完成_寻路没有变化次数"] = 0
+  _ENV["检测寻路完成_已观察移动"] = false
+  local 开始时间 = tonumberEx(tickCount()) or 0
+  for ii = 1, 300 do
+    if _ENV["检测寻路完成"]() then
+      return true
+    end
+    local 已等待 = (tonumberEx(tickCount()) or 开始时间) - 开始时间
+    if not _ENV["检测寻路完成_已观察移动"] and 已等待 >= 10000 then
+      toast("寻路启动失败：10秒内未检测到移动，稍后重试")
+      return false
+    end
+    if ii % 10 == 0 then toast("前往目的地" .. ii .. "/300") end
+    sleep(1000)
+  end
+  toast("寻路超时：已移动但未检测到到达")
+  return false
+end
+
+_ENV["寻路_等待完成"] = L0_1
+
+-- The localized map picker dims the game behind it, invalidating the recovered
+-- color template. Recognize its stable NPC tab and search placeholder instead.
+function L0_1()
+  if _ENV["找到"](tz["大地图页面"]) then
+    _ENV["大地图页面中文"] = false
+    return true
+  end
+  local now = tonumberEx(tickCount()) or 0
+  local cachedAt = tonumberEx(_ENV["大地图页面识别缓存时间"])
+  if cachedAt ~= nil and now - cachedAt < 300 then
+    return _ENV["大地图页面识别缓存结果"] == true
+  end
+  local isOpen = false
+  local localizedMapTab = false
+  local ok, rows = pcall(tomocrtexttable, 0, 0, 420, 155)
+  if ok and type(rows) == "table" then
+    local hasNpcTab, hasSearchPlaceholder = false, false
+    for _, row in pairs(rows) do
+      if type(row) == "table" then
+        local x, y = tonumber(row.x), tonumber(row.y)
+        local text = tostring(row.words or row.text or ""):gsub("%s", ""):gsub("　", "")
+        if x ~= nil and y ~= nil and text ~= "" then
+          if x >= 20 and x <= 150 and y >= 15 and y <= 70
+              and string.find(text, "NPC", 1, true) ~= nil then
+            hasNpcTab = true
+          elseif x >= 0 and x <= 400 and y >= 70 and y <= 145
+              and string.find(text, "输入", 1, true) ~= nil
+              and string.find(text, "名", 1, true) ~= nil
+              and (string.find(text, "NPC", 1, true) ~= nil
+                  or string.find(text, "地图", 1, true) ~= nil) then
+            hasSearchPlaceholder = true
+            if string.find(text, "输入地图名", 1, true) ~= nil then
+              localizedMapTab = true
+            end
+          end
+        end
+      end
+    end
+    isOpen = hasNpcTab and hasSearchPlaceholder
+  end
+  _ENV["大地图页面识别缓存时间"] = now
+  _ENV["大地图页面识别缓存结果"] = isOpen
+  _ENV["大地图页面中文"] = localizedMapTab
+  return isOpen
+end
+_ENV["大地图页面已打开"] = L0_1
+
+function L0_1(地图名)
+  local target = tostring(地图名 or ""):gsub("%s", ""):gsub("　", "")
+  if target == "" then return false end
+  local ok, rows = pcall(tomocrtexttable, 0, 120, 330, 650)
+  if not ok or type(rows) ~= "table" then return false end
+  local selected
+  for _, row in pairs(rows) do
+    if type(row) == "table" then
+      local text = tostring(row.words or row.text or ""):gsub("%s", ""):gsub("　", "")
+      local x, y = tonumber(row.x), tonumber(row.y)
+      local score = tonumber(row.score) or 0
+      if text == target and score >= 0.82 and x ~= nil and y ~= nil
+          and x >= 0 and x <= 330 and y >= 120 and y <= 650 then
+        selected = {x = x, y = y}
+        break
+      end
+    end
+  end
+  if selected == nil then return false end
+  _ENV["点击"](math.floor(selected.x), math.floor(selected.y), 1200)
+  sleep(700)
+  local headerOk, headerRows = pcall(tomocrtexttable, 600, 0, 1000, 90)
+  if not headerOk or type(headerRows) ~= "table" then return false end
+  for _, row in pairs(headerRows) do
+    if type(row) == "table" then
+      local text = tostring(row.words or row.text or ""):gsub("%s", ""):gsub("　", "")
+      if text == target and (tonumber(row.score) or 0) >= 0.82 then return true end
+    end
+  end
+  return false
+end
+
+_ENV["大地图_按OCR选择"] = L0_1
+
+function L0_1(地图名, 切换到NPC列表, 只用中文搜索)
+  local selected = false
+  if _ENV["大地图页面已打开"]() then
+    _ENV["点击"]("@@大地图选择", 253, 38, 1000)
+  end
+  if _ENV["大地图页面已打开"]() then
+    _ENV["点击"]("@@大地图选择", 361, 95, 1500)
+  end
+  if _ENV["大地图页面已打开"]() then
+    _ENV["点击"]("@@大地图输入框", 283, 96, 1500)
+    local 中文搜索 = _ENV["大地图页面中文"] == true
+    if 只用中文搜索 and not 中文搜索 then return false end
+    imeLib.lock()
+    imeLib.setText(地图名)
+    imeLib.unlock()
+    sleep(1000)
+    if 中文搜索 then
+      _ENV["点击"](361, 95, 1000)
+      sleep(700)
+      selected = _ENV["大地图_按OCR选择"](地图名)
+      if not selected then return false end
+    else
+      _ENV["点击"]("@@XONG", 98, 197, 2000)
+    end
+  end
+  if not 只用中文搜索 and not selected and not _ENV["大地图页面中文"]
+      and _ENV["大地图页面已打开"]() then
+    if 地图名 == "phong thần" or 地图名 == "sùng thành"
+        or 地图名 == "荒漠3" or 地图名 == "崇城野外" then
+      _ENV["点击"]("@@选择地图2", 80, 195, 1500)
+    else
+      _ENV["点击"]("@@选择地图1", 66, 155, 1500)
+    end
+  end
+  if 切换到NPC列表 and _ENV["大地图页面已打开"]() then
+    _ENV["点击"]("@@npc选择", 82, 38, 1500)
+  end
+  if 只用中文搜索 then return selected end
+  if _ENV["大地图页面中文"] then return selected end
+  return _ENV["大地图页面已打开"]()
+end
+
+_ENV["大地图_输入大地图"] = L0_1
+require("网页路线")
+
+-- Overweight characters cannot walk to the doctor. Free only verified junk
+-- equipment in place, then re-read the sandbox memory snapshot before routing.
+function L0_1()
+  local config = _ENV["界面数据"] or {}
+  local function isEnabled(value)
+    return value == true or tostring(value) == "true"
+  end
+  local reserveSlots = math.max(0, tonumber(_ENV["背包保留格子"]) or 2)
+  local reserveWeight = math.max(0, tonumber(_ENV["背包保留重量"]) or 3)
+  local function readSnapshot()
+    if type(getSandboxBagSnapshot) ~= "function" then return nil, "缺少内存接口" end
+    local ok, value = pcall(getSandboxBagSnapshot, reserveSlots, reserveWeight)
+    if not ok or type(value) ~= "table" or value.supported ~= true then
+      return nil, "内存快照不可用"
+    end
+    local freeSlots = tonumber(value.freeSlots)
+    local weight = tonumber(value.currentWeight)
+    local maxWeight = tonumber(value.maxWeight)
+    local age = tonumber(value.ageMs)
+    local buildId = tostring(value.buildId or "")
+    local previous = _ENV["最近背包内存快照"]
+    local previousBuildId = type(previous) == "table" and tostring(previous.buildId or "") or ""
+    if freeSlots == nil or freeSlots < 0 or freeSlots > 200
+        or weight == nil or weight < 0 or weight > 1000000
+        or maxWeight == nil or maxWeight <= 0 or maxWeight > 1000000
+        or age == nil or age < 0 or age > 5000
+        or buildId == "" or previousBuildId ~= "" and buildId ~= previousBuildId then
+      return nil, "内存快照过期或版本不匹配"
+    end
+    return {
+      空格 = math.floor(freeSlots),
+      重量 = math.floor(weight),
+      上限 = math.floor(maxWeight),
+      年龄 = age,
+      buildId = buildId,
+      时间 = tickCount()
+    }
+  end
+  local function saveSnapshot(snapshot)
+    _ENV["最近背包内存快照"] = {
+      空格 = snapshot.空格,
+      重量 = snapshot.重量,
+      上限 = snapshot.上限,
+      buildId = snapshot.buildId,
+      时间 = snapshot.时间,
+      保留格子 = reserveSlots,
+      保留重量 = reserveWeight,
+      需要去大夫 = snapshot.空格 <= reserveSlots
+          or snapshot.上限 - snapshot.重量 <= reserveWeight,
+      超重 = snapshot.重量 > snapshot.上限
+    }
+    _ENV["当前背包格子"] = snapshot.空格
+    _ENV["当前背包重量"] = snapshot.重量 .. "/" .. snapshot.上限
+  end
+  local function needsEmergencyClear(snapshot)
+    return snapshot.空格 <= reserveSlots
+        or snapshot.上限 - snapshot.重量 <= reserveWeight
+  end
+  local function hasMovementRoom(snapshot)
+    return snapshot.空格 > reserveSlots
+        and snapshot.上限 - snapshot.重量 > reserveWeight
+  end
+  local function bagOpen()
+    if type(tz) == "table" and tz["背包页面"] ~= nil
+        and _ENV["找到"](tz["背包页面"]) then
+      return true
+    end
+    return _ENV["药品_识别背包页面"] ~= nil
+        and _ENV["药品_识别背包页面"]() == true
+  end
+  local function itemDetailOpen()
+    if type(tz) ~= "table" then return false end
+    for _, key in ipairs({"商店选中装备属性页面", "商店选中非装备属性页面"}) do
+      if tz[key] ~= nil and _ENV["找到"](tz[key]) then return true end
+    end
+    return false
+  end
+  local function closeItemDetail()
+    if not itemDetailOpen() then return true end
+    -- This is the existing safe close control used by the inventory/shop flow.
+    -- Never tap the item cell a second time: that can invoke a destructive action.
+    _ENV["点击"]("@@安全关闭超重物品详情", 1188, 626, 600)
+    for _ = 1, 10 do
+      sleep(200)
+      if bagOpen() and not itemDetailOpen() then return true end
+    end
+    return false
+  end
+  local function closeBag()
+    if bagOpen() then
+      if not closeItemDetail() then return false end
+      _ENV["点击"]("@@关闭超重清理背包", 1244, 104, 800)
+      for _ = 1, 10 do
+        sleep(200)
+        if _ENV["在主页面"]() then return true end
+      end
+      return false
+    end
+    return _ENV["在主页面"]()
+  end
+  local function setFailure(message, retryMs, leaveOpen)
+    _ENV["当前任务2"] = message
+    local now = tonumberEx(tickCount()) or 0
+    _ENV["超重清理_下次尝试时间"] = now + (retryMs or 15000)
+    local lastNotice = tonumberEx(_ENV["超重清理_上次提示时间"])
+    if lastNotice == nil or now - lastNotice >= 15000 then
+      toast(message)
+      _ENV["超重清理_上次提示时间"] = now
+    end
+    if not leaveOpen then closeBag() end
+    return false
+  end
+  local function normalize(text)
+    return string.lower(tostring(text or "")):gsub("%s+", ""):gsub("　", "")
+      :gsub("，", ""):gsub("。", ""):gsub("？", ""):gsub("%?", "")
+  end
+  local function exactButton(rows, accepted, left, top, right, bottom)
+    local foundX, foundY, count = nil, nil, 0
+    if type(rows) ~= "table" then return nil, nil, 0 end
+    for _, row in pairs(rows) do
+      if type(row) == "table" then
+        local text = normalize(row.words or row.text)
+        local score = tonumber(row.score) or tonumber(row.confidence) or 0
+        local x, y = tonumber(row.x), tonumber(row.y)
+        if accepted[text] and score >= 0.82 and x and y
+            and x >= left and x <= right and y >= top and y <= bottom then
+          foundX, foundY, count = math.floor(x), math.floor(y), count + 1
+        end
+      end
+    end
+    if count == 1 then return foundX, foundY, count end
+    return nil, nil, count
+  end
+  local function findDropButton()
+    local ok, rows = pcall(tomocrtexttable, 1030, 600, 1235, 710)
+    if not ok or type(rows) ~= "table" then return nil, nil end
+    local x, y, count = exactButton(rows, { ["丢弃"] = true, ["vứtbỏ"] = true },
+        1030, 600, 1235, 710)
+    if count ~= 1 then return nil, nil end
+    return x, y
+  end
+  local function readDropConfirmation()
+    local ok, rows = pcall(tomocrtexttable, 260, 300, 1020, 590)
+    if not ok or type(rows) ~= "table" then return false, nil, nil end
+    local prompt = false
+    for _, row in pairs(rows) do
+      if type(row) == "table" then
+        local text = normalize(row.words or row.text)
+        if (string.find(text, "丢弃", 1, true) ~= nil
+              and (string.find(text, "确定", 1, true) ~= nil
+                or string.find(text, "确认", 1, true) ~= nil
+                or string.find(text, "是否", 1, true) ~= nil))
+            or (string.find(text, "vứtbỏ", 1, true) ~= nil
+              and string.find(text, "chắc", 1, true) ~= nil
+              and string.find(text, "muốn", 1, true) ~= nil) then
+          prompt = true
+          break
+        end
+      end
+    end
+    if not prompt then return false, nil, nil end
+    local confirmX, confirmY, confirmCount = exactButton(rows,
+        { ["确定"] = true, ["确认"] = true, ["đồngý"] = true, ["có"] = true, ["yes"] = true },
+        300, 390, 980, 590)
+    local cancelX, cancelY, cancelCount = exactButton(rows,
+        { ["取消"] = true, ["hủy"] = true, ["không"] = true, ["no"] = true },
+        300, 390, 980, 590)
+    if confirmCount ~= 1 or cancelCount ~= 1 then return true, nil, nil end
+    return true, confirmX, confirmY
+  end
+  local function waitForProgress(before, timeoutMs)
+    local attempts = math.max(1, math.floor(timeoutMs / 400))
+    for _ = 1, attempts do
+      sleep(400)
+      local after = readSnapshot()
+      if after and (after.重量 < before.重量 or after.空格 > before.空格) then
+        saveSnapshot(after)
+        return after
+      end
+    end
+    return nil
+  end
+  local function hasConfiguredKeepLine(attributes)
+    local threshold = math.max(0, tonumber(_ENV["保留蓝条数量"]) or 4)
+    if #attributes < threshold then return false end
+    local filters = {
+      {"回蓝", "回蓝>=", "保留回蓝数值"},
+      {"魔法出招", "魔法出招>=", "保留魔法出招数值"},
+      {"武器出招", "武器出招>=", "保留武器出招数值"}
+    }
+    for _, filter in ipairs(filters) do
+      if isEnabled(config[filter[2]]) then
+        local minimum = tonumber(config[filter[3]]) or 0
+        for _, attribute in ipairs(attributes) do
+          if attribute["蓝条属性"] == filter[1]
+              and (tonumber(attribute["蓝条数值"]) or 0) >= minimum then
+            return true
+          end
+        end
+      end
+    end
+    return false
+  end
+  local function safeEquipment()
+    if not itemDetailOpen() then return false end
+    local gearOk, isGear = pcall(_ENV["去卖货_卖货_判断是否装备"])
+    if not gearOk or isGear ~= true then return false end
+    local qualityOk, quality = pcall(_ENV["去卖货_卖货_识别装备品质"])
+    if not qualityOk or quality == nil or quality == "未识别"
+        or not _ENV["去卖货_卖货_品质是否允许出售"](quality, config["出售装备品质上限"]) then
+      return false
+    end
+    local affixOk, protectedAffix = pcall(_ENV["去卖货_检测回红回内词条"])
+    if not affixOk or protectedAffix ~= false then return false end
+    local attributesOk, attributes = pcall(_ENV["去卖货_卖货_识别蓝条数量和属性"])
+    if not attributesOk or type(attributes) ~= "table" then return false end
+    local countOk, lineCount = pcall(_ENV["去卖货_卖货_识别蓝条数量"])
+    if not countOk or tonumber(lineCount) == nil or #attributes ~= tonumber(lineCount) then
+      return false
+    end
+    for _, attribute in ipairs(attributes) do
+      local name = tostring(attribute["蓝条属性"] or "")
+      local value = tonumber(attribute["蓝条数值"])
+      local protectedNames = {
+        ["回红"] = true, ["回血"] = true, ["生命回复"] = true,
+        ["生命恢复"] = true, ["恢复生命"] = true, ["回复生命"] = true,
+        ["回内"] = true, ["内力回复"] = true, ["内力恢复"] = true,
+        ["恢复内力"] = true, ["回复内力"] = true
+      }
+      if name == "" or value == nil or value <= 0 or protectedNames[name] then
+        return false
+      end
+    end
+    return not hasConfiguredKeepLine(attributes)
+  end
+
+  local now = tonumberEx(tickCount()) or 0
+  local retryAt = tonumberEx(_ENV["超重清理_下次尝试时间"])
+  if retryAt ~= nil and now < retryAt then return false end
+  local snapshot, reason = readSnapshot()
+  if not snapshot then return setFailure("超重清理暂停：" .. tostring(reason)) end
+  saveSnapshot(snapshot)
+  if not needsEmergencyClear(snapshot) then
+    _ENV["超重清理_下次尝试时间"] = nil
+    return true
+  end
+  local enabled = config["超重时原地丢弃低品质装备"]
+  if enabled ~= nil and not isEnabled(enabled) then
+    return setFailure("背包已满：请开启原地清理低品质装备")
+  end
+
+  if not bagOpen() then
+    if not _ENV["在主页面"]() then
+      return setFailure("已超重：当前页面无法安全打开背包")
+    end
+    _ENV["点击"]("@@打开超重清理背包", 902, 693, 800)
+    for _ = 1, 10 do
+      sleep(200)
+      if bagOpen() then break end
+    end
+    if not bagOpen() then return setFailure("已超重：背包页面未能确认") end
+  end
+
+  local maxDrops = 35
+  local droppedCount = 0
+  while droppedCount < maxDrops do
+    snapshot, reason = readSnapshot()
+    if not snapshot then return setFailure("超重清理暂停：" .. tostring(reason)) end
+    saveSnapshot(snapshot)
+    if hasMovementRoom(snapshot) then
+      if not closeBag() then return setFailure("减重完成但背包未能关闭") end
+      _ENV["超重清理_下次尝试时间"] = nil
+      _ENV["当前任务2"] = "背包已腾出空间，前往大夫"
+      toast("背包已腾出空间，前往大夫")
+      return true
+    end
+
+    local progressed = false
+    local scanFailed = false
+    local tabPositions = {{720, 115}, {842, 115}, {966, 115}}
+    for _, tab in ipairs(tabPositions) do
+      _ENV["点击"]("@@切换超重清理背包页", tab[1], tab[2], 600)
+      sleep(250)
+      if not bagOpen() then
+        scanFailed = true
+        break
+      end
+      for row = 0, 6 do
+        for col = 0, 4 do
+          local left, top = 666 + col * 73, 147 + row * 73
+          local picOk, _, emptyX = pcall(findPic, left, top, left + 60, top + 60,
+              "空格子0.png", "101010", 0, 0.95)
+          if not picOk or tonumber(emptyX) == nil then
+            scanFailed = true
+            break
+          end
+          if tonumber(emptyX) <= 0 then
+            _ENV["点击"]("@@检查超重清理装备", 695 + col * 73, 178 + row * 73, 650)
+            sleep(350)
+            if safeEquipment() then
+              local beforeDrop, beforeReason = readSnapshot()
+              if not beforeDrop then
+                return setFailure("超重清理暂停：" .. tostring(beforeReason))
+              end
+              if hasMovementRoom(beforeDrop) then
+                saveSnapshot(beforeDrop)
+                if not closeBag() then return setFailure("减重完成但背包未能关闭") end
+                _ENV["超重清理_下次尝试时间"] = nil
+                return true
+              end
+              local dropX, dropY = findDropButton()
+              if dropX and dropY then
+                _ENV["当前任务2"] = "确认安全的低品质装备，正在原地丢弃"
+                _ENV["点击"]("@@丢弃已核验低品质装备", dropX, dropY, 800)
+                local prompt, confirmX, confirmY = false, nil, nil
+                for _ = 1, 10 do
+                  sleep(250)
+                  prompt, confirmX, confirmY = readDropConfirmation()
+                  if prompt then break end
+                  local immediateProgress = readSnapshot()
+                  if immediateProgress and (immediateProgress.重量 < beforeDrop.重量
+                      or immediateProgress.空格 > beforeDrop.空格) then
+                    snapshot = immediateProgress
+                    break
+                  end
+                end
+                if prompt then
+                  if not confirmX or not confirmY then
+                    return setFailure("丢弃确认弹窗无法唯一识别，已停止操作", 15000, true)
+                  end
+                  _ENV["点击"]("@@确认丢弃已核验装备", confirmX, confirmY, 800)
+                end
+                local afterDrop = snapshot and (snapshot.重量 < beforeDrop.重量
+                    or snapshot.空格 > beforeDrop.空格) and snapshot
+                    or waitForProgress(beforeDrop, 8000)
+                if not afterDrop then
+                  -- The tap may have opened a confirmation/blocked-item dialog.
+                  -- Leave the UI untouched for inspection; never guess another tap.
+                  return setFailure("丢弃后负重未下降，已停止并等待重试", 15000, true)
+                end
+                droppedCount = droppedCount + 1
+                saveSnapshot(afterDrop)
+                progressed = true
+                break
+              end
+            end
+            if itemDetailOpen() and not closeItemDetail() then
+              return setFailure("装备详情未能安全关闭，已停止清理")
+            end
+          end
+        end
+        if scanFailed or progressed then break end
+      end
+      if scanFailed or progressed then break end
+    end
+    if scanFailed then return setFailure("背包或空格状态无法确认，已停止清理") end
+    if not progressed then
+      _ENV["超重清理_下次尝试时间"] = nil
+      return setFailure("背包已满/超重：没有可安全丢弃的勾选品质装备")
+    end
+    snapshot = nil
+  end
+  return setFailure("已超重：单轮清理达到安全上限，等待重试")
+end
+_ENV["去卖货_超重时原地清理低品质装备"] = L0_1
+
+-- The backpack is handled before the merchant route. Sorting can combine
+-- stacks, but does not grant permission to sell items; the shop's existing
+-- equipment protection and explicit item allowlist still decide every sale.
+function L0_1()
+  -- The same 610 memory snapshot already proved that the configured doctor
+  -- threshold was reached. Reopening the bag here used to invoke OCR before
+  -- the doctor route, which could time out and kill the entire farming loop.
+  -- Skip only this optional sort/preflight when the proof is fresh and the
+  -- player is visibly back on the world HUD. The sale still uses its normal
+  -- allowlist, rarity checks, and confirmation flow at the shop.
+  local snapshot = _ENV["最近背包内存快照"]
+  if type(snapshot) == "table" and snapshot.需要去大夫 == true then
+    -- Clear verified junk in place on either threshold. A full slot count can
+    -- also prevent movement, even when the weight counter is still below max.
+    return _ENV["去卖货_超重时原地清理低品质装备"]()
+  end
+  if type(snapshot) == "table" and snapshot.需要去大夫 == true
+      and snapshot.buildId == "350ee73d222f974988c13b5917337fb2d96fe68a"
+      and snapshot.保留格子 == (tonumber(_ENV["背包保留格子"]) or 2)
+      and snapshot.保留重量 == (tonumber(_ENV["背包保留重量"]) or 3) then
+    local capturedAt = tonumberEx(snapshot.时间)
+    local now = tonumberEx(tickCount())
+    local age = capturedAt ~= nil and now ~= nil and now - capturedAt or nil
+    if age ~= nil and age >= 0 and age <= 5000 and _ENV["在主页面"]() then
+      _ENV["当前任务2"] = "背包内存已确认，跳过OCR整理"
+      toast("内存已确认背包阈值，直接前往大夫")
+      return true
+    end
+  end
+  if not (_ENV["找到"](tz["背包页面"]) or _ENV["药品_识别背包页面"]()) then
+    if not _ENV["在主页面"]() then return false end
+    _ENV["点击"]("@@打开背包", 902, 693, 1000)
+    if not (_ENV["找到"](tz["背包页面"]) or _ENV["药品_识别背包页面"]()) then return false end
+  end
+  local function 确认物品堆叠()
+    local ok, rows = pcall(tomocrtexttable, 350, 220, 950, 530)
+    if not ok or type(rows) ~= "table" then return false end
+    local prompt, agree, decline = false, nil, 0
+    local agreeCount = 0
+    for _, row in pairs(rows) do
+      if type(row) == "table" then
+        local label = tostring(row.words or row.text or ""):gsub("%s", ""):gsub("　", "")
+        local x, y = tonumber(row.x), tonumber(row.y)
+        local score = tonumber(row.score) or tonumber(row.confidence) or 0
+        if label ~= "" and score >= 0.82
+            and (string.find(label, "物品堆叠功能", 1, true) ~= nil
+                or string.find(label, "使用物品堆叠", 1, true) ~= nil) then
+          prompt = true
+        elseif label == "同意" and x and y and x >= 400 and x <= 650 and y >= 410 and y <= 530
+            and score >= 0.82 then
+          agree = {x = x, y = y}
+          agreeCount = agreeCount + 1
+        elseif label == "否" and x and y and x >= 650 and x <= 950 and y >= 410 and y <= 530
+            and score >= 0.82 then
+          decline = decline + 1
+        end
+      end
+    end
+    if not prompt then return true, false end
+    if agreeCount ~= 1 or decline ~= 1 or agree == nil then return false end
+    _ENV["点击"]("@@确认物品堆叠", math.floor(agree.x), math.floor(agree.y), 1000)
+    sleep(1000)
+    local verifyOk, verifyRows = pcall(tomocrtexttable, 350, 220, 950, 530)
+    if not verifyOk or type(verifyRows) ~= "table" then return false end
+    for _, row in pairs(verifyRows) do
+      if type(row) == "table" then
+        local label = tostring(row.words or row.text or ""):gsub("%s", ""):gsub("　", "")
+        local score = tonumber(row.score) or tonumber(row.confidence) or 0
+        if score >= 0.82 and (string.find(label, "物品堆叠功能", 1, true) ~= nil
+            or string.find(label, "使用物品堆叠", 1, true) ~= nil) then
+          return false
+        end
+      end
+    end
+    return _ENV["找到"](tz["背包页面"]) or _ENV["药品_识别背包页面"](), true
+  end
+  local stackConfirmed, pendingStackWasConfirmed = 确认物品堆叠()
+  if not stackConfirmed then return false end
+  local 空格文本 = tomocrtextall(1045, 604, 1215, 655)
+  local empty = _ENV["检测背包_解析空格子"](空格文本)
+  if empty == nil then
+    empty = _ENV["检测背包_识别空格子"]()
+  end
+  if type(empty) ~= "number" then return false end
+  _ENV["当前背包格子"] = empty
+  if empty <= (tonumber(_ENV["背包保留格子"]) or 0) and not pendingStackWasConfirmed then
+    local ok, rows = pcall(tomocrtexttable, 1040, 320, 1210, 390)
+    if not ok or type(rows) ~= "table" then return false end
+    local sortX, sortY, matches = nil, nil, 0
+    for _, row in pairs(rows) do
+      if type(row) == "table" then
+        local label = tostring(row.words or row.text or ""):gsub("%s", ""):gsub("　", "")
+        local x, y = tonumber(row.x), tonumber(row.y)
+        if label == "整理" and (tonumber(row.score) or 0) >= 0.82
+            and x and y and x >= 1040 and x <= 1210 and y >= 320 and y <= 390 then
+          sortX, sortY, matches = x, y, matches + 1
+        end
+      end
+    end
+    if matches == 1 then
+      _ENV["点击"]("@@整理背包", math.floor(sortX), math.floor(sortY), 1000)
+      sleep(500)
+      local sortConfirmed = 确认物品堆叠()
+      if not sortConfirmed then return false end
+      if not (_ENV["找到"](tz["背包页面"]) or _ENV["药品_识别背包页面"]()) then return false end
+      local 整理后空格文本 = tomocrtextall(1045, 604, 1215, 655)
+      empty = _ENV["检测背包_解析空格子"](整理后空格文本)
+      if empty == nil then
+        empty = _ENV["检测背包_识别空格子"]()
+      end
+      if type(empty) ~= "number" then return false end
+      _ENV["当前背包格子"] = empty
+      _ENV["卖货前整理后空格"] = empty
+      if empty <= (tonumber(_ENV["背包保留格子"]) or 0) then
+        toast("整理后空格仍不足，将前往大夫按出售清单处理")
+      end
+    else
+      -- Sorting is optional. If its button text cannot be read, keep the
+      -- configured sell list flow moving instead of abandoning the doctor trip.
+      toast("未识别整理按钮，跳过整理，前往大夫清理")
+    end
+  elseif empty <= (tonumber(_ENV["背包保留格子"]) or 0) then
+    toast("已确认堆叠整理，仍无空格，将前往大夫按出售清单处理")
+  end
+  _ENV["点击"]("@@关闭背包", 1244, 104, 1000)
+  return _ENV["在主页面"]()
+end
+_ENV["去卖货_准备背包"] = L0_1
+
+function L0_1()
+  if not _ENV["大地图页面已打开"]() then return false end
+  local pickerOk, pickerRows = pcall(tomocrtexttable, 0, 0, 420, 155)
+  if not pickerOk or type(pickerRows) ~= "table" then return false end
+  local npcSearch = false
+  for _, row in pairs(pickerRows) do
+    if type(row) == "table" then
+      local text = tostring(row.words or row.text or ""):gsub("%s", "")
+      local x, y = tonumber(row.x), tonumber(row.y)
+      if text == "输入NPC名" and (tonumber(row.score) or 0) >= 0.82
+          and x and y and x >= 0 and x <= 400 and y >= 70 and y <= 145 then
+        npcSearch = true
+      end
+    end
+  end
+  if not npcSearch then return false end
+  local ok, rows = pcall(tomocrtexttable, 0, 120, 330, 650)
+  if not ok or type(rows) ~= "table" then return false end
+  local npcX, npcY = nil, nil
+  for index = 1, #rows do
+    local row = rows[index]
+    if type(row) == "table" then
+      local text = tostring(row.words or row.text or ""):gsub("%s", "")
+      local x, y = tonumber(row.x), tonumber(row.y)
+      -- The live NPC list labels these entries 东门大夫/南门大夫/西门大夫/中门大夫.
+      -- Match the role name and select the first visible doctor row in list order.
+      if string.find(text, "大夫", 1, true) and (tonumber(row.score) or 0) >= 0.82
+          and x and y and x >= 0 and x <= 150 and y >= 140 and y <= 650 then
+        npcX, npcY = x, y
+        break
+      end
+    end
+  end
+  if not npcX or not npcY then return false end
+  _ENV["点击"]("@@前往卖货npc", math.floor(npcX), math.floor(npcY), 1000)
+  -- Selecting a merchant highlights it on the map, but does not start
+  -- movement until the map's go button is confirmed.
+  sleep(400)
+  if _ENV["大地图页面已打开"]() then
+    _ENV["点击"]("@@确认前往大夫", 857, 651, 1000)
+    for _ = 1, 12 do
+      sleep(250)
+      if not _ENV["大地图页面已打开"]() then return true end
+    end
+    return false
+  end
+  return true
+end
+_ENV["大地图_点击大夫"] = L0_1
+
+function L0_1()
+  _ENV["当前任务2"] = "去卖货"
+  local 已到商店 = false
+  if not _ENV["去卖货_准备背包"]() then
+    _ENV["当前任务2"] = "卖货前背包处理失败"
+    toast("背包未能确认或整理，本次停止卖货")
+    return false
+  end
+  for i = 1, 100 do
+    -- An open map is already the merchant route's next state. Avoid unrelated
+    -- modal and login scans while its localized picker is on screen.
+    local 大地图打开 = _ENV["大地图页面已打开"]()
+    if not 大地图打开 then
+      if _ENV["登录_判断一轮"]() then
+        sleep(100)
+        return false
+      end
+      _ENV["通用处理"]()
+      if _ENV["找到"](tz["对话页面"]) then
+        if _ENV["找到"](tz["对话进入商店按钮"]) then
+          _ENV["点击"]("@@关闭对话 不去商店", 1233, 421, 1000)
+        else
+          _ENV["点击"]("@@关闭对话", 892, 652, 1000)
+        end
+      end
+      if _ENV["找到"](tz["商店卖货确定页面"]) then
+        _ENV["点击"]("@@关闭商店卖货确定页面", 714, 497, 1000)
+      end
+      if _ENV["找到"](tz["商店选中装备属性页面"]) or _ENV["找到"](tz["商店选中非装备属性页面"]) then
+        _ENV["点击"]("@@关闭商店选中装备属性页面", 1188, 626, 1000)
+      end
+      if _ENV["找到"](tz["签到页面"]) then
+        _ENV["点击"]("@@关闭签到页面", 1198, 119, 1000)
+      end
+      if _ENV["找到"](tz["背包页面"]) then
+        _ENV["点击"]("@@关闭背包", 1244, 104, 1000)
+      end
+      if _ENV["找到"](tz["商店页面"]) then
+        _ENV["点击"]("@@关闭商店", 1244, 104, 1000)
+      end
+      if _ENV["找到"](tz["确定输入内容"]) then
+        _ENV["点击"]("@@关闭输入内容", 85, 190, 1000)
+      end
+    end
+    if 大地图打开 then
+      if not _ENV["大地图_输入大地图"](_ENV["卖货地图"], true) then
+        _ENV["当前任务2"] = "卖货地图选择失败"
+        toast("卖货地图未确认，本次停止卖货")
+        return false
+      end
+      if not _ENV["大地图_点击大夫"]() then
+        _ENV["当前任务2"] = "卖货NPC选择失败"
+        toast("未能确认大夫NPC，本次停止卖货")
+        return false
+      end
+      if not _ENV["寻路_等待完成"]() then
+        _ENV["当前任务2"] = "去卖货寻路失败"
+        toast("卖货路线超时，取消本次卖货")
+        return false
+      end
+      if _ENV["卖货地图"]:find("Đại Phong") or _ENV["卖货地图"]:find("冰3") then
+        touchDown(1, 205, 590)
+        touchMoveEx(1, 137, 594, 300)
+        sleep(100)
+        touchUp(1)
+      end
+      _ENV["当前任务2"] = "去卖货 卖货开始"
+      for i = 1, 10 do
+        _ENV["找到点击"]("@@对话进入商店按钮", tz["对话进入商店按钮"], {
+          530,
+          624,
+          1000
+        })
+        _ENV["找到点击"]("@@对话按钮", tz["对话按钮"])
+        if _ENV["找到"](tz["商店页面"]) then
+          local saleOk, saleError = pcall(_ENV["去卖货_卖货"])
+          if not saleOk then
+            _ENV["当前任务2"] = "卖货识别异常，正在安全恢复"
+            print("卖货流程异常", tostring(saleError))
+            -- OCR or item-detail inspection can fail transiently. Close only
+            -- UI states that are positively identified, then let the main
+            -- loop re-read the bag and retry the doctor route.
+            pcall(function()
+              if _ENV["找到"](tz["商店卖货确定页面"]) then
+                _ENV["点击"]("@@安全取消卖货确认", 714, 497, 600)
+                sleep(200)
+              end
+              if _ENV["找到"](tz["商店选中装备属性页面"])
+                  or _ENV["找到"](tz["商店选中非装备属性页面"]) then
+                _ENV["点击"]("@@安全关闭卖货物品详情", 1188, 626, 600)
+                sleep(200)
+              end
+              if _ENV["找到"](tz["对话页面"]) then
+                _ENV["点击"]("@@安全关闭卖货对话", 1233, 422, 600)
+                sleep(200)
+              end
+              if _ENV["找到"](tz["商店页面"]) then
+                _ENV["点击"]("@@安全关闭卖货商店", 1244, 104, 600)
+              end
+            end)
+            toast("卖货异常，本次已停止并稍后重试")
+            _ENV["需要去挂机点一次"] = true
+            return false
+          end
+          已到商店 = true
+          break
+        end
+        sleep(1000)
+      end
+      break
+    elseif _ENV["在主页面"]() then
+      if _ENV["找到点击"]("@@关掉自动挂机", tz["自动挂机按钮_已开启"]) then
+      elseif _ENV["找到"](tz["自动挂机按钮_未开启"]) then
+        _ENV["点击"]("@@打开大地图", 1159, 110, 1000)
+      end
+    end
+    sleep(500)
+  end
+  return 已到商店
+end
+
+_ENV["去卖货"] = L0_1
+
+function L0_1()
+  if _ENV["去卖货"]() then
+    return _ENV["执行返回挂机点"]()
+  end
+  -- Keep the failed merchant task active so the main loop can retry it. Do
+  -- not start a competing return route after the doctor route failed.
+  _ENV["当前任务2"] = "卖货失败，等待重试"
+  toast("卖货未完成，稍后重新尝试")
+  sleep(3000)
+  return false
+end
+_ENV["去卖货后返回挂机点"] = L0_1
+
+function L0_1()
+  _ENV["当前任务2"] = "去挂机点" .. _ENV["挂机点x"] .. "," .. _ENV["挂机点y"]
+  while true do
+    if _ENV["登录_判断一轮"]() then
+      sleep(100)
+      return false
+    end
+    _ENV["通用处理"]()
+    if _ENV["找到"](tz["对话页面"]) then
+      if _ENV["找到"](tz["对话进入商店按钮"]) then
+        _ENV["点击"]("@@关闭对话 不去商店", 1233, 421, 1000)
+      else
+        _ENV["点击"]("@@关闭对话", 892, 652, 1000)
+      end
+    end
+    if _ENV["找到"](tz["商店卖货确定页面"]) then
+      _ENV["点击"]("@@关闭商店卖货确定页面", 714, 497, 1000)
+    end
+    if _ENV["找到"](tz["商店选中装备属性页面"]) or _ENV["找到"](tz["商店选中非装备属性页面"]) then
+      _ENV["点击"]("@@关闭商店选中装备属性页面", 1188, 626, 1000)
+    end
+    if _ENV["找到"](tz["签到页面"]) then
+      _ENV["点击"]("@@关闭签到页面", 1198, 119, 1000)
+    end
+    if _ENV["找到"](tz["背包页面"]) then
+      _ENV["点击"]("@@关闭背包", 1244, 104, 1000)
+    end
+    if _ENV["找到"](tz["商店页面"]) then
+      _ENV["点击"]("@@关闭商店", 1244, 104, 1000)
+    end
+    if _ENV["找到"](tz["确定输入内容"]) then
+      _ENV["点击"]("@@关闭输入内容", 85, 190, 1000)
+    end
+    if _ENV["在主页面"]() then
+      if _ENV["找到点击"](tz["自动挂机按钮_已开启"]) then
+      elseif _ENV["找到"](tz["自动挂机按钮_未开启"]) then
+        _ENV["点击"]("@@寻路 关闭自动挂机", 1159, 110, 1000)
+      end
+    elseif _ENV["大地图页面已打开"]() then
+      if not _ENV["大地图_输入大地图"](_ENV["挂机点地图"], false) then
+        _ENV["当前任务2"] = "挂机地图选择失败"
+        toast("挂机地图未能确认，稍后重试")
+        return false
+      end
+      if _ENV["大地图页面已打开"]() then
+        _ENV["点击"]("@@输入x", 664, 655, 1000)
+        for i = 1, 10 do
+          keyPress("del")
+          sleep(80)
+        end
+        imeLib.lock()
+        imeLib.setText(_ENV["挂机点x"])
+        print(_ENV["挂机点x"])
+        sleep(1000)
+        _ENV["点击"]("@@xong", 116, 227, 1000)
+      end
+      if _ENV["大地图页面已打开"]() then
+        _ENV["点击"]("@@输入y", 774, 657, 1000)
+        for i = 1, 10 do
+          keyPress("del")
+          sleep(80)
+        end
+        imeLib.lock()
+        imeLib.setText(_ENV["挂机点y"])
+        print(_ENV["挂机点y"])
+        sleep(1000)
+        _ENV["点击"]("@@xong", 116, 227, 1000)
+      end
+      imeLib.unlock()
+      if _ENV["大地图页面已打开"]() then
+        _ENV["点击"]("@@去目的地", 857, 651, 1000)
+        toast("等待寻路完成")
+        if _ENV["寻路_等待完成"]() then
+          _ENV["点击"](809, 673, 2000)
+          if _ENV["找到"](tz["自动设置页面"]) then
+            _ENV["点击"](1173, 516, 2000)
+            _ENV["点击"](808, 189, 2000)
+          end
+          return true
+        else
+          toast("寻路超时，暂未到达挂机点")
+          return false
+        end
+      end
+    end
+    sleep(500)
+  end
+end
+
+_ENV["去挂机点"] = L0_1
+
+function L0_1()
+  if _ENV["去挂机点"]() then
+    _ENV["需要去挂机点一次"] = false
+    _ENV["队员找不到队长组队次数"] = 0
+    return true
+  end
+  _ENV["需要去挂机点一次"] = true
+  _ENV["当前任务2"] = "回挂机点失败，等待重试"
+  toast("回挂机点失败，稍后重试")
+  return false
+end
+
+_ENV["执行返回挂机点"] = L0_1
+
+function L0_1()
+  local matched, x, y = findPicAdaptive(620, 580, 900, 720,
+      "素材库/汉化服务器确认按钮.png", "101010", 0, 0.68)
+  if tonumber(matched) == nil or tonumber(matched) <= 0
+      or tonumber(x) == nil or tonumber(y) == nil then return false end
+  local now = tickCount()
+  if _ENV["登录_允许页面动作"] ~= nil
+      and not _ENV["登录_允许页面动作"]("服务器选择确认", now) then return true end
+  _ENV["登录_快速点击"]("@@汉化服务器集群确认", math.floor(tonumber(x)), math.floor(tonumber(y)))
+  if _ENV["登录_记录页面动作"] ~= nil then
+    _ENV["登录_记录页面动作"]("服务器选择确认", now)
+  end
+  return true
+end
+_ENV["登录_汉化选区确认"] = L0_1
+
+-- Localized login controls captured from the Chinese client. These image
+-- templates live in script_modules/脚本/素材库 and are searched in small ROIs.
+local 登录素材 = {
+  ["进入游戏"] = {"素材库/服务器进入游戏按钮.png", 470, 310, 810, 410, 300, 72, 0.78},
+  ["登录"] = {"素材库/汉化登录按钮.png", 480, 455, 820, 585, 306, 75, 0.65},
+  ["确认"] = {"素材库/汉化角色确认按钮.png", 950, 510, 1210, 625, 203, 57, 0.52},
+  ["返回"] = {"素材库/汉化登录返回按钮.png", 530, 420, 750, 520, 128, 46, 0.62},
+  ["角色返回"] = {"素材库/汉化登录返回按钮.png", 850, 610, 1150, 690, 128, 46, 0.52}
+}
+local 登录素材查找缓存 = {}
+_ENV["登录_动作阶段"] = nil
+_ENV["登录_动作开始时间"] = nil
+_ENV["登录_失败次数"] = 0
+_ENV["登录_最大失败次数"] = 3
+_ENV["登录_自动重试终止"] = false
+_ENV["登录_页面动作记录"] = {}
+_ENV["登录_等待角色确认"] = false
+_ENV["登录_角色确认扫描次数"] = 0
+_ENV["登录_角色确认恢复阶段"] = nil
+
+function L0_1(name, x, y)
+  -- Login screens need quick feedback: tap once, then let the next loop classify
+  -- the resulting screen instead of sleeping through a fixed long sequence.
+  登录素材查找缓存 = {}
+  return _ENV["点击"](name, x, y, 100)
+end
+_ENV["登录_快速点击"] = L0_1
+
+function L0_1(page, now)
+  local actions = _ENV["登录_页面动作记录"]
+  if type(actions) ~= "table" then
+    actions = {}
+    _ENV["登录_页面动作记录"] = actions
+  end
+  local previous = tonumber(actions[page])
+  local interval = page == "角色确认" and 350 or 500
+  return previous == nil or now - previous >= interval
+end
+_ENV["登录_允许页面动作"] = L0_1
+
+function L0_1(page, now)
+  local actions = _ENV["登录_页面动作记录"]
+  if type(actions) ~= "table" then
+    actions = {}
+    _ENV["登录_页面动作记录"] = actions
+  end
+  if page == "服务器进入游戏" then actions["角色确认"] = nil end
+  if page == "角色确认" then actions["服务器进入游戏"] = nil end
+  actions[page] = now or tickCount()
+  _ENV["登录_动作阶段"] = page
+  _ENV["登录_动作开始时间"] = actions[page]
+  local shortName = ({
+    ["使用条款"] = "条款后复查",
+    ["服务器进入游戏"] = "服务器后复查",
+    ["角色确认"] = "角色后复查",
+    ["账号登录"] = "账号后复查"
+  })[page] or page
+  _ENV["当前任务2"] = shortName
+end
+_ENV["登录_记录页面动作"] = L0_1
+
+function L0_1()
+  登录素材查找缓存 = {}
+  local failures = (tonumber(_ENV["登录_失败次数"]) or 0) + 1
+  _ENV["登录_失败次数"] = failures
+  _ENV["登录_动作阶段"] = nil
+  _ENV["登录_动作开始时间"] = nil
+  local backoff = math.min(500 * (2 ^ math.min(failures - 1, 4)), 8000)
+  _ENV["登录_自动重试终止"] = false
+  _ENV["登录_重试允许时间"] = tickCount() + backoff
+  _ENV["当前任务2"] = "重试 " .. failures
+end
+_ENV["登录_记录失败"] = L0_1
+
+function L0_1()
+  local ok, matched, x, y = pcall(function()
+    return findPicAdaptive(380, 550, 580, 650,
+        "素材库/汉化条款同意按钮.png", "101010", 0, 0.68)
+  end)
+  if not ok or (matched ~= true and (tonumber(matched) == nil or tonumber(matched) <= 0))
+      or tonumber(x) == nil or tonumber(y) == nil or tonumber(x) < 0 or tonumber(y) < 0 then
+    return nil, nil
+  end
+  return math.floor(tonumber(x)), math.floor(tonumber(y))
+end
+_ENV["登录_找条款同意按钮"] = L0_1
+
+function L0_1()
+  local uiConfig = _ENV["界面数据"]
+  if type(uiConfig) == "table" and uiConfig["自动登录"] == "false" then return nil, nil end
+  local loginX, loginY
+  local cached = _ENV["登录_账号按钮缓存"]
+  local now = tickCount()
+  if type(cached) == "table" and now - (tonumber(cached.time) or 0) < 250 then
+    if cached.found then loginX, loginY = cached.x, cached.y end
+  else
+    local ok, buttonX, buttonY = pcall(function()
+      return findMultiColor(410, 628, 445, 650, "2A9CF5-101010",
+        "35|12|2A9CF5-101010|75|12|2A9CF5-101010|115|12|2A9CF5-101010|155|12|2A9CF5-101010|195|12|2A9CF5-101010|235|12|2A9CF5-101010|275|12|2A9CF5-101010|315|12|2A9CF5-101010|355|12|2A9CF5-101010|395|12|2A9CF5-101010|435|12|2A9CF5-101010")
+    end)
+    buttonX, buttonY = tonumber(buttonX), tonumber(buttonY)
+    if ok and buttonX ~= nil and buttonY ~= nil and buttonX >= 410 and buttonX <= 445
+        and buttonY >= 628 and buttonY <= 650 then
+      loginX, loginY = math.floor(buttonX + 220), math.floor(buttonY + 40)
+      _ENV["登录_账号按钮缓存"] = {time = now, found = true, x = loginX, y = loginY}
+    else
+      _ENV["登录_账号按钮缓存"] = {time = now, found = false}
+    end
+  end
+  if loginX == nil or loginY == nil then loginX, loginY = _ENV["登录_找素材按钮"]("登录") end
+  return loginX, loginY
+end
+_ENV["登录_找账号按钮"] = L0_1
+
+function L0_1(key)
+  local item = 登录素材[key]
+  if item == nil then return nil end
+  local now = tickCount()
+  local cached = 登录素材查找缓存[key]
+  if key ~= "进入游戏" and key ~= "确认"
+      and cached ~= nil and now - cached.time < 250 then
+    if cached.found then return cached.x, cached.y end
+    return nil, nil
+  end
+  local matched, x, y = findPicAdaptive(item[2], item[3], item[4], item[5],
+      item[1], "101010", 0, item[8])
+  if tonumber(matched) == nil or tonumber(matched) <= 0
+      or tonumber(x) == nil or tonumber(y) == nil or tonumber(x) < 0 or tonumber(y) < 0 then
+    登录素材查找缓存[key] = {time = now, found = false}
+    return nil
+  end
+  local centerX, centerY = math.floor(tonumber(x)), math.floor(tonumber(y))
+  登录素材查找缓存[key] = {time = now, found = true, x = centerX, y = centerY}
+  return centerX, centerY
+end
+_ENV["登录_找素材按钮"] = L0_1
+
+-- Every login pass captures one frame, classifies that frame, performs at most
+-- one action, then releases it so the next pass sees the result of that action.
+function L0_1()
+  登录素材查找缓存 = {}
+  _ENV["登录_账号按钮缓存"] = nil
+  local held = false
+  local holdOk = pcall(function() keepCapture(); held = true end)
+  local ok, page, x, y = pcall(function()
+    local activityX, activityY = _ENV["活动_找关闭按钮"]()
+    if activityX ~= nil and activityY ~= nil then
+      return "活动弹窗", activityX, activityY
+    end
+    if _ENV["在主页面"]() then return "游戏主界面" end
+    local termsX, termsY = _ENV["登录_找条款同意按钮"]()
+    if termsX ~= nil then return "使用条款", termsX, termsY end
+    local roleX, roleY = _ENV["登录_找素材按钮"]("确认")
+    if roleX ~= nil and roleX >= 950 and roleX <= 1210 and roleY >= 510 and roleY <= 625 then
+      return "角色选择", roleX, roleY
+    end
+    local serverConfirm, confirmX, confirmY = findPicAdaptive(620, 580, 900, 720,
+        "素材库/汉化服务器确认按钮.png", "101010", 0, 0.68)
+    if (serverConfirm == true or (tonumber(serverConfirm) ~= nil and tonumber(serverConfirm) > 0))
+        and tonumber(confirmX) ~= nil and tonumber(confirmY) ~= nil
+        and tonumber(confirmX) >= 0 and tonumber(confirmY) >= 0 then
+      return "服务器确认", math.floor(tonumber(confirmX)), math.floor(tonumber(confirmY))
+    end
+    local serverX, serverY = _ENV["登录_找素材按钮"]("进入游戏")
+    if serverX ~= nil and serverX >= 580 and serverX <= 700 and serverY >= 335 and serverY <= 385 then
+      return "服务器选择", serverX, serverY
+    end
+    local accountX, accountY = _ENV["登录_找账号按钮"]()
+    if accountX ~= nil then return "账号登录", accountX, accountY end
+    local roleBackX, roleBackY = _ENV["登录_找素材按钮"]("角色返回")
+    if roleBackX ~= nil and roleBackX >= 930 and roleBackX <= 1070
+        and roleBackY >= 610 and roleBackY <= 680 then
+      return "角色返回", roleBackX, roleBackY
+    end
+    local rolePageOk, rolePageFound = pcall(function()
+      return _ENV["找到"](tz["选角色页面"])
+    end)
+    if rolePageOk and rolePageFound then return "角色页面" end
+    local returnX, returnY = _ENV["登录_找素材按钮"]("返回")
+    if returnX ~= nil then return "连接提示", returnX, returnY end
+    return "未知页面"
+  end)
+  if held then pcall(releaseCapture) end
+  if not holdOk or not ok then
+    print("登录页面识别异常", tostring(page))
+    return "未知页面", nil, nil
+  end
+  return page, x, y
+end
+_ENV["登录_识别当前页面"] = L0_1
+
+_ENV["登录_连接提示开始时间"] = nil
+_ENV["登录_连接提示最后看到"] = nil
+function L0_1()
+  _ENV["登录_自动重试终止"] = false
+  local uiConfig = _ENV["界面数据"]
+  if type(uiConfig) == "table" and uiConfig["自动登录"] == "false" then return false end
+  _ENV["当前任务1"] = "登录"
+
+  local now = tickCount()
+  local retryAt = tonumber(_ENV["登录_重试允许时间"])
+  if retryAt ~= nil and now < retryAt then return true end
+  if retryAt ~= nil then _ENV["登录_重试允许时间"] = nil end
+
+  local page, x, y = _ENV["登录_识别当前页面"]()
+  if page == "游戏主界面" then
+    _ENV["登录_等待角色确认"] = false
+    _ENV["登录_角色确认恢复阶段"] = nil
+    _ENV["登录_角色确认扫描次数"] = 0
+    _ENV["登录_失败次数"] = 0
+    _ENV["登录_动作阶段"] = nil
+    _ENV["登录_动作开始时间"] = nil
+    _ENV["登录_页面动作记录"] = {}
+    _ENV["登录_连接提示开始时间"] = nil
+    _ENV["登录_连接提示最后看到"] = nil
+    _ENV["当前任务1"] = "挂机"
+    _ENV["当前任务2"] = "进入地图"
+    return false
+  end
+
+  if page == "活动弹窗" then
+    _ENV["当前任务2"] = "关活动"
+    _ENV["登录_快速点击"]("@@关闭活动页面右侧X", x, y)
+    return true
+  end
+
+  local roleLocked = _ENV["登录_等待角色确认"] == true
+      or _ENV["登录_角色确认恢复阶段"] ~= nil
+  if roleLocked and (page == "使用条款" or page == "账号登录" or page == "连接提示") then
+    -- A timeout or manual action can return to an earlier page. Drop the old
+    -- role-only lock and let this same page dispatcher handle the new screen.
+    _ENV["登录_等待角色确认"] = false
+    _ENV["登录_角色确认恢复阶段"] = nil
+    _ENV["登录_角色确认扫描次数"] = 0
+    roleLocked = false
+  end
+
+  if page == "服务器确认" then
+    if _ENV["登录_允许页面动作"]("服务器确认", now)
+        and _ENV["登录_快速点击"]("@@汉化服务器集群确认", x, y) then
+      _ENV["登录_记录页面动作"]("服务器确认", now)
+      if _ENV["登录_角色确认恢复阶段"] == "返回服务器" then
+        _ENV["登录_角色确认恢复阶段"] = "等待服务器"
+      end
+    end
+    return true
+  end
+
+  if page == "连接提示" then
+    _ENV["登录_连接提示最后看到"] = now
+    if _ENV["登录_连接提示开始时间"] == nil then
+      _ENV["登录_连接提示开始时间"] = now
+    end
+    _ENV["当前任务2"] = "关连接提示"
+    if now - _ENV["登录_连接提示开始时间"] >= 700 then
+      _ENV["登录_快速点击"]("@@登录超时关闭提示", x, y)
+      _ENV["登录_连接提示开始时间"] = nil
+      _ENV["登录_连接提示最后看到"] = nil
+      _ENV["登录_记录失败"]()
+    end
+    return true
+  else
+    _ENV["登录_连接提示开始时间"] = nil
+    _ENV["登录_连接提示最后看到"] = nil
+  end
+
+  if roleLocked then
+    local recovery = _ENV["登录_角色确认恢复阶段"]
+    if page == "角色选择" then
+      if _ENV["登录_快速点击"]("@@汉化角色确认", x, y) then
+        _ENV["登录_等待角色确认"] = false
+        _ENV["登录_角色确认恢复阶段"] = nil
+        _ENV["登录_角色确认扫描次数"] = 0
+        _ENV["登录_记录页面动作"]("角色确认", now)
+      end
+      return true
+    end
+    if recovery == nil and page == "服务器选择" then
+      local actions = _ENV["登录_页面动作记录"]
+      local lastEntry = type(actions) == "table" and tonumber(actions["服务器进入游戏"]) or nil
+      if lastEntry ~= nil and now - lastEntry >= 1500
+          and _ENV["登录_允许页面动作"]("服务器进入游戏", now)
+          and _ENV["登录_快速点击"]("@@重新进入已选服务器", x, y) then
+        _ENV["登录_角色确认扫描次数"] = 0
+        _ENV["登录_记录页面动作"]("服务器进入游戏", now)
+      else
+        _ENV["当前任务2"] = "等角色页"
+      end
+      return true
+    end
+    if recovery == "等待服务器" then
+      if page == "服务器选择" then
+        if _ENV["登录_快速点击"]("@@重新进入已选服务器", x, y) then
+          _ENV["登录_角色确认恢复阶段"] = nil
+          _ENV["登录_等待角色确认"] = true
+          _ENV["登录_角色确认扫描次数"] = 0
+          _ENV["登录_记录页面动作"]("服务器进入游戏", now)
+        end
+      elseif page == "角色返回" then
+        if _ENV["登录_快速点击"]("@@角色页返回服务器选择", x, y) then
+          _ENV["当前任务2"] = "回服务器"
+        end
+      elseif page == "角色页面" then
+        if _ENV["登录_快速点击"]("@@角色页返回服务器选择", 1085, 640) then
+          _ENV["当前任务2"] = "回服务器"
+        end
+      else
+        _ENV["当前任务2"] = "等服务器"
+      end
+      return true
+    end
+    if recovery == "返回服务器" then
+      if page == "服务器选择" then
+        _ENV["登录_角色确认恢复阶段"] = "等待服务器"
+        return true
+      elseif page == "角色返回" then
+        if _ENV["登录_快速点击"]("@@角色页返回服务器选择", x, y) then
+          _ENV["登录_角色确认恢复阶段"] = "等待服务器"
+        end
+      elseif page == "角色页面" then
+        if _ENV["登录_快速点击"]("@@角色页返回服务器选择", 1085, 640) then
+          _ENV["登录_角色确认恢复阶段"] = "等待服务器"
+        end
+      else
+        _ENV["当前任务2"] = "识别角色页"
+      end
+      return true
+    end
+
+    if page ~= "角色返回" and page ~= "角色页面" then
+      _ENV["当前任务2"] = "等角色页"
+      return true
+    end
+    local attempt = (tonumber(_ENV["登录_角色确认扫描次数"]) or 0) + 1
+    _ENV["登录_角色确认扫描次数"] = attempt
+    _ENV["当前任务2"] = "确认 " .. attempt .. "/10"
+    if attempt >= 10 then
+      _ENV["登录_角色确认扫描次数"] = 0
+      _ENV["登录_角色确认恢复阶段"] = "返回服务器"
+      _ENV["当前任务2"] = "回服务器"
+    end
+    return true
+  end
+
+  if page == "使用条款" then
+    if _ENV["登录_允许页面动作"]("使用条款", now) then
+      _ENV["登录_快速点击"]("@@同意使用条款", x, y)
+      _ENV["登录_记录页面动作"]("使用条款", now)
+    end
+    return true
+  elseif page == "服务器选择" then
+    if _ENV["登录_允许页面动作"]("服务器进入游戏", now) then
+      if _ENV["登录_快速点击"]("@@进入已选服务器", x, y) then
+        _ENV["登录_等待角色确认"] = true
+        _ENV["登录_角色确认扫描次数"] = 0
+        _ENV["登录_角色确认恢复阶段"] = nil
+        _ENV["登录_记录页面动作"]("服务器进入游戏", now)
+      end
+    end
+    return true
+  elseif page == "角色选择" then
+    if _ENV["登录_允许页面动作"]("角色确认", now) then
+      if _ENV["登录_快速点击"]("@@汉化角色确认", x, y) then
+        _ENV["登录_记录页面动作"]("角色确认", now)
+      end
+    end
+    return true
+  elseif page == "账号登录" then
+    if _ENV["登录_允许页面动作"]("账号登录", now) then
+      _ENV["登录_快速点击"]("@@汉化账号密码登录", x, y)
+      _ENV["登录_记录页面动作"]("账号登录", now)
+    end
+    return true
+  elseif page == "角色返回" then
+    _ENV["当前任务2"] = "等角色确认"
+    return true
+  end
+
+  -- Unknown/loading screens stay inside the login loop. Never send combat,
+  -- route or inventory touches to a page that has not been identified.
+  _ENV["当前任务2"] = "识别页面"
+  return true
+end
+_ENV["登录_判断一轮"] = L0_1
+
+function L0_1()
+  local 空格子 = 0
+  for yy = 149, 575, 71 do
+    for xx = 670, 1035, 71 do
+      if 1024 < xx then
+      else
+        local rtn, x, y = findPic(xx, yy, xx + 68, yy + 72, "空格子0.png", "101010", 0, 0.95)
+        if 0 < x then
+          print(rtn, x, y)
+          空格子 = 空格子 + 1
+        end
+      end
+    end
+  end
+  return 空格子
+end
+
+_ENV["检测背包_识别空格子"] = L0_1
+
+function L0_1()
+  local 红数量 = 0
+  local 蓝数量 = 0
+  local 药品信息
+  local 数量识别有效 = false
+  for i = 1, 10 do
+    药品信息, 数量识别有效 = _ENV["检测背包_识别红蓝数量"]()
+    if 数量识别有效 == nil then
+      数量识别有效 = true
+      for _, 药名 in ipairs({"大红", "小红", "大蓝", "小蓝"}) do
+        local 数量文本 = 药品信息[药名]
+        if 数量文本 ~= nil and string.match(tostring(数量文本), "^%s*%d+%s*$") == nil then
+          数量识别有效 = false
+          break
+        end
+      end
+    end
+    if 数量识别有效 then
+      break
+    end
+    toast("药品数量识别失败，重试" .. i .. "/10")
+    if i < 10 then sleep(1000) end
+  end
+  if not 数量识别有效 then
+    toast("药品数量持续无法识别，跳过本次补给交易")
+    return ""
+  end
+  红数量 = tonumberEx(药品信息["大红"]) + tonumberEx(药品信息["小红"])
+  蓝数量 = tonumberEx(药品信息["大蓝"]) + tonumberEx(药品信息["小蓝"])
+  toast(string.format("红%d 蓝%d 识别完成", 红数量, 蓝数量))
+  print(_ENV["界面数据"]["购买小红"], _ENV["界面数据"]["购买小红"] == "true")
+  print(_ENV["界面数据"]["红的数量低于"])
+  print(_ENV["界面数据"]["购买小蓝"], _ENV["界面数据"]["购买小蓝"] == "true")
+  print(_ENV["界面数据"]["蓝的数量低于"])
+  if _ENV["界面数据"]["出售全部红"] == "true" and 红数量 > tonumber(_ENV["界面数据"]["红的数量高于"]) then
+    toast("红太多" .. 红数量 .. ">" .. _ENV["界面数据"]["红的数量高于"] .. " 要去卖红")
+    sleep(1000)
+    return "卖红", 红数量
+  end
+  if _ENV["界面数据"]["出售全部蓝"] == "true" and 蓝数量 > tonumber(_ENV["界面数据"]["蓝的数量高于"]) then
+    toast("蓝太多" .. 蓝数量 .. ">" .. _ENV["界面数据"]["蓝的数量高于"] .. " 要去卖蓝")
+    sleep(1000)
+    return "卖蓝", 蓝数量
+  end
+  if _ENV["界面数据"]["购买小红"] == "true" and _ENV["买了一次红"] == false and 红数量 < tonumber(_ENV["界面数据"]["红的数量低于"]) then
+    toast("红太少" .. 红数量 .. "<" .. _ENV["界面数据"]["红的数量低于"] .. " 要去买红")
+    sleep(1000)
+    return "买红", 红数量
+  end
+  if _ENV["界面数据"]["购买小蓝"] == "true" and _ENV["买了一次蓝"] == false and 蓝数量 < tonumber(_ENV["界面数据"]["蓝的数量低于"]) then
+    toast("蓝太少" .. 蓝数量 .. "<" .. _ENV["界面数据"]["蓝的数量低于"] .. " 要去买蓝")
+    sleep(1000)
+    return "买蓝", 蓝数量
+  end
+  return ""
+end
+
+_ENV["检测背包_判断是否去卖或者买药"] = L0_1
+
+function L0_1(a, b, c, d)
+  local function 文字识别库()
+    local 识别库 = {}
+
+    识别库[1] = "1|4,14|100m0F&&&&"
+    识别库[2] = "7|5,15|200m0U1&&#7u0"
+    识别库[3] = "6|7,15|0FmV&p67mmQ63SVm1y"
+    识别库[4] = "5|6,15|&ns67mWU63m&m1u"
+    识别库[5] = "8|7,15|00GV&pF3mmQ73V&mmy"
+    识别库[6] = "6|6,15|F&ZlEmmQ63S&n3y"
+    识别库[7] = "9|7,15|0O0Vnp37m8Q33V&m&u"
+    识别库[8] = "6|7,15|0FWV&p67mmQ63SVn1y"
+    识别库[9] = "5|7,15|008&ns63mWU67G&m0m"
+    识别库[10] = "0|6,15|F&pWEm0Q03V&n&y"
+    识别库[11] = "5|7,15|0C8&ns43mWU67G&m0m"
+    识别库[12] = "8|6,14|&ViyU63Xm&&umy"
+    识别库[13] = "2|7,15|002U1x0VmEQ7ZVmPu0"
+    识别库[14] = "3|7,15|0W8S1p07mGQ73V&muu"
+    识别库[15] = "4|7,15|00m0#0yGV37&&V&u0O"
+    识别库[16] = "2|6,15|U1x0VmFQ7ZVmPu0"
+    识别库[17] = "3|7,14|0W8u3i0U23Xm&&vuy"
+    识别库[18] = "3|6,15|C1ZWEG0U23Pux&#"
+    识别库[19] = "6|6,15|F&p76mmU63S&n1y"
+    识别库[20] = "8|6,15|VlpF7mmQ73V&mmy"
+    识别库[21] = "4|8,15|0603m3o3uO&&p&&0300G"
+    识别库[22] = "7|5,15|602mF#&y&m300"
+    return 识别库
+  end
+
+  TURING["来源_获取屏幕像素"](a, b, c, d)
+  TURING["滤镜_彩色_二值化"]("00DBDE-202020|00FBF7-202020|00CBC6-202020")
+  TURING["切割_范围投影切割"](0, 0, "8")
+  TURING["字库_加载六十四进制识别字库"](文字识别库())
+  local 识别结果 = TURING["识别"](80)
+  if 识别结果 ~= nil and 识别结果 ~= "" then
+    return 识别结果
+  end
+  return ""
+end
+
+_ENV["检测背包_主页面识别红蓝数量_识别子函数"] = L0_1
+
+function L0_1()
+  local 检测数量数组 = {}
+  检测数量数组[1] = _ENV["检测背包_主页面识别红蓝数量_识别子函数"](940, 299, 995, 321)
+  检测数量数组[2] = _ENV["检测背包_主页面识别红蓝数量_识别子函数"](1023, 299, 1078, 321)
+  检测数量数组[3] = _ENV["检测背包_主页面识别红蓝数量_识别子函数"](1100, 299, 1159, 321)
+  检测数量数组[4] = _ENV["检测背包_主页面识别红蓝数量_识别子函数"](1180, 299, 1238, 321)
+  for i = 1, #检测数量数组 do
+    print("第" .. i .. "个数量", 检测数量数组[i])
+  end
+  local 数量识别有效 = true
+  for i = 1, #检测数量数组 do
+    if 检测数量数组[i] == nil or not tostring(检测数量数组[i]):match("%d") then
+      数量识别有效 = false
+      break
+    end
+  end
+  _ENV["小红数量"] = tonumberEx(检测数量数组[1])
+  _ENV["大红数量"] = tonumberEx(检测数量数组[2])
+  _ENV["小蓝数量"] = tonumberEx(检测数量数组[3])
+  _ENV["大蓝数量"] = tonumberEx(检测数量数组[4])
+  _ENV["药品数量识别有效"] = 数量识别有效
+  return 数量识别有效
+end
+
+_ENV["检测背包_主页面识别红蓝数量"] = L0_1
+
+function L0_1(识别文本)
+  识别文本 = tostring(识别文本 or "")
+  识别文本 = string.gsub(识别文本, "%s+", "")
+  识别文本 = string.gsub(识别文本, "／", "/")
+  local 当前重量文本, 总重量文本 = string.match(识别文本, "^(%d+)%/(%d+)$")
+  if 当前重量文本 == nil then
+    return nil, nil
+  end
+  local 当前重量 = tonumber(当前重量文本)
+  local 总重量 = tonumber(总重量文本)
+  -- The game allows current load to exceed capacity (for example 361/200);
+  -- that is a valid reading and must trigger the merchant trip.
+  if 总重量 <= 0 then
+    return nil, nil
+  end
+  return 当前重量, 总重量
+end
+
+_ENV["检测背包_解析重量"] = L0_1
+
+-- The backpack footer displays the number of free cells as "0/35". Prefer
+-- that explicit counter; template scanning remains a fallback for OCR misses.
+function L0_1(识别文本)
+  识别文本 = tostring(识别文本 or "")
+  识别文本 = string.gsub(识别文本, "%s+", "")
+  识别文本 = string.gsub(识别文本, "Ｏ", "0")
+  识别文本 = string.gsub(识别文本, "ｏ", "0")
+  识别文本 = string.gsub(识别文本, "[Oo]", "0")
+  识别文本 = string.gsub(识别文本, "｜", "/")
+  识别文本 = string.gsub(识别文本, "|", "/")
+  识别文本 = string.gsub(识别文本, "[lI]", "/")
+  识别文本 = string.gsub(识别文本, "／", "/")
+  local 空格文本, 总格文本 = string.match(识别文本, "(%d+)%/(%d+)")
+  if 空格文本 == nil then
+    return nil, nil
+  end
+  local 空格 = tonumber(空格文本)
+  local 总格 = tonumber(总格文本)
+  if 总格 <= 0 or 空格 > 总格 then
+    return nil, nil
+  end
+  return 空格, 总格
+end
+
+_ENV["检测背包_解析空格子"] = L0_1
+
+function L0_1()
+  if _ENV["检测修理装备"] and _ENV["找到"](tz["提示装备需要修理"]) then
+    toast("装备需要修理")
+    sleep(1000)
+    return false
+  end
+  local function 暂缓清包(reason)
+    local now = tonumberEx(tickCount()) or 0
+    _ENV["最近背包内存快照"] = nil
+    _ENV["背包读取来源"] = "暂不可用"
+    _ENV["当前任务2"] = "等待沙箱背包数据：" .. tostring(reason)
+    local lastNotice = tonumberEx(_ENV["背包读取提示时间"])
+    if lastNotice == nil or now - lastNotice >= 15000 then
+      toast("背包数据暂不可用，保留挂机并继续重试：" .. tostring(reason))
+      _ENV["背包读取提示时间"] = now
+    end
+    return nil
+  end
+  -- The sell trip may only be triggered by a fresh, validated 610 sandbox
+  -- memory snapshot. Do not silently fall back to OCR for weight/free slots:
+  -- a wrong reading can send the character away or sell the wrong inventory.
+  if type(getSandboxBagSnapshot) ~= "function" then
+    return 暂缓清包("缺少内存接口")
+  end
+  local reserveSlots = tonumber(_ENV["背包保留格子"]) or 2
+  local reserveWeight = tonumber(_ENV["背包保留重量"]) or 3
+  local snapshotOk, snapshot = pcall(getSandboxBagSnapshot, reserveSlots, reserveWeight)
+  if not snapshotOk then return 暂缓清包("读取异常") end
+  if type(snapshot) ~= "table" or snapshot.supported ~= true then
+    local status = type(snapshot) == "table" and tostring(snapshot.status or "未知状态") or "无快照"
+    return 暂缓清包(status)
+  end
+
+  local freeSlots = tonumber(snapshot.freeSlots)
+  local currentWeight = tonumber(snapshot.currentWeight)
+  local maxWeight = tonumber(snapshot.maxWeight)
+  local ageMs = tonumber(snapshot.ageMs)
+  if not freeSlots or freeSlots < 0 or freeSlots > 200
+      or not currentWeight or currentWeight < 0 or currentWeight > 1000000
+      or not maxWeight or maxWeight <= 0 or maxWeight > 1000000
+      or not ageMs or ageMs < 0 or ageMs > 5000 then
+    return 暂缓清包("快照过期或数值无效")
+  end
+  local 内存背包 = {
+    空格 = math.floor(freeSlots),
+    重量 = math.floor(currentWeight),
+    上限 = math.floor(maxWeight),
+    buildId = tostring(snapshot.buildId or "")
+  }
+  local 需要去大夫 = 内存背包.空格 <= reserveSlots
+      or 内存背包.上限 - 内存背包.重量 <= reserveWeight
+  if snapshot.shouldVisitDoctor ~= 需要去大夫 then
+    return 暂缓清包("阈值校验不一致")
+  end
+  _ENV["最近背包内存快照"] = {
+    空格 = 内存背包.空格,
+    重量 = 内存背包.重量,
+    上限 = 内存背包.上限,
+    buildId = 内存背包.buildId,
+    时间 = tickCount(),
+    保留格子 = reserveSlots,
+    保留重量 = reserveWeight,
+    需要去大夫 = 需要去大夫,
+    超重 = 内存背包.重量 > 内存背包.上限
+  }
+  _ENV["背包读取来源"] = "游戏内存"
+  _ENV["当前背包格子"] = 内存背包.空格
+  _ENV["当前背包重量"] = 内存背包.重量 .. "/" .. 内存背包.上限
+  _ENV["背包重量识别失败"] = false
+  _ENV["背包格子识别失败"] = false
+  local lowSlots = 内存背包.空格 <= reserveSlots
+  _ENV["背包接近负重阈值"] = 内存背包.上限 - 内存背包.重量 <= reserveWeight + 5
+  if 需要去大夫 then
+    _ENV["上次检测背包"] = tickCount()
+    if lowSlots then
+      toast("内存检测空格不足" .. 内存背包.空格 .. "格，前往大夫")
+    else
+      toast("内存检测剩余负重达到阈值，前往大夫")
+    end
+    return false
+  end
+  -- With no inventory-driven purchase/sale enabled, the memory snapshot fully
+  -- answers the cleanup trigger; do not open the backpack for OCR polling.
+  local inventoryConfig = _ENV["界面数据"]
+  local wantsPotionInventory = inventoryConfig["购买小红"] == "true"
+      or inventoryConfig["购买小蓝"] == "true"
+      or inventoryConfig["出售全部红"] == "true"
+      or inventoryConfig["出售全部蓝"] == "true"
+  if not wantsPotionInventory then
+    _ENV["上次检测背包"] = tickCount()
+    return true
+  end
+  -- The configured interval still controls medicine checks. Weight and free
+  -- slots need a shorter independent interval so a near-full bag is not left
+  -- unchecked for a whole minute. Near-full and failed reads retry sooner.
+  local 设置间隔秒 = math.max(1, tonumber(_ENV["背包检测间隔秒"]) or 60)
+  local 背包间隔秒 = math.min(设置间隔秒, 15)
+  if _ENV["背包重量识别失败"] or _ENV["背包格子识别失败"]
+      or _ENV["背包接近负重阈值"] then
+    背包间隔秒 = math.min(背包间隔秒, 5)
+  end
+  if _ENV["上次检测背包"] == nil or tickCount() - _ENV["上次检测背包"] >= 1000 * 背包间隔秒 then
+    local 在主页面 = _ENV["在主页面"]()
+    if 在主页面 then
+      local 配置 = _ENV["界面数据"]
+      local 要检测药品 = 配置["购买小红"] == "true" or 配置["购买小蓝"] == "true"
+          or 配置["出售全部红"] == "true" or 配置["出售全部蓝"] == "true"
+      if 要检测药品 and (_ENV["上次检测快捷药品"] == nil
+          or tickCount() - _ENV["上次检测快捷药品"] >= 1000 * 设置间隔秒) then
+        _ENV["上次检测快捷药品"] = tickCount()
+        if _ENV["检测背包_主页面识别红蓝数量"]() then
+          if 配置["购买小红"] == "true" and _ENV["小红数量"] + _ENV["大红数量"] < tonumber(配置["红的数量低于"]) then
+            toast(string.format("%d %d %d %d 红太少", _ENV["小红数量"], _ENV["大红数量"], _ENV["小蓝数量"], _ENV["大蓝数量"]))
+            sleep(1000)
+            return false
+          end
+          if 配置["购买小蓝"] == "true" and _ENV["小蓝数量"] + _ENV["大蓝数量"] < tonumber(配置["蓝的数量低于"]) then
+            toast(string.format("%d %d %d %d 蓝太少", _ENV["小红数量"], _ENV["大红数量"], _ENV["小蓝数量"], _ENV["大蓝数量"]))
+            sleep(1000)
+            return false
+          end
+          if 配置["出售全部红"] == "true" and _ENV["小红数量"] + _ENV["大红数量"] > tonumber(配置["红的数量高于"]) then
+            toast(string.format("%d %d %d %d 红太多", _ENV["小红数量"], _ENV["大红数量"], _ENV["小蓝数量"], _ENV["大蓝数量"]))
+            sleep(1000)
+            return false
+          end
+          if 配置["出售全部蓝"] == "true" and _ENV["小蓝数量"] + _ENV["大蓝数量"] > tonumber(配置["蓝的数量高于"]) then
+            toast(string.format("%d %d %d %d 蓝太多", _ENV["小红数量"], _ENV["大红数量"], _ENV["小蓝数量"], _ENV["大蓝数量"]))
+            sleep(1000)
+            return false
+          end
+        else
+          toast("药品数量识别失败，跳过药品交易并继续检查背包")
+        end
+      end
+      -- Record attempts too, so a page that cannot be identified does not
+      -- cause the backpack to be opened again on every main-loop iteration.
+      _ENV["上次检测背包"] = tickCount()
+      _ENV["点击"]("@@打开背包", 902, 693, 1000)
+    end
+    local 背包页面 = _ENV["找到"](tz["背包页面"])
+    if not 背包页面 and _ENV["药品_识别背包页面"] ~= nil then
+      背包页面 = _ENV["药品_识别背包页面"]()
+    end
+    if not 背包页面 then
+      if 在主页面 then
+        _ENV["背包重量识别失败"] = true
+        _ENV["当前背包重量"] = "未识别"
+        _ENV["当前任务2"] = "背包页面未识别，稍后重试"
+        print("背包页面未识别，稍后重试")
+        toast("背包页面未识别，稍后重试")
+        return nil
+      end
+      return true
+    end
+    _ENV["上次检测背包"] = tickCount()
+    local 是否要去商店 = false
+    -- In the 610 UI, both counters sit in the lower/right footer of the
+    -- backpack. Read the explicit free-slot counter first so a full bag is
+    -- not dependent on matching every empty-cell image template.
+    local 空格文本 = tomocrtextall(1045, 604, 1215, 655)
+    local 当前空格子 = 内存背包 and 内存背包.空格
+        or _ENV["检测背包_解析空格子"](空格文本)
+    if 当前空格子 == nil then
+      当前空格子 = _ENV["检测背包_识别空格子"]()
+    end
+    _ENV["当前背包格子"] = 当前空格子
+    local 空格子已识别 = type(当前空格子) == "number" and 当前空格子 >= 0
+    _ENV["背包格子识别失败"] = not 空格子已识别
+    if not 空格子已识别 then
+      _ENV["当前任务2"] = "背包空格识别失败，稍后重试"
+      toast("背包空格识别失败，稍后重试")
+    end
+    -- 361/200 is in the upper portion of the right-hand backpack panel
+    -- (reference coordinates for the 1280x720 game canvas).
+    local 重量, 总重量
+    if 内存背包 ~= nil then
+      重量, 总重量 = 内存背包.重量, 内存背包.上限
+    else
+      local 识别结果 = tomocrtextall(1100, 225, 1210, 260)
+      print("背包重量识别结果", 识别结果)
+      重量, 总重量 = _ENV["检测背包_解析重量"](识别结果)
+    end
+    local 重量已识别 = 重量 ~= nil and 总重量 ~= nil
+    _ENV["背包重量识别失败"] = not 重量已识别
+    if 重量已识别 then
+      _ENV["当前背包重量"] = 重量 .. "/" .. 总重量
+      local 保留重量 = tonumber(_ENV["背包保留重量"]) or 3
+      local 剩余重量 = 总重量 - 重量
+      _ENV["背包接近负重阈值"] = 剩余重量 <= 保留重量 + 5
+      if 剩余重量 <= 保留重量 then
+        toast("剩余负重达到阈值，前往大夫")
+        是否要去商店 = true
+      end
+    else
+      _ENV["当前背包重量"] = "未识别"
+      _ENV["当前任务2"] = "背包重量未识别，稍后重试"
+      print("背包重量未识别，稍后重试")
+      toast("背包重量未识别，稍后重试")
+    end
+    local 保留格子 = tonumber(_ENV["背包保留格子"]) or 2
+    if 空格子已识别 and 当前空格子 <= 保留格子 then
+      toast("空格子不足" .. 当前空格子 .. "/" .. 保留格子)
+      sleep(1000)
+      是否要去商店 = true
+    end
+    if _ENV["上次检测元宝"] == nil then
+      _ENV["上次检测元宝"] = -999999
+    end
+    if tickCount() - _ENV["上次检测元宝"] > 300000 then
+      toast("去检测元宝")
+      sleep(1000)
+      _ENV["当前元宝"] = tomocrtextall(1054, 271, 1198, 305)
+      _ENV["修改数据库"]("元宝", _ENV["当前元宝"])
+      _ENV["上次检测元宝"] = tickCount()
+    end
+    if 是否要去商店 then return false end
+    if not 重量已识别 or not 空格子已识别 then return nil end
+    return true
+  end
+  return true
+end
+
+_ENV["检测背包"] = L0_1
+
+-- Only enter combat when the 610 sandbox memory bridge returned a fresh,
+-- validated snapshot. Unknown inventory state is not treated as "bag is OK".
+function L0_1()
+  local result = _ENV["检测背包"]()
+  if result == false then return "SELL" end
+  if result == nil then return "WAIT" end
+  return "CONTINUE"
+end
+_ENV["挂机_背包状态门控"] = L0_1
+
+function L0_1()
+  if _ENV["检测修理装备"] and _ENV["找到"](tz["提示装备需要修理"]) then
+    toast("装备需要修理")
+    sleep(1000)
+    return false
+  end
+  if _ENV["上次检测背包"] == nil or tickCount() - _ENV["上次检测背包"] > 1000 * _ENV["背包检测间隔秒"] then
+    if _ENV["在主页面"]() then
+      _ENV["点击"]("@@打开背包", 902, 663, 1000)
+    end
+    if _ENV["找到"](tz["背包页面"]) then
+      _ENV["上次检测背包"] = tickCount()
+      local 是否要去商店 = false
+      是否要去商店 = _ENV["检测背包_判断是否去卖或者买药"]() ~= ""
+      if 是否要去商店 == false then
+        local 当前空格子 = _ENV["检测背包_识别空格子"]()
+        _ENV["当前背包格子"] = 当前空格子
+        local 识别结果 = tomocrtextall(1057, 346, 1187, 373)
+        print(识别结果)
+        local 识别结果数组 = splitStr(识别结果, "/")
+        if #识别结果数组 == 2 then
+          local 重量 = tonumberEx(识别结果数组[1])
+          local 总重量 = tonumberEx(识别结果数组[2])
+          _ENV["当前背包重量"] = 重量 .. "/" .. 总重量
+          toast(string.format("%d/%d", 重量, 总重量))
+          if 总重量 - 重量 <= _ENV["背包保留重量"] then
+            是否要去商店 = true
+          end
+        end
+        if 当前空格子 <= _ENV["背包保留格子"] then
+          toast("空格子不足" .. 当前空格子 .. "/" .. _ENV["背包保留格子"])
+          sleep(1000)
+          是否要去商店 = true
+        end
+      end
+      return not 是否要去商店
+    end
+  end
+  return true
+end
+
+_ENV["检测背包_备份"] = L0_1
+
+function L0_1()
+  local ret = cmpColorEx("287|394|808080-111111,191|485|ffffff-111111,329|393|808080-111111,200|327|808080-111111,344|291|808080-111111,300|310|808080-111111,292|328|808080-111111,218|289|808080-111111,362|444|ffffff-111111,321|320|808080-111111,313|399|808080-111111,226|306|808080-111111,207|518|ffffff-111111,303|508|ffffff-111111,304|521|ffffff-111111,323|454|ffffff-111111,361|328|808080-111111,365|508|ffffff-111111,186|425|f2f2f2-111111,297|500|ffffff-111111", 0.8)
+  if ret == 1 then
+    return true
+  end
+  local x, y = findMultiColor(55, 226, 672, 624, "ebebeb-111111", "112|14|808080-111111|301|23|808080-111111|7|145|808080-111111|131|143|808080-111111|303|152|808080-111111|-2|208|ffffff-111111|102|210|ffffff-111111|183|210|ffffff-111111|22|275|000000-111111|17|108|ffffff-111111|18|89|ffffff-111111", 0, 0.9)
+  if x ~= -1 and y ~= -1 then
+    return true
+  end
+  return false
+end
+
+_ENV["页面_vpn已关"] = L0_1
+
+function L0_1()
+  local x, y = findMultiColor(10, 172, 223, 416, "1e4376-111111", "157|5|1e4376-111111|349|25|1e4376-111111|395|28|1e4376-111111|-128|136|1e4376-111111|-128|113|1e4376-111111|-125|-37|fafafa-111111|-58|-37|fafafa-111111|-27|-37|fafafa-111111", 0, 0.9)
+  if x ~= -1 and y ~= -1 then
+    return true
+  end
+  local ret = cmpColorEx("410|273|1e4376-111111,495|263|1e4376-111111,553|269|1e4376-111111,557|331|1e4376-111111,559|493|ffffff-111111,541|535|ffffff-111111,525|689|ffffff-111111", 0.8)
+  if ret == 1 then
+    return true
+  end
+  x, y = findMultiColor(55, 226, 672, 624, "1e4376-111111", "101|0|1e4376-111111|303|5|1e4376-111111|9|113|1e4376-111111|152|129|1e4376-111111|2|78|ffffff-111111|14|70|486690-111111|-19|193|ffffff-111111|61|191|ffffff-111111|7|243|000000-111111|-11|243|000000-111111", 0, 0.9)
+  if x ~= -1 and y ~= -1 then
+    return true
+  end
+  return false
+end
+
+_ENV["页面_vpn已开"] = L0_1
+
+function L0_1()
+  local vpn包名 = "com.github.metacubex.clash.meta"
+  local vpn包名 = "com.github.kr328.clash"
+  local 确定开启 = {
+    "596|912|008577-111111,599|912|008577-111111,601|912|008577-111111,596|916|008577-111111,596|921|008577-111111,600|918|0d8b7e-111111,164|837|ffffff-111111,180|803|ffffff-111111,171|817|060606-111111,179|819|010101-111111,177|826|505050-111111,176|803|ffffff-111111,149|803|ffffff-111111,216|805|757575-111111,221|805|757575-111111",
+    0.95
+  }
+  local 次数 = 0
+  while _ENV["开启vpn"] do
+    次数 = 次数 + 1
+    toast("去开启vpn")
+    runApp(vpn包名)
+    for i = 1, 10 do
+      sleep(1000)
+      if _ENV["页面_vpn已关"]() then
+        break
+      end
+      if _ENV["页面_vpn已开"]() then
+        tap(378, 297)
+        sleep(1000)
+      end
+      _ENV["找到点击"]("@@确定开启", 确定开启)
+    end
+    for i = 1, 10 do
+      sleep(1000)
+      _ENV["找到点击"]("@@确定开启", 确定开启)
+      if _ENV["页面_vpn已关"]() then
+        tap(378, 297)
+        sleep(1000)
+      end
+      if _ENV["页面_vpn已开"]() then
+        return true
+      end
+    end
+    if 2 <= 次数 then
+      toast("vpn白屏 重启手机")
+      exec("reboot")
+    end
+    stopApp(vpn包名)
+    sleep(1000)
+  end
+end
+
+_ENV["开启vpn函数"] = L0_1
+
+function L0_1(a, b, c, d)
+  local rows = tomocrtexttable(a, b, c, d) or {}
+  local bestName = ""
+  local bestScore = 0
+  for i = 1, #rows do
+    local row = rows[i]
+    local name = tostring(row["words"] or row["text"] or "")
+    name = string.gsub(name, "^%s*(.-)%s*$", "%1")
+    local score = tonumber(row["score"]) or 0
+    if name ~= "" and score >= 0.8 and score > bestScore then
+      bestName = name
+      bestScore = score
+    end
+  end
+  return bestName
+end
+_ENV["组队_识别名字"] = L0_1
+
+function L0_1(aa, bb, cc, dd)
+  local 所有队伍 = {}
+  local ret = findMultiColorAll(aa, bb, cc, dd, "73418c-111111", "7|1|733584-111111|8|2|73357b-111111|11|5|7b3963-111111|14|5|7b3963-111111|6|8|84394a-111111|2|9|8c3d4a-111111|1|10|8c3d42-111111", 0, 0.9)
+  if ret ~= nil then
+    for i = 1, #ret do
+      local a, b, c, d = 24 + ret[i].x, ret[i].y, 229 + ret[i].x, 34 + ret[i].y
+      table.insert(所有队伍, {
+        x = a + 76,
+        y = b + 27,
+        words = _ENV["组队_识别名字"](a, b, c, d)
+      })
+    end
+  end
+  return 所有队伍
+end
+
+_ENV["组队_识别所有队伍名字"] = L0_1
+
+function L0_1()
+  return _ENV["组队_识别名字"](147, 212, 327, 263)
+end
+
+_ENV["组队_识别队长名称2"] = L0_1
+
+function L0_1()
+  local x, y = findMultiColor(105, 187, 165, 285, "7b4173-111111", "-7|1|7b3863-111111|-9|-4|6b348c-111111|-13|1|7b3863-111111|-13|3|843852-111111|-9|2|84385a-111111|-6|3|843852-111111|-18|14|943c18-111111|-18|-3|6b387b-111111|-18|6|843c39-111111", 0, 0.9)
+  if x ~= -1 and y ~= -1 then
+    print("有队长")
+    local 队长名字 = _ENV["组队_识别名字"](147, 212, 327, 263)
+    print("队长名字", 队长名字)
+    return 队长名字
+  end
+  return ""
+end
+
+_ENV["组队_识别队长名称"] = L0_1
+
+function L0_1()
+  if _ENV["界面数据"]["自动战斗"] ~= "true" then
+    return false
+  end
+  return _ENV["找到点击"]("@@自动挂机按钮_未开启", tz["自动挂机按钮_未开启"])
+end
+
+_ENV["执行自动战斗"] = L0_1
+
+function L0_1(资源文本)
+  资源文本 = tostring(资源文本 or "")
+  资源文本 = string.gsub(资源文本, "%s+", "")
+  资源文本 = string.gsub(资源文本, "／", "/")
+  local 当前值, 最大值 = string.match(资源文本, "^(%d+)%/(%d+)$")
+  当前值 = tonumber(当前值)
+  最大值 = tonumber(最大值)
+  if 当前值 == nil or 最大值 == nil or 最大值 <= 0 or 当前值 < 0 or 当前值 > 最大值 then
+    return nil
+  end
+  return math.floor(当前值 * 100 / 最大值)
+end
+
+_ENV["战斗_解析资源百分比"] = L0_1
+
+function L0_1(a, b, c, d)
+  local rows = tomocrtexttable(a, b, c, d)
+  local bestScore = 0
+  local bestPercent = nil
+  for i = 1, #rows do
+    local row = rows[i]
+    local score = tonumber(row["score"]) or tonumber(row["confidence"]) or 0
+    local text = tostring(row["words"] or row["text"] or "")
+    local percent = _ENV["战斗_解析资源百分比"](text)
+    if score >= 0.8 and percent ~= nil and score > bestScore then
+      bestScore = score
+      bestPercent = percent
+    end
+  end
+  return bestPercent
+end
+
+_ENV["战斗_识别资源百分比"] = L0_1
+
+function L0_1(药品颜色)
+  -- The game presents eight item/skill slots in a 4-by-2 grid. Only tap a
+  -- slot after the recovered red/blue potion image signature matches inside it.
+  for _, y in ipairs({310, 375}) do
+    for _, x in ipairs({971, 1051, 1131, 1211}) do
+      if 药品颜色 == "红" and type(findPic) == "function" then
+        local matched, mx, my = findPic(x - 24, y - 24, x + 24, y + 24,
+            "素材库/汉化快捷栏红药瓶图标.png", "101010", 0, 0.68)
+        mx, my = tonumber(mx), tonumber(my)
+        if (matched == true or tonumber(matched) == 1) and mx ~= nil and my ~= nil
+            and mx >= x - 24 and mx <= x + 24 and my >= y - 24 and my <= y + 24 then
+          return x, y
+        end
+      end
+      local 药品类型 = _ENV["检测背包_识别红蓝数量_识别红蓝"](x - 24, y - 24, x + 24, y + 24)
+      if 药品颜色 == "红" and (药品类型 == "小红" or 药品类型 == "大红")
+          or 药品颜色 == "蓝" and (药品类型 == "小蓝" or 药品类型 == "大蓝") then
+        return x, y
+      end
+    end
+  end
+  return nil, nil
+end
+
+_ENV["战斗_查找快捷栏药品"] = L0_1
+
+function L0_1()
+  local slots = {
+    {140, 216}, {234, 216}, {330, 216}, {424, 216},
+    {138, 306}, {234, 306}, {329, 306}, {424, 306}
+  }
+  for i = 1, #slots do
+    local sx, sy = slots[i][1], slots[i][2]
+    local matched, mx, my = findPic(sx - 22, sy - 22, sx + 22, sy + 22,
+        "素材库/汉化空快捷栏槽位.png", "101010", 0, 0.95)
+    mx, my = tonumber(mx), tonumber(my)
+    -- findPic returns the matched image's top-left, while `slots` stores its
+    -- center. Compare the template center with the expected quickslot center.
+    if (matched == true or tonumber(matched) == 1) and mx ~= nil and my ~= nil
+        and math.abs((mx + 20) - sx) <= 4 and math.abs((my + 20) - sy) <= 4 then
+      return sx, sy
+    end
+  end
+  return nil, nil
+end
+
+_ENV["战斗_查找空快捷栏槽位"] = L0_1
+
+function L0_1(药品颜色)
+  for _, yy in ipairs({127, 205, 284}) do
+    for _, xx in ipairs({612, 690, 769, 848, 926, 1004}) do
+      if 药品颜色 == "蓝" then
+        local matched, mx, my = findPic(xx, yy, xx + 68, yy + 72,
+            "素材库/汉化快捷栏蓝药瓶图标.png", "101010", 0, 0.65)
+        mx, my = tonumber(mx), tonumber(my)
+        if (matched == true or tonumber(matched) == 1) and mx ~= nil and my ~= nil
+            and mx >= xx and mx <= xx + 68 and my >= yy and my <= yy + 72 then
+          return xx + 34, yy + 40
+        end
+      end
+      if 药品颜色 == "红" and type(findPic) == "function" then
+        -- The quickbar settings list renders the red potion icon smaller than
+        -- the backpack. Use a separately calibrated template for this view.
+        local matched, mx, my = findPic(xx, yy, xx + 68, yy + 72,
+            "素材库/汉化设置红药瓶图标.png", "101010", 0, 0.78)
+        mx, my = tonumber(mx), tonumber(my)
+        if (matched == true or tonumber(matched) == 1) and mx ~= nil and my ~= nil
+            and mx >= xx and mx <= xx + 68 and my >= yy and my <= yy + 72 then
+          return xx + 34, yy + 40
+        end
+      end
+      local 类型 = _ENV["检测背包_识别红蓝数量_识别红蓝"](xx, yy, xx + 68, yy + 72)
+      if 药品颜色 == "红" and (类型 == "小红" or 类型 == "大红")
+          or 药品颜色 == "蓝" and (类型 == "小蓝" or 类型 == "大蓝") then
+        return xx + 34, yy + 40
+      end
+    end
+  end
+  return nil, nil
+end
+
+_ENV["战斗_查找自动设置药品"] = L0_1
+
+function L0_1(标题, markers, requiredMarkers)
+  -- Do not OCR the full 1280x720 game canvas to decide whether the backpack
+  -- opened. On-device ML Kit times out on this screen-sized crop on LDPlayer,
+  -- leaving the timed-out native task burning CPU. Check the fixed title first,
+  -- then only the backpack's tabs/counter/action column.
+  local titleLeft, titleTop, titleRight, titleBottom = 620, 0, 940, 105
+  if 标题 ~= "背包" then
+    titleLeft, titleRight = 420, 900
+  end
+  local titleOk, titleRows = pcall(tomocrtexttable,
+      titleLeft, titleTop, titleRight, titleBottom)
+  if not titleOk or type(titleRows) ~= "table" then return false end
+  local titleText = ""
+  for i = 1, #titleRows do
+    local row = titleRows[i]
+    local score = tonumber(row.score) or tonumber(row.confidence) or 0
+    if score >= 0.55 then
+      titleText = titleText .. string.gsub(tostring(row.words or row.text or ""), "%s+", "") .. "|"
+    end
+  end
+  if not string.find(titleText, 标题, 1, true) then return false end
+
+  local regions
+  if 标题 == "背包" then
+    regions = {{650, 70, 1000, 280}, {990, 130, 1235, 300}, {990, 285, 1235, 585}}
+  else
+    regions = {{220, 95, 1060, 650}}
+  end
+  local found = 0
+  for _, region in ipairs(regions) do
+    local ok, rows = pcall(tomocrtexttable, table.unpack(region))
+    if not ok or type(rows) ~= "table" then return false end
+    local text = ""
+    for i = 1, #rows do
+      local row = rows[i]
+      local score = tonumber(row.score) or tonumber(row.confidence) or 0
+      if score >= 0.55 then
+        text = text .. string.gsub(tostring(row.words or row.text or ""), "%s+", "") .. "|"
+      end
+    end
+    for i = 1, #markers do
+      if string.find(text, markers[i], 1, true) then found = found + 1 end
+    end
+  end
+  return found >= requiredMarkers
+end
+
+_ENV["药品_页面文字匹配"] = L0_1
+_ENV["药品_识别背包页面"] = function()
+  return _ENV["药品_页面文字匹配"]("背包",
+      {"整理", "商铺", "禁止丢弃", "Sắp xếp", "Cấm bỏ", "Túi1", "Túi2"}, 2)
+end
+_ENV["药品_识别自动设置页面"] = function()
+  return _ENV["药品_页面文字匹配"]("自动设置",
+      {"物品快捷键栏", "连续使用设置", "开始设置物品", "请选快捷键"}, 1)
+end
+
+-- Configure one missing medicine quickslot using the localized game's own
+-- item menu. The slot is only selected when the known empty-cell template
+-- positively matches; unknown or occupied cells are never replaced.
+function L0_1(药品颜色)
+  if 药品颜色 ~= "红" and 药品颜色 ~= "蓝" then
+    return false
+  end
+  if not _ENV["在主页面"]() then
+    return false
+  end
+  local 已有X = _ENV["战斗_查找快捷栏药品"](药品颜色)
+  if 已有X ~= nil then
+    return true
+  end
+
+  -- Open and positively identify the backpack before scanning its item grid.
+  tap(902, 693)
+  sleep(350)
+  if not _ENV["药品_识别背包页面"]() then
+    return false
+  end
+
+  local 物品X, 物品Y = nil, nil
+  for yy = 149, 575, 71 do
+    for xx = 670, 1024, 71 do
+      local 类型 = _ENV["检测背包_识别红蓝数量_识别红蓝"](xx, yy, xx + 68, yy + 72)
+      if 药品颜色 == "红" and (类型 == "小红" or 类型 == "大红")
+          or 药品颜色 == "蓝" and (类型 == "小蓝" or 类型 == "大蓝") then
+        物品X, 物品Y = xx + 34, yy + 44
+        break
+      end
+    end
+    if 物品X ~= nil then break end
+  end
+  if 物品X == nil then
+    _ENV["通用关闭"]()
+    return false
+  end
+
+  -- OCR must find one unambiguous localized “快捷” action.
+  tap(物品X, 物品Y)
+  sleep(200)
+  local ok, rows = pcall(tomocrtexttable, 0, 0, 1280, 720)
+  if not ok or type(rows) ~= "table" then
+    _ENV["通用关闭"]()
+    return false
+  end
+  local 快捷X, 快捷Y, 快捷数 = nil, nil, 0
+  for i = 1, #rows do
+    local row = rows[i]
+    local words = tostring(row.words or row.text or "")
+    local score = tonumber(row.score) or tonumber(row.confidence) or 0
+    local x, y = tonumber(row.x), tonumber(row.y)
+    local normalized = string.gsub(words, "%s+", "")
+    if (normalized == "快捷" or normalized == "快键" or normalized == "快捷键")
+        and score >= 0.75 and x ~= nil and y ~= nil then
+      快捷X, 快捷Y, 快捷数 = x, y, 快捷数 + 1
+    end
+  end
+  if 快捷数 ~= 1 then
+    _ENV["通用关闭"]()
+    return false
+  end
+  tap(快捷X, 快捷Y)
+  sleep(350)
+  if not _ENV["药品_识别自动设置页面"]() then
+    _ENV["通用关闭"]()
+    return false
+  end
+
+  -- The quickbar page has its own paginated 6x3 inventory. The medicine can
+  -- be on a later page even when it was visible in the backpack, so scan each
+  -- page and advance with the page's right-arrow control. Keep this bounded to
+  -- avoid wrapping forever if the game cycles pages at the end.
+  local 设置物品X, 设置物品Y = nil, nil
+  for page = 1, 12 do
+    设置物品X, 设置物品Y = _ENV["战斗_查找自动设置药品"](药品颜色)
+    if 设置物品X ~= nil then break end
+    if page < 12 then
+      tap(953, 410)
+      sleep(160)
+      if not _ENV["药品_识别自动设置页面"]() then
+        break
+      end
+    end
+  end
+  if 设置物品X == nil then
+    _ENV["通用关闭"]()
+    return false
+  end
+
+  -- The quickslot config has eight item slots (4x2). Search each cell
+  -- independently and require the empty-cell image match before selecting it.
+  local slotX, slotY = _ENV["战斗_查找空快捷栏槽位"]()
+  if slotX == nil then
+    _ENV["通用关闭"]()
+    return false
+  end
+
+  tap(slotX, slotY)
+  -- The localized game's operation guide says to double-tap the selected item
+  -- to assign it. Use one host gesture so screenshots/foreground checks cannot
+  -- stretch the interval and turn this into two separate single taps.
+  if type(_ENV["doubleTap"]) == "function" then
+    _ENV["doubleTap"](设置物品X, 设置物品Y)
+  else
+    tap(设置物品X, 设置物品Y)
+    sleep(100)
+    tap(设置物品X, 设置物品Y)
+  end
+  sleep(350)
+
+  -- Return to the HUD so the normal matching/threshold code can verify and
+  -- use the assigned potion. Close only recognized pages.
+  for _ = 1, 2 do
+    if _ENV["药品_识别自动设置页面"]() then
+      _ENV["点击"]("@@关闭自动设置", 1234, 54, 1000)
+      sleep(200)
+    elseif _ENV["药品_识别背包页面"]() then
+      _ENV["点击"]("@@关闭背包", 1244, 104, 1000)
+      sleep(200)
+    end
+  end
+  return _ENV["在主页面"]() and _ENV["战斗_查找快捷栏药品"](药品颜色) ~= nil
+end
+
+_ENV["战斗_配置快捷栏药品"] = L0_1
+
+function L0_1()
+  local 配置 = _ENV["界面数据"] or {}
+  local 启用红药 = 配置["自动使用红药"] == "true"
+  local 启用蓝药 = 配置["自动使用蓝药"] == "true"
+  if not 启用红药 and not 启用蓝药 then
+    return false
+  end
+
+  local 当前时间 = tickCount()
+  if _ENV["上次自动补给时间"] ~= nil and 当前时间 - _ENV["上次自动补给时间"] < 3000 then
+    return false
+  end
+
+  if 启用红药 then
+    local 当前百分比 = _ENV["战斗_识别资源百分比"](230, 45, 275, 64)
+    local 阈值 = tonumberEx(配置["生命药触发阈值"])
+    if 当前百分比 ~= nil and 当前百分比 <= 阈值 then
+      local x, y = _ENV["战斗_查找快捷栏药品"]("红")
+      if x == nil then
+        local 当前时间 = tickCount()
+        if _ENV["上次配置红药快捷栏"] == nil or 当前时间 - _ENV["上次配置红药快捷栏"] >= 60000 then
+          _ENV["上次配置红药快捷栏"] = 当前时间
+          if _ENV["战斗_配置快捷栏药品"]("红") then
+            x, y = _ENV["战斗_查找快捷栏药品"]("红")
+          end
+        end
+      end
+      if x ~= nil then
+        local 已执行 = tap(x, y)
+        if 已执行 ~= false then
+          _ENV["上次自动补给时间"] = 当前时间
+          toast("生命低于阈值，已使用快捷栏红药")
+          return true
+        end
+      end
+    end
+  end
+
+  if 启用蓝药 then
+    local 当前百分比 = _ENV["战斗_识别资源百分比"](230, 65, 280, 84)
+    local 阈值 = tonumberEx(配置["法力药触发阈值"])
+    if 当前百分比 ~= nil and 当前百分比 <= 阈值 then
+      local x, y = _ENV["战斗_查找快捷栏药品"]("蓝")
+      if x == nil then
+        local 当前时间 = tickCount()
+        if _ENV["上次配置蓝药快捷栏"] == nil or 当前时间 - _ENV["上次配置蓝药快捷栏"] >= 60000 then
+          _ENV["上次配置蓝药快捷栏"] = 当前时间
+          if _ENV["战斗_配置快捷栏药品"]("蓝") then
+            x, y = _ENV["战斗_查找快捷栏药品"]("蓝")
+          end
+        end
+      end
+      if x ~= nil then
+        local 已执行 = tap(x, y)
+        if 已执行 ~= false then
+          _ENV["上次自动补给时间"] = 当前时间
+          toast("法力低于阈值，已使用快捷栏蓝药")
+          return true
+        end
+      end
+    end
+  end
+  return false
+end
+
+_ENV["执行自动补给"] = L0_1
+
+function L0_1(识别名称1, 识别名称2, 期望队长名称)
+  local 期望队长名称数组 = {}
+  if type(期望队长名称) == "table" then
+    for _, 名称 in ipairs(期望队长名称) do
+      名称 = string.gsub(tostring(名称 or ""), "^%s*(.-)%s*$", "%1")
+      if 名称 ~= "" then
+        table.insert(期望队长名称数组, 名称)
+      end
+    end
+  else
+    local 配置文本 = tostring(期望队长名称 or "")
+    for 名称 in string.gmatch(配置文本 .. "\n", "(.-)\n") do
+      名称 = string.gsub(名称, "^%s*(.-)%s*$", "%1")
+      if 名称 ~= "" then
+        table.insert(期望队长名称数组, 名称)
+      end
+    end
+  end
+  if #期望队长名称数组 == 0 then
+    return "未配置"
+  end
+  local 有效识别结果 = false
+  for _, 名称 in ipairs({识别名称1 or "", 识别名称2 or ""}) do
+    名称 = tostring(名称)
+    名称 = string.gsub(名称, "^%s*(.-)%s*$", "%1")
+    if 名称 ~= "" then
+      有效识别结果 = true
+      for _, 期望名称 in ipairs(期望队长名称数组) do
+        if 0.95 <= w.stringSimilarity.levenshteinNormalized(名称, 期望名称) then
+          return "匹配"
+        end
+      end
+    end
+  end
+  if not 有效识别结果 then
+    return "无法识别"
+  end
+  return "不匹配"
+end
+
+_ENV["组队_判断队长名称"] = L0_1
+
+function L0_1(上次检查时间, 当前时间, 检查间隔秒)
+  if 上次检查时间 == nil then
+    return false
+  end
+  return 当前时间 - tonumberEx(上次检查时间) > 1000 * tonumberEx(检查间隔秒)
+end
+
+_ENV["组队_检查间隔已到"] = L0_1
+
+-- The localized client labels this action "组队" (older builds said
+-- "创建队伍"). OCR must find the actual button inside its bottom-panel area;
+-- an exact text match also avoids the script's own toast.
+function L0_1()
+  local ok, rows = pcall(tomocrtexttable, 430, 570, 1070, 685)
+  if not ok or type(rows) ~= "table" then return nil, nil end
+  local bestScore, bestX, bestY = 0.7, nil, nil
+  for i = 1, #rows do
+    local row = rows[i]
+    local label = string.gsub(tostring(row.words or row.text or ""), "%s+", "")
+    local score = tonumber(row.score or row.confidence) or 0
+    local x, y = tonumber(row.x), tonumber(row.y)
+    if (label == "组队" or label == "创建队伍") and score > bestScore and x and y
+        and x >= 430 and x <= 1070 and y >= 570 and y <= 685 then
+      bestScore, bestX, bestY = score, math.floor(x), math.floor(y)
+    end
+  end
+  return bestX, bestY
+end
+_ENV["组队_识别创建队伍按钮"] = L0_1
+
+function L0_1()
+  -- The left-side team flag is still visible outside the modal. A missing
+  -- create label by itself is not proof that a team was created.
+  if not _ENV["没有创建队伍"]() then return true end
+  -- In the localized party panel, a created team replaces the green "组队"
+  -- action with a gold "解散" action. This is a stronger post-action signal
+  -- than the legacy flag template, whose pixels vary across client skins.
+  local ok, rows = pcall(tomocrtexttable, 350, 600, 570, 680)
+  if not ok or type(rows) ~= "table" then return false end
+  for i = 1, #rows do
+    local row = type(rows[i]) == "table" and rows[i] or {}
+    local label = string.gsub(string.lower(tostring(row.words or row.text or "")), "%s+", "")
+    local score = tonumber(row.score or row.confidence) or 0
+    local x, y = tonumber(row.x), tonumber(row.y)
+    if score >= 0.8 and x and y and x >= 350 and x <= 570 and y >= 600 and y <= 680
+        and (string.find(label, "解散", 1, true) or string.find(label, "giảitán", 1, true)) then
+      return true
+    end
+  end
+  return false
+end
+_ENV["组队_已确认创建成功"] = L0_1
+
+function L0_1()
+  _ENV["当前任务1"] = "挂机模式"
+  _ENV["当前任务2"] = ""
+  while true do
+    local 登录处理中 = _ENV["登录_自动重试终止"] == true
+    if not 登录处理中 then 登录处理中 = _ENV["登录_判断一轮"]() == true end
+    if 登录处理中 then
+      sleep(_ENV["登录_自动重试终止"] and 1000 or 100)
+    else
+      _ENV["当前任务2"] = "挂机中"
+      local 已处理网页方案 = _ENV["处理网页方案队列"]()
+      local 已处理网页路线 = false
+      if not 已处理网页方案 then
+        已处理网页路线 = _ENV["处理网页路线队列"]()
+      end
+      if not 已处理网页方案 and not 已处理网页路线 then
+      _ENV["通用处理"]()
+      print(_ENV["当前任务1"], _ENV["当前任务2"])
+    if _ENV["检测挂机长时间不移动"]() then
+      _ENV["需要去挂机点一次"] = true
+    end
+    if _ENV["在主页面"]() then
+      print("在主页面")
+      local 背包状态 = _ENV["挂机_背包状态门控"]()
+      if 背包状态 == "WAIT" then
+        _ENV["当前任务2"] = "等待有效沙箱背包数据，暂停攻击并重试"
+        sleep(1000)
+      elseif 背包状态 == "SELL" then
+        toast("背包达到清理阈值，前往大夫")
+        _ENV["去卖货后返回挂机点"]()
+      else
+      if _ENV["界面数据"]["是否队长"] == "0" then
+        if _ENV["找到"](tz["是否允许队伍申请弹出"]) then
+          local rtn, x, y = _ENV["找到"](tz["是否允许队伍申请弹出"])
+          local 是否允许进入队伍 = false
+          local ok, tb = pcall(tomocrtexttable, 411, 269, x - 5, 304)
+          if not ok or type(tb) ~= "table" then tb = {} end
+          for i = 1, #tb do
+            local row = type(tb[i]) == "table" and tb[i] or {}
+            local 名称 = row.words or row.text
+            名称 = type(名称) == "string" and string.gsub(名称, "^%s*(.-)%s*$", "%1") or ""
+            local score = tonumber(row.score or row.confidence) or 0
+            if 名称 ~= "" and score >= 0.8 then
+              for _, 队友名称 in ipairs(_ENV["队友名称数组"] or {}) do
+                队友名称 = type(队友名称) == "string" and string.gsub(队友名称, "^%s*(.-)%s*$", "%1") or ""
+                if 队友名称 ~= "" then
+                  local sim = w.stringSimilarity.levenshteinNormalized(名称, 队友名称)
+                  print(sim, 名称, 队友名称)
+                  if 0.8 <= sim then
+                    是否允许进入队伍 = true
+                    break
+                  end
+                end
+              end
+            end
+            if 是否允许进入队伍 then
+              _ENV["点击"]("@@允许进入队伍", 542, 407, 1000)
+              break
+            end
+          end
+          if not 是否允许进入队伍 and _ENV["找到"](tz["是否允许队伍申请弹出"]) then
+            _ENV["点击"]("@@不允许进入队伍", 764, 412, 1000)
+          end
+        elseif _ENV["找到点击"]("@@有人申请", tz["有人申请组队提示按钮"]) then
+        elseif _ENV["没有创建队伍"]() then
+          local 上次尝试 = _ENV["上次尝试创建队伍"]
+          if 上次尝试 == nil or tickCount() - 上次尝试 >= 30000 then
+            _ENV["上次尝试创建队伍"] = tickCount()
+            _ENV["点击"]("@@点队伍按钮", 1114, 556, 2000)
+            if _ENV["组队_页面已打开"]() then
+              hideToast()
+              sleep(200)
+              local x, y = _ENV["组队_识别创建队伍按钮"]()
+              if x and y then
+                _ENV["点击"]("@@点创建队伍按钮", x, y, 1500)
+                hideToast()
+                if _ENV["组队_已确认创建成功"]() then
+                  _ENV["当前任务2"] = "队伍创建成功"
+                else
+                  _ENV["当前任务2"] = "创建队伍未确认，稍后重试"
+                end
+              else
+                _ENV["当前任务2"] = "未识别到创建队伍按钮，稍后重试"
+              end
+              _ENV["组队_关闭页面"]()
+            end
+          else
+            _ENV["当前任务2"] = "创建队伍待重试"
+          end
+        end
+      end
+      if _ENV["界面数据"]["是否队长"] == "1" then
+        if _ENV["上次检测队长名字"] == nil then
+          _ENV["上次检测队长名字"] = tickCount()
+        end
+        if _ENV["组队_检查间隔已到"](_ENV["上次检测队长名字"], tickCount(), _ENV["界面数据"]["检测队长名字频率秒"]) then
+          toast("去检测队长名字是否正确")
+          sleep(1000)
+          if _ENV["在主页面"]() then
+            if _ENV["没有创建队伍"]() then
+              toast("没有创建队伍 不用检测队长名字")
+              sleep(1000)
+            else
+              _ENV["点击"]("@@打开队伍", 1118, 556, 2000)
+            end
+          end
+          if _ENV["组队_页面已打开"]() then
+            local 队长名称 = _ENV["组队_识别队长名称"]()
+            local 队长名称2 = ""
+            local 判断结果 = _ENV["组队_判断队长名称"](队长名称, 队长名称2, _ENV["队长名称数组"])
+            if 判断结果 == "不匹配" then
+              队长名称2 = _ENV["组队_识别队长名称2"]()
+              判断结果 = _ENV["组队_判断队长名称"](队长名称, 队长名称2, _ENV["队长名称数组"])
+            end
+            if 判断结果 == "匹配" then
+              toast(string.format("[%s]==[%s] ", 队长名称, _ENV["队长名称数组"][1]))
+              sleep(1000)
+            elseif 判断结果 == "不匹配" then
+              toast(string.format("[%s]!=[%s]", 队长名称, _ENV["队长名称数组"][1]))
+              sleep(1000)
+              _ENV["点击"]("@@解散队伍", 477, 630, 1000)
+              _ENV["点击"]("@@解散队伍", 477, 630, 1000)
+              _ENV["需要去挂机点一次"] = true
+            else
+              toast(判断结果 == "未配置" and "未填写队长名，跳过队长校验" or "未识别到队长名，跳过解散操作")
+            end
+          end
+          _ENV["组队_关闭页面"]()
+          _ENV["上次检测队长名字"] = tickCount()
+        end
+        if _ENV["上次检测是否有队伍"] == nil then
+          _ENV["上次检测是否有队伍"] = tickCount()
+        end
+        if _ENV["组队_检查间隔已到"](_ENV["上次检测是否有队伍"], tickCount(), _ENV["界面数据"]["检测是否有队伍频率秒"]) then
+          if _ENV["在主页面"]() and _ENV["没有创建队伍"]() then
+            _ENV["点击"]("@@点队伍按钮", 1114, 556, 2000)
+          end
+          if _ENV["组队_页面已打开"]() then
+            _ENV["点击"]("@@去附近队伍页面", 1141, 323, 1500)
+          end
+          if _ENV["组队_页面已打开"]() then
+            local 找到队长 = false
+            local tb = _ENV["组队_识别所有队伍名字"](576, 186, 626, 525)
+            for i = 1, #tb do
+              print(tb[i].words)
+              for ii = 1, #_ENV["队长名称数组"] do
+                local sim = w.stringSimilarity.levenshteinNormalized(tb[i].words, _ENV["队长名称数组"][ii])
+                print(sim, tb[i].words, _ENV["队长名称数组"][ii], tb[i])
+                if 0.99 <= sim then
+                  找到队长 = true
+                  toast(string.format("[%s]==[%s] %s", tb[i].words, _ENV["队长名称数组"][ii], tostring(sim)))
+                  sleep(1000)
+                  _ENV["点击"]("@@点击队伍", math.floor(tb[i].x), math.floor(tb[i].y), 2000)
+                  if not _ENV["找到点击"]("@@加入队伍按钮", tz["加入队伍按钮"]) then
+                    break
+                  end
+                  for i = 1, 10 do
+                    sleep(1000)
+                    toast("等待队长同意" .. i .. "/10")
+                    if _ENV["找到"](tz["组队_左侧发现旗帜"]) then
+                      goto lbl_461
+                    end
+                  end
+                  break
+                else
+                  toast(string.format("[%s]!=[%s] %s", tb[i].words, _ENV["队长名称数组"][ii], tostring(sim)))
+                  sleep(1000)
+                end
+              end
+              ::lbl_461::
+              if _ENV["在主页面"]() then
+                break
+              end
+            end
+            if 找到队长 == false then
+              if _ENV["队员找不到队长组队次数"] == nil then
+                _ENV["队员找不到队长组队次数"] = 0
+              end
+              _ENV["队员找不到队长组队次数"] = _ENV["队员找不到队长组队次数"] + 1
+              toast("没有找到队长" .. _ENV["队员找不到队长组队次数"] .. "次/" .. _ENV["界面数据"]["队员找不到队长组队就回家次数"])
+              sleep(1000)
+              if _ENV["队员找不到队长组队次数"] >= tonumberEx(_ENV["界面数据"]["队员找不到队长组队就回家次数"]) then
+                _ENV["队员找不到队长组队次数"] = 0
+                _ENV["需要去挂机点一次"] = true
+              end
+            else
+              _ENV["队员找不到队长组队次数"] = 0
+            end
+            _ENV["组队_关闭页面"]()
+          _ENV["上次检测是否有队伍"] = tickCount()
+          end
+        end
+      end
+      if _ENV["需要去挂机点一次"] then
+        if not _ENV["执行返回挂机点"]() then sleep(3000) end
+      else
+        _ENV["执行自动战斗"]()
+        _ENV["执行自动补给"]()
+      end
+      end
+    end
+    _ENV["通用关闭"]()
+      end
+      sleep(1000)
+    end
+  end
+end
+
+_ENV["挂机模式"] = L0_1

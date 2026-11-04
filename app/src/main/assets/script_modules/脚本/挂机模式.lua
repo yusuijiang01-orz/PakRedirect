@@ -2157,7 +2157,35 @@ function L0_1()
         })
         _ENV["找到点击"]("@@对话按钮", tz["对话按钮"])
         if _ENV["找到"](tz["商店页面"]) then
-          _ENV["去卖货_卖货"]()
+          local saleOk, saleError = pcall(_ENV["去卖货_卖货"])
+          if not saleOk then
+            _ENV["当前任务2"] = "卖货识别异常，正在安全恢复"
+            print("卖货流程异常", tostring(saleError))
+            -- OCR or item-detail inspection can fail transiently. Close only
+            -- UI states that are positively identified, then let the main
+            -- loop re-read the bag and retry the doctor route.
+            pcall(function()
+              if _ENV["找到"](tz["商店卖货确定页面"]) then
+                _ENV["点击"]("@@安全取消卖货确认", 714, 497, 600)
+                sleep(200)
+              end
+              if _ENV["找到"](tz["商店选中装备属性页面"])
+                  or _ENV["找到"](tz["商店选中非装备属性页面"]) then
+                _ENV["点击"]("@@安全关闭卖货物品详情", 1188, 626, 600)
+                sleep(200)
+              end
+              if _ENV["找到"](tz["对话页面"]) then
+                _ENV["点击"]("@@安全关闭卖货对话", 1233, 422, 600)
+                sleep(200)
+              end
+              if _ENV["找到"](tz["商店页面"]) then
+                _ENV["点击"]("@@安全关闭卖货商店", 1244, 104, 600)
+              end
+            end)
+            toast("卖货异常，本次已停止并稍后重试")
+            _ENV["需要去挂机点一次"] = true
+            return false
+          end
           已到商店 = true
           break
         end
