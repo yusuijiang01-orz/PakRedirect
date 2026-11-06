@@ -7,6 +7,7 @@ import secrets
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from license_codes import generate_key
 
 DB_PATH = Path(os.environ.get("PAKREDIRECT_LICENSE_DB", "./data/licenses.db")).resolve()
 PBKDF2_ITERATIONS = 310_000
@@ -66,12 +67,6 @@ def open_db() -> sqlite3.Connection:
     return db
 
 
-def generate_key() -> str:
-    raw = secrets.token_hex(10).upper()
-    groups = [raw[i:i + 4] for i in range(0, len(raw), 4)]
-    return "PR-" + "-".join(groups)
-
-
 def b64url(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
 
@@ -93,7 +88,7 @@ def create_license(days: int, label: str, requested_key: str | None) -> None:
     if days <= 0:
         raise SystemExit("--days 必须大于 0")
 
-    value = normalize_key(requested_key) if requested_key else generate_key()
+    value = normalize_key(requested_key) if requested_key else generate_key(days)
     now = utc_now()
     expires = now + timedelta(days=days)
 

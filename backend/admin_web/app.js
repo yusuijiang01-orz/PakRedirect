@@ -123,12 +123,13 @@ async function loadLicenses(){
     $("licenseBody").innerHTML=d.items.length?d.items.map(r=>{
       const statusHtml=r.redeemed?`<span class="badge badge-disabled">已兑换</span>`:badge(r.status);
       const toggleDisabled=r.redeemed?"disabled":"";
+      const redeemedAccount=r.redeemed_by_username|| (r.redeemed_by_user_id?`#${r.redeemed_by_user_id}`:"-");
       return `<tr><td>#${r.id}</td><td>${keyCell(r)}</td><td>${r.duration_days?`${r.duration_days} 天`:"-"}${r.is_paid?' <span class="badge badge-active">已收款</span>':""}</td><td>${esc(r.label||"-")}${r.issued_by_agent_id?`<div class="muted">代理 #${r.issued_by_agent_id}</div>`:""}</td>
-        <td>${statusHtml}</td><td>${fmt(r.expires_at)}</td><td>${fmt(r.last_seen_at)}</td><td>${esc(r.last_seen_ip||"-")}</td>
+        <td>${statusHtml}</td><td>${esc(redeemedAccount)}</td><td>${fmt(r.redeemed_at)}</td><td>${fmt(r.expires_at)}</td><td>${fmt(r.last_seen_at)}</td><td>${esc(r.last_seen_ip||"-")}</td>
         <td><div class="actions"><button class="btn ${r.enabled?"btn-danger":"btn-success"} btn-sm" data-toggle="${r.id}" data-enabled="${r.enabled?0:1}" ${toggleDisabled}>${r.enabled?"禁用":"启用"}</button>
         <select class="select" data-extend-select="${r.id}"><option value="1">+1天</option><option value="7">+7天</option><option value="30" selected>+30天</option><option value="90">+90天</option><option value="180">+180天</option><option value="365">+365天</option></select>
         <button class="btn btn-secondary btn-sm" data-extend="${r.id}">延长码有效期</button></div></td></tr>`;
-    }).join(""):`<tr><td class="empty" colspan="9">暂无匹配兑换码</td></tr>`;
+    }).join(""):`<tr><td class="empty" colspan="11">暂无匹配兑换码</td></tr>`;
     $("pagerInfo").textContent=`第 ${d.page} / ${d.pages} 页 · 共 ${d.total} 条`;$("prevBtn").disabled=state.licensePage<=1;$("nextBtn").disabled=state.licensePage>=state.licensePages;bindLicenseActions();
   }catch(e){alertMsg(e.message,"error")}
 }

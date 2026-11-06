@@ -13,8 +13,9 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from admin_v2 import generate_key, key_hash, key_hint, log_action, request_ip, require_csrf, require_ready
+from admin_v2 import key_hash, key_hint, log_action, request_ip, require_csrf, require_ready
 from admin_key_access import serialize_license
+from license_codes import generate_key
 from user_v1 import (
     TRIAL_HOURS, bearer_token, create_session, digest_token, iso, open_db, parse_iso, password_hash,
     require_user, serialize_user, username_key, validate_username, verify_password, utc_now,
@@ -747,7 +748,7 @@ def agent_issue_cards(payload: IssueCards, request: Request, authorization: str 
                                  f"发卡 {payload.days} 天 × {payload.quantity}",
                                  f"cards:{payload.days}x{payload.quantity}", "can_issue_cards")
         for _ in range(payload.quantity):
-            value = generate_key()
+            value = generate_key(payload.days)
             db.execute("INSERT INTO licenses(key_hash,key_hint,key_value,label,expires_at,enabled,created_at,duration_days,is_paid,issued_by_agent_id,agent_price_cents) VALUES(?,?,?,?,?,1,?,?,?,?,?)",
                        (key_hash(value), key_hint(value), value, payload.label, expiry, iso(now), payload.days,
                         int(payload.paid), auth["user_id"], price_cents))

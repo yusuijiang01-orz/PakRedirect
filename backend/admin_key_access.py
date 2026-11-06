@@ -9,7 +9,6 @@ from fastapi.responses import Response
 from admin_v2 import (
     GeneratePayload,
     MAX_BATCH,
-    generate_key,
     iso,
     key_hash,
     key_hint,
@@ -22,6 +21,7 @@ from admin_v2 import (
     require_ready,
     utc_now,
 )
+from license_codes import generate_key, is_license_key_prefix
 
 router = APIRouter()
 CODE_PRESETS = (1, 7, 30, 90, 180, 365)
@@ -58,6 +58,8 @@ def serialize_license(row, reveal: bool = False):
         "is_paid": bool(row["is_paid"]) if "is_paid" in row.keys() else False,
         "issued_by_agent_id": row["issued_by_agent_id"] if "issued_by_agent_id" in row.keys() else None,
         "redeemed": bool(row["redeemed_at"]) if "redeemed_at" in row.keys() else False,
+        "redeemed_by_user_id": row["redeemed_by_user_id"] if "redeemed_by_user_id" in row.keys() else None,
+        "redeemed_by_username": row["redeemed_by_username"] if "redeemed_by_username" in row.keys() else None,
         "redeemed_at": row["redeemed_at"] if "redeemed_at" in row.keys() else None,
         "label": row["label"] or "",
         "expires_at": row["expires_at"],
@@ -81,7 +83,7 @@ def build_filter(query: str, state: str):
             "COALESCE(key_value,'') LIKE ? COLLATE NOCASE",
         ]
         params.extend([like, like, like, like])
-        if normalize_key(q).startswith("PR-"):
+        if is_license_key_prefix(q):
             parts.append("key_hash = ?")
             params.append(key_hash(q))
         cond.append("(" + " OR ".join(parts) + ")")
@@ -108,7 +110,9 @@ def list_licenses(query: str, state: str, page: int, page_size: int, reveal: boo
         rows = db.execute(
             """
             SELECT id,key_hash,key_hint,key_value,label,expires_at,enabled,created_at,last_seen_at,last_seen_ip,
-                   duration_days,redeemed_by_user_id,redeemed_at,is_paid,issued_by_agent_id
+                   duration_days,redeemed_by_user_id,redeemed_at,is_paid,issued_by_agent_id,
+                   (SELECT username FROM app_users AS redeeming_user
+                    WHERE redeeming_user.id=licenses.redeemed_by_user_id) AS redeemed_by_username
             FROM licenses
             """
             + where
@@ -130,7 +134,7 @@ def create_licenses(days: int, quantity: int, label: str, paid: bool = False):
     with open_db() as db:
         for _ in range(quantity):
             for _try in range(8):
-                value = generate_key()
+                value = generate_key(days)
                 try:
                     db.execute(
                         """

@@ -13,6 +13,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
+from license_codes import generate_key, is_license_key_prefix
 
 DB_PATH = Path(os.environ.get("PAKREDIRECT_LICENSE_DB", "./data/licenses.db")).resolve()
 WEB_DIR = Path(__file__).with_name("admin_web")
@@ -76,11 +77,6 @@ def key_hash(value: str) -> str:
 def key_hint(value: str) -> str:
     compact = normalize_key(value).replace("-", "")
     return compact[-6:] if len(compact) >= 6 else compact
-
-
-def generate_key() -> str:
-    raw = secrets.token_hex(10).upper()
-    return "PR-" + "-".join(raw[i:i + 4] for i in range(0, len(raw), 4))
 
 
 def open_db() -> sqlite3.Connection:
@@ -361,7 +357,7 @@ def list_licenses(query: str, state: str, page: int, page_size: int):
             "COALESCE(last_seen_ip,'') LIKE ? COLLATE NOCASE",
         ]
         params.extend([like, like, like])
-        if normalize_key(q).startswith("PR-"):
+        if is_license_key_prefix(q):
             parts.append("key_hash = ?")
             params.append(key_hash(q))
         cond.append("(" + " OR ".join(parts) + ")")
@@ -404,7 +400,7 @@ def create_licenses(days: int, quantity: int, label: str):
     with open_db() as db:
         for _ in range(quantity):
             for _try in range(8):
-                value = generate_key()
+                value = generate_key(days)
                 try:
                     db.execute(
                         """
