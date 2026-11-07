@@ -209,7 +209,11 @@ function L0_1()
     127,
     1000
   })
-  _ENV["找到点击"]("@@死亡有时候弹出", tz["死亡有时候弹出"])
+  if _ENV["找到点击"]("@@死亡有时候弹出", tz["死亡有时候弹出"]) then
+    -- Dismiss the death dialog, then route back to the configured farm point.
+    _ENV["需要去挂机点一次"] = true
+    _ENV["当前任务2"] = "角色死亡，返回挂机点"
+  end
   if _ENV["找到"]("@@提示或拒绝", tz["弹出提示或拒绝"]) then
     sleep(500)
     _ENV["找到点击"]("@@是否加入其他人队伍弹出", tz["是否加入其他人队伍弹出"], {
@@ -1214,17 +1218,39 @@ function L0_1()
         local 装备蓝条属性数组 = _ENV["去卖货_卖货_识别蓝条数量和属性"]()
         local 蓝条数量 = #装备蓝条属性数组
         local 回红回内识别结果 = _ENV["去卖货_检测回红回内词条"]()
-        local 含回红回内词条 = 回红回内识别结果 == "回红" or 回红回内识别结果 == "回内"
+        local 含回红回内词条 = false
         local 含未识别词条 = 回红回内识别结果 == nil
+        local 已识别回红回内属性 = false
+        local 回红保留阈值 = tonumber(_ENV["界面数据"]["保留回红数值"]) or 10
+        local 回内保留阈值 = tonumber(_ENV["界面数据"]["保留回内数值"]) or 10
         for _, 属性 in ipairs(装备蓝条属性数组) do
-          if 属性["蓝条属性"] == "回红" or 属性["蓝条属性"] == "回内" then
-            含回红回内词条 = true
+          local 属性数值 = tonumber(属性["蓝条数值"])
+          if 属性["蓝条属性"] == "回红" and (属性数值 == nil or 属性数值 <= 0) then
+            已识别回红回内属性 = true
+            含未识别词条 = true
+          elseif 属性["蓝条属性"] == "回红" and 属性数值 >= 回红保留阈值 then
+            已识别回红回内属性 = true
+            含回红回内词条 = 蓝条数量 >= (tonumber(_ENV["保留蓝条数量"]) or 4)
+          elseif 属性["蓝条属性"] == "回红" then
+            已识别回红回内属性 = true
+          elseif 属性["蓝条属性"] == "回内" and (属性数值 == nil or 属性数值 <= 0) then
+            已识别回红回内属性 = true
+            含未识别词条 = true
+          elseif 属性["蓝条属性"] == "回内" and 属性数值 >= 回内保留阈值 then
+            已识别回红回内属性 = true
+            含回红回内词条 = 蓝条数量 >= (tonumber(_ENV["保留蓝条数量"]) or 4)
+          elseif 属性["蓝条属性"] == "回内" then
+            已识别回红回内属性 = true
           elseif 属性["蓝条属性"] == nil or 属性["蓝条属性"] == "" then
             含未识别词条 = true
           end
         end
+        if not 已识别回红回内属性 and (回红回内识别结果 == "回红" or 回红回内识别结果 == "回内") then
+          -- Keep conservatively when OCR detects the stat but cannot pair its value.
+          含未识别词条 = true
+        end
         if 含回红回内词条 then
-          toast("装备有回红/回内词条，保留")
+          toast("回红/回内达到保留值，保留")
         elseif 含未识别词条 then
           toast("装备词条无法确认，保留")
         elseif 装备品质 == "未识别" then
@@ -1941,9 +1967,9 @@ end
 _ENV["登录_汉化服务器进入"] = L0_1
 
 function L0_1(name, x, y)
-  -- w.tap adds +/-50 ms jitter; passing [550,1450] keeps the final delay
-  -- inside the requested 500..1500 ms human-like range.
-  return _ENV["点击"](name, x, y, math.random(550, 1450))
+  -- The tap adapter adds only +/-50 ms jitter. Keep login transitions snappy;
+  -- long waits belong to the next state observation, not before the tap.
+  return _ENV["点击"](name, x, y, 100)
 end
 _ENV["登录_快速点击"] = L0_1
 
@@ -2090,12 +2116,35 @@ function L0_1()
         _ENV["登录_记录失败"]()
         return true
       end
-    elseif stageAge < 8000 then
-      return true
-    end
-    if _ENV["登录_动作阶段"] == "登录中" or _ENV["登录_动作阶段"] == "等待主画面" then
-      _ENV["登录_记录失败"]()
-      return true
+    elseif _ENV["登录_动作阶段"] == "登录中" then
+      -- The login page often advances to role/server selection in under a
+      -- second. Observe those buttons immediately instead of blindly blocking
+      -- the login loop for the full eight-second action timeout.
+      local confirmX = _ENV["登录_找素材按钮"]("确认")
+      local enterX = _ENV["登录_找素材按钮"]("进入游戏")
+      if confirmX ~= nil or enterX ~= nil then
+        _ENV["登录_动作阶段"] = nil
+        _ENV["登录_动作开始时间"] = nil
+      elseif stageAge < 8000 then
+        return true
+      else
+        _ENV["登录_记录失败"]()
+        return true
+      end
+    elseif _ENV["登录_动作阶段"] == "等待主画面" then
+      -- A timeout or server return after role confirmation is a new state,
+      -- not a reason to sit on the stale confirmation phase.
+      local loginX = _ENV["登录_找素材按钮"]("登录")
+      local enterX = _ENV["登录_找素材按钮"]("进入游戏")
+      if loginX ~= nil or enterX ~= nil then
+        _ENV["登录_动作阶段"] = nil
+        _ENV["登录_动作开始时间"] = nil
+      elseif stageAge < 8000 then
+        return true
+      else
+        _ENV["登录_记录失败"]()
+        return true
+      end
     end
   end
   -- Chinese-client button templates run before the older Vietnamese OCR/image
