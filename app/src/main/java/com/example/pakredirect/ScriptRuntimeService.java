@@ -726,7 +726,7 @@ public final class ScriptRuntimeService extends Service {
         try {
             int clickAttempts = 0;
             int noMatchFrames = 0;
-            while (clickAttempts < 3) {
+            while (clickAttempts < 10) {
                 control.checkpoint();
                 if (clickAttempts == 0) {
                     publish("正在检查使用条款页（" + (noMatchFrames + 1) + "/12）");
@@ -762,19 +762,23 @@ public final class ScriptRuntimeService extends Service {
                 noMatchFrames = 0;
                 clickAttempts++;
                 Log.i("RYLUX-Lua", "startup terms consent detected; tap=" + tap.x + "," + tap.y
-                        + " attempt=" + clickAttempts + "/3");
-                publish("检测到使用条款页，正在点击“同意”（" + clickAttempts + "/3）");
+                        + " attempt=" + clickAttempts + "/10");
+                publish("检测到使用条款页，正在点击“同意”（" + clickAttempts + "/10）");
                 boolean clicked = ScriptGameAdapter.requireConnected(control)
-                        .tap(tap.x, tap.y, 100L, 5_000L);
+                        .tap(tap.x, tap.y, 100L, 1_500L);
                 Log.i("RYLUX-Lua", "startup terms consent tap accepted=" + clicked);
-                if (!clicked) throw new IllegalStateException("使用条款页已识别，但点击“同意”未成功");
-                control.sleep(1_000L);
+                if (!clicked) {
+                    publish("“同意”点击未送达，继续重试（" + clickAttempts + "/10）");
+                    control.sleep(250L);
+                    continue;
+                }
+                control.sleep(500L);
             }
             Bitmap verifyFrame = captureStartupFrame(30_000L, 5_000L);
             try {
                 if (!isWorldHudVisible(verifyFrame)
                         && findStartupAgreeButton(verifyFrame, template) != null) {
-                    throw new IllegalStateException("已重试 3 次点击使用条款“同意”，页面仍未关闭");
+                    throw new IllegalStateException("已重试 10 次点击使用条款“同意”，页面仍未关闭");
                 }
                 publish("使用条款页已关闭，继续自动登录流程");
             } finally {

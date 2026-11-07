@@ -681,29 +681,51 @@ public final class ScriptGameAdapter extends AccessibilityService {
     private boolean dispatch(Path path, long durationMs, long timeoutMs) throws Exception {
         requireTargetGameForeground();
         if (Build.VERSION.SDK_INT < 24) throw new UnsupportedOperationException("触控需要 Android 7 或更新版本");
-        if (!ScriptControlOverlayService.setGameInputPassthrough(true, 1_000L)) {
-            throw new IllegalStateException("无法暂时让 RYLUX 悬浮窗为游戏触控让路");
-        }
-        CountDownLatch done = new CountDownLatch(1);
-        AtomicBoolean completed = new AtomicBoolean(false);
-        try {
-            GestureDescription gesture = new GestureDescription.Builder()
-                    .addStroke(new GestureDescription.StrokeDescription(path, 0, durationMs)).build();
-            boolean accepted = dispatchGesture(gesture, new GestureResultCallback() {
-                @Override public void onCompleted(GestureDescription description) {
-                    completed.set(true);
-                    done.countDown();
-                }
-
-                @Override public void onCancelled(GestureDescription description) {
-                    done.countDown();
-                }
-            }, null);
-            return accepted && done.await(timeoutMs, TimeUnit.MILLISECONDS) && completed.get();
-        } finally {
-            if (!ScriptControlOverlayService.setGameInputPassthrough(false, 1_000L)) {
-                Log.e(TAG, "could not restore RYLUX overlay touch controls after a game gesture");
+        long deadline = SystemClock.elapsedRealtime() + Math.max(1L, timeoutMs);
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            requireTargetGameForeground();
+            if (!ScriptControlOverlayService.setGameInputPassthrough(true, 1_000L)) {
+                throw new IllegalStateException("无法暂时让 RYLUX 悬浮窗为游戏触控让路");
             }
+            CountDownLatch done = new CountDownLatch(1);
+            AtomicBoolean completed = new AtomicBoolean(false);
+            AtomicBoolean cancelled = new AtomicBoolean(false);
+            try {
+                // WindowManager updates the overlay flags asynchronously on some emulator builds.
+                // Give the non-touchable state a short moment to reach the input dispatcher.
+                SystemClock.sleep(60L);
+                GestureDescription gesture = new GestureDescription.Builder()
+                        .addStroke(new GestureDescription.StrokeDescription(path, 0, durationMs)).build();
+                boolean accepted = dispatchGesture(gesture, new GestureResultCallback() {
+                    @Override public void onCompleted(GestureDescription description) {
+                        completed.set(true);
+                        done.countDown();
+                    }
+
+                    @Override public void onCancelled(GestureDescription description) {
+                        cancelled.set(true);
+                        done.countDown();
+                    }
+                }, null);
+                if (accepted) {
+                    long remaining = deadline - SystemClock.elapsedRealtime();
+                    if (remaining > 0 && done.await(remaining, TimeUnit.MILLISECONDS) && completed.get()) {
+                        return true;
+                    }
+                    Log.w(TAG, "game gesture did not complete; attempt=" + attempt
+                            + ", cancelled=" + cancelled.get());
+                } else {
+                    Log.w(TAG, "Android rejected game gesture; attempt=" + attempt);
+                }
+            } finally {
+                if (!ScriptControlOverlayService.setGameInputPassthrough(false, 1_000L)) {
+                    Log.e(TAG, "could not restore RYLUX overlay touch controls after a game gesture");
+                }
+            }
+            long remaining = deadline - SystemClock.elapsedRealtime();
+            if (attempt == 3 || remaining <= 0) break;
+            SystemClock.sleep(Math.min(100L, remaining));
         }
+        return false;
     }
 }
