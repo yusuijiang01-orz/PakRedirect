@@ -76,7 +76,7 @@ final class LegacyLuaConfig {
         // widget fallback is not necessarily persisted until the user edits it.
         values.put("挂机不移动秒", "60");
         values.put("队员找不到队长组队就回家次数", "2");
-        values.put("保护装备不出售", "false");
+        values.put("保护装备不出售", "true");
         values.put("出售装备", "true");
         values.put("出售装备品质上限", "0");
         values.put("出售装备品质_白色", "true");
