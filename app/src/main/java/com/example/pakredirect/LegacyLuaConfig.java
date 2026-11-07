@@ -63,6 +63,8 @@ final class LegacyLuaConfig {
         values.put("保留蓝条数量", "4");
         values.put("回蓝>=", "true");
         values.put("保留回蓝数值", "10");
+        values.put("保留回红数值", "10");
+        values.put("保留回内数值", "10");
         values.put("魔法出招>=", "true");
         values.put("保留魔法出招数值", "15");
         values.put("武器出招>=", "true");
@@ -74,8 +76,8 @@ final class LegacyLuaConfig {
         // widget fallback is not necessarily persisted until the user edits it.
         values.put("挂机不移动秒", "60");
         values.put("队员找不到队长组队就回家次数", "2");
-        values.put("保护装备不出售", "true");
-        values.put("出售装备", "false");
+        values.put("保护装备不出售", "false");
+        values.put("出售装备", "true");
         values.put("出售装备品质上限", "0");
         values.put("出售装备品质_白色", "true");
         values.put("出售装备品质_蓝色", "true");

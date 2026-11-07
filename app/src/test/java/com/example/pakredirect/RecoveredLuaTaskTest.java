@@ -723,7 +723,7 @@ public final class RecoveredLuaTaskTest {
                 clicks.isEmpty());
     }
 
-    @Test public void localizedLoginUsesTheCapturedLoginButtonTemplateAndFastHumanDelay() throws Exception {
+    @Test public void localizedLoginUsesTheCapturedLoginButtonTemplateAndShortDelay() throws Exception {
         Globals globals = JsePlatform.standardGlobals();
         List<String> clicks = new ArrayList<>();
         globals.set("tickCount", new ZeroArgFunction() {
@@ -752,8 +752,8 @@ public final class RecoveredLuaTaskTest {
         String[] fields = clicks.get(0).split("\\|");
         assertEquals(Arrays.asList("@@汉化账号密码登录", "650", "530"),
                 Arrays.asList(fields[0], fields[1], fields[2]));
-        assertTrue("w.tap jitter plus Lua random delay must stay within 500..1500 ms",
-                Integer.parseInt(fields[3]) >= 550 && Integer.parseInt(fields[3]) <= 1450);
+        assertTrue("w.tap jitter around the 100 ms fast delay must stay within 50..150 ms",
+                Integer.parseInt(fields[3]) >= 50 && Integer.parseInt(fields[3]) <= 150);
         assertTrue("The matcher must read the saved material from a bounded account-button ROI",
                 globals.get("登录_找素材按钮").checkfunction().call(LuaValue.valueOf("登录")).arg1().toint() == 650);
     }
@@ -788,7 +788,7 @@ public final class RecoveredLuaTaskTest {
         String[] fields = clicks.get(0).split("\\|");
         assertEquals(Arrays.asList("@@汉化角色确认", "1085", "566"),
                 Arrays.asList(fields[0], fields[1], fields[2]));
-        assertTrue(Integer.parseInt(fields[3]) >= 550 && Integer.parseInt(fields[3]) <= 1450);
+        assertTrue(Integer.parseInt(fields[3]) >= 50 && Integer.parseInt(fields[3]) <= 150);
     }
 
     @Test public void localizedCharacterSelectRejectsMissingConfirmTemplate() throws Exception {

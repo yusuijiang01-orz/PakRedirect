@@ -374,14 +374,14 @@ public final class ScriptToolsActivity extends Activity {
         addNumber(supplies, "购买蓝的数量", "每次购买蓝药", "10", "个", 1, 99999);
 
         root = (LinearLayout) tabPages.get(3).getChildAt(0);
-        LinearLayout inventory = section("背包与装备", "自动清包触发只接受已验证的 610 沙箱内存快照；负重超上限时先在原地丢弃勾选品质的装备，确认减重后才去大夫。回红/回内、词条或丢弃按钮无法确认时一律保留。商店出售仍由下方“出售装备”和“保护装备不出售”单独控制；NPC、商店及物品文字识别仍依赖 OCR。");
-        addSwitch(inventory, "保护装备不出售", "商店出售总保护；不阻止上方超重清理开关按品质原地丢弃", true);
+        LinearLayout inventory = section("背包与装备", "空格不足、剩余负重不足，或已启用购买的红/蓝药低于阈值，任一满足就去大夫处清理并补给。若已超重，保留已有的原地减重保护流程。默认出售白、蓝装备；回红/回内达到保留值、属性无法确认时保留。");
+        addSwitch(inventory, "保护装备不出售", "总保护开关；开启后不出售任何装备（不影响超重时原地减重）", false);
         addSwitch(inventory, "检测修理装备", "检测并修理装备", true);
         addNumber(inventory, "背包保留重量", "剩余负重达到此值时卖垃圾", "3", "重量", 0, 99999);
         addNumber(inventory, "背包保留格子", "可用空格达到此值时卖垃圾（默认 2 格，即低于 3 格）", "2", "格", 0, 99999);
         addSwitch(inventory, "超重时原地丢弃低品质装备", "只在超重时清理；按下方白/蓝/绿/黄/橙勾选，白/蓝默认开启", true);
         addNumber(inventory, "背包检测间隔秒", "药品按此间隔检测；负重和空格空闲时约 15 秒检测，接近阈值或识别失败约 5 秒后重试", "60", "秒", 1, 86400);
-        addSwitch(inventory, "出售装备", "允许出售装备", false);
+        addSwitch(inventory, "出售装备", "允许出售装备", true);
         addSwitch(inventory, "出售装备品质_白色", "清理白色装备", true);
         addSwitch(inventory, "出售装备品质_蓝色", "清理蓝色装备", true);
         addSwitch(inventory, "出售装备品质_绿色", "清理绿色装备", false);
@@ -392,6 +392,8 @@ public final class ScriptToolsActivity extends Activity {
         addChoice(inventory, "蓝条筛选模式", "蓝条筛选条件（单选）",
                 new String[]{"不筛选", "回蓝 ≥", "魔法出招 ≥", "武器出招 ≥"}, 1);
         addNumber(inventory, "保留回蓝数值", "回蓝最低值", "10", "点", 0, 99999);
+        addNumber(inventory, "保留回红数值", "回红最低值", "10", "点", 0, 99999);
+        addNumber(inventory, "保留回内数值", "回内最低值", "10", "点", 0, 99999);
         addNumber(inventory, "保留魔法出招数值", "魔法出招最低值", "15", "点", 0, 99999);
         addNumber(inventory, "保留武器出招数值", "武器出招最低值", "15", "点", 0, 99999);
 
