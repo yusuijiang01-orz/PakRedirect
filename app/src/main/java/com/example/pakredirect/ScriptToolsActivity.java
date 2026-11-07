@@ -381,7 +381,7 @@ public final class ScriptToolsActivity extends Activity {
         addNumber(inventory, "背包保留格子", "可用空格达到此值时卖垃圾（默认 2 格，即低于 3 格）", "2", "格", 0, 99999);
         addSwitch(inventory, "超重时原地丢弃低品质装备", "只在超重时清理；按下方白/蓝/绿/黄/橙勾选，白/蓝默认开启", true);
         addNumber(inventory, "背包检测间隔秒", "药品按此间隔检测；负重和空格空闲时约 15 秒检测，接近阈值或识别失败约 5 秒后重试", "60", "秒", 1, 86400);
-        addSwitch(inventory, "出售装备", "允许出售装备", true);
+        addSwitch(inventory, "出售装备", "允许出售装备", false);
         addSwitch(inventory, "出售装备品质_白色", "清理白色装备", true);
         addSwitch(inventory, "出售装备品质_蓝色", "清理蓝色装备", true);
         addSwitch(inventory, "出售装备品质_绿色", "清理绿色装备", false);
