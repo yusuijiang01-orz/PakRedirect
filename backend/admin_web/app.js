@@ -15,7 +15,7 @@ function membershipBadge(m,enabled=true,role="user"){
   if(role==="admin")return `<span class="badge badge-admin">Admin · 内测</span>`;
   if(!m||!m.active)return `<span class="badge badge-expired">已到期</span>`;
   if(m.kind==="trial")return `<span class="badge badge-expired">24h 体验</span>`;
-  return `<span class="badge badge-active">${esc(m.plan_label?`${m.plan_label} 有效`:"VIP 有效")}</span>`;
+  return `<span class="badge badge-active">${esc(m.plan_label||"VIP")}</span>`;
 }
 function alertMsg(msg,type="ok"){
   const el=$("globalAlert");el.textContent=msg;el.className=`alert alert-${type}`;
