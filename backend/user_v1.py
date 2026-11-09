@@ -987,10 +987,48 @@ def admin_users(
     status = status if status in ("", "active", "expired", "disabled") else ""
     cond = []
     params = []
+    plan_days_sql = """(
+        SELECT CASE
+            WHEN ve.source='redeem' THEN COALESCE(
+                (SELECT l.duration_days FROM licenses l
+                 WHERE l.id=CAST(substr(ve.reference,9) AS INTEGER)
+                   AND l.redeemed_by_user_id=u.id
+                   AND l.redeemed_at IS NOT NULL
+                 LIMIT 1),
+                CAST(ROUND(ve.duration_seconds / 86400.0) AS INTEGER)
+            )
+            WHEN ve.source IN ('payment_alipay','payment_wechat') THEN COALESCE(
+                (SELECT p.days FROM payment_orders p
+                 WHERE p.order_id=substr(ve.reference,9) AND p.user_id=u.id
+                 LIMIT 1),
+                CAST(ROUND(ve.duration_seconds / 86400.0) AS INTEGER)
+            )
+            WHEN ve.source IN ('admin','admin_batch','admin_set','agent','agent_batch') THEN
+                CAST(ROUND(ve.duration_seconds / 86400.0) AS INTEGER)
+            ELSE NULL
+        END
+        FROM vip_events ve
+        WHERE ve.user_id=u.id
+          AND ve.source IN ('redeem','payment_alipay','payment_wechat',
+                            'admin','admin_batch','admin_set','agent','agent_batch')
+        ORDER BY ve.created_at DESC, ve.id DESC
+        LIMIT 1
+    )"""
     if q.strip():
         like = f"%{q.strip()}%"
-        cond.append("(username LIKE ? COLLATE NOCASE OR COALESCE(last_login_ip,'') LIKE ? COLLATE NOCASE)")
+        search_parts = ["username LIKE ? COLLATE NOCASE", "COALESCE(last_login_ip,'') LIKE ? COLLATE NOCASE"]
         params.extend([like, like])
+        plan_filters = {
+            "月卡": (30, 31),
+            "季卡": (90,),
+            "半年卡": (180,),
+            "年卡": (365,),
+        }
+        matching_days = next((days for label, days in plan_filters.items() if label in q.strip()), None)
+        if matching_days:
+            search_parts.append(f"{plan_days_sql} IN ({','.join('?' for _ in matching_days)})")
+            params.extend(matching_days)
+        cond.append("(" + " OR ".join(search_parts) + ")")
     now = iso(utc_now())
     if status == "active":
         cond.append("status=1 AND vip_expires_at>?")
@@ -1003,39 +1041,14 @@ def admin_users(
     where = (" WHERE " + " AND ".join(cond)) if cond else ""
     offset = (page - 1) * page_size
     with open_db() as db:
-        total = int(db.execute("SELECT COUNT(*) AS c FROM app_users" + where, tuple(params)).fetchone()["c"])
+        total = int(db.execute("SELECT COUNT(*) AS c FROM app_users u" + where, tuple(params)).fetchone()["c"])
         rows = db.execute(
-            """
+            f"""
             SELECT u.*,
-                   (
-                       SELECT CASE
-                           WHEN ve.source='redeem' THEN COALESCE(
-                               (SELECT l.duration_days FROM licenses l
-                                WHERE l.id=CAST(substr(ve.reference,9) AS INTEGER)
-                                  AND l.redeemed_by_user_id=u.id
-                                  AND l.redeemed_at IS NOT NULL
-                                LIMIT 1),
-                               CAST(ROUND(ve.duration_seconds / 86400.0) AS INTEGER)
-                           )
-                           WHEN ve.source IN ('payment_alipay','payment_wechat') THEN COALESCE(
-                               (SELECT p.days FROM payment_orders p
-                                WHERE p.order_id=substr(ve.reference,9) AND p.user_id=u.id
-                                LIMIT 1),
-                               CAST(ROUND(ve.duration_seconds / 86400.0) AS INTEGER)
-                           )
-                           WHEN ve.source IN ('admin','admin_batch','agent','agent_batch') THEN
-                               CAST(ROUND(ve.duration_seconds / 86400.0) AS INTEGER)
-                           ELSE NULL
-                       END
-                       FROM vip_events ve
-                       WHERE ve.user_id=u.id
-                         AND ve.source IN ('redeem','payment_alipay','payment_wechat',
-                                           'admin','admin_batch','admin_set','agent','agent_batch')
-                       ORDER BY ve.created_at DESC, ve.id DESC
-                       LIMIT 1
-                   ) AS membership_plan_days
+                   {plan_days_sql} AS membership_plan_days
             FROM app_users u
-            """ + where + " ORDER BY u.id DESC LIMIT ? OFFSET ?",
+            {where} ORDER BY u.id DESC LIMIT ? OFFSET ?
+            """,
             tuple(params + [page_size, offset]),
         ).fetchall()
     return {
