@@ -481,9 +481,24 @@ def membership(user) -> dict:
     }
 
 
+def membership_plan_label(days) -> str | None:
+    try:
+        duration = int(days)
+    except (TypeError, ValueError):
+        return None
+    return {
+        30: "月卡",
+        31: "月卡",
+        90: "季卡",
+        180: "半年卡",
+        365: "年卡",
+    }.get(duration)
+
+
 def serialize_user(row) -> dict:
     user = dict(row)
     m = membership(user)
+    m["plan_label"] = membership_plan_label(user.get("membership_plan_days"))
     return {
         "id": int(user["id"]),
         "username": user["username"],
@@ -990,7 +1005,37 @@ def admin_users(
     with open_db() as db:
         total = int(db.execute("SELECT COUNT(*) AS c FROM app_users" + where, tuple(params)).fetchone()["c"])
         rows = db.execute(
-            "SELECT * FROM app_users" + where + " ORDER BY id DESC LIMIT ? OFFSET ?",
+            """
+            SELECT u.*,
+                   (
+                       SELECT CASE
+                           WHEN ve.source='redeem' THEN COALESCE(
+                               (SELECT l.duration_days FROM licenses l
+                                WHERE l.id=CAST(substr(ve.reference,9) AS INTEGER)
+                                  AND l.redeemed_by_user_id=u.id
+                                  AND l.redeemed_at IS NOT NULL
+                                LIMIT 1),
+                               CAST(ROUND(ve.duration_seconds / 86400.0) AS INTEGER)
+                           )
+                           WHEN ve.source IN ('payment_alipay','payment_wechat') THEN COALESCE(
+                               (SELECT p.days FROM payment_orders p
+                                WHERE p.order_id=substr(ve.reference,9) AND p.user_id=u.id
+                                LIMIT 1),
+                               CAST(ROUND(ve.duration_seconds / 86400.0) AS INTEGER)
+                           )
+                           WHEN ve.source IN ('admin','admin_batch','agent','agent_batch') THEN
+                               CAST(ROUND(ve.duration_seconds / 86400.0) AS INTEGER)
+                           ELSE NULL
+                       END
+                       FROM vip_events ve
+                       WHERE ve.user_id=u.id
+                         AND ve.source IN ('redeem','payment_alipay','payment_wechat',
+                                           'admin','admin_batch','admin_set','agent','agent_batch')
+                       ORDER BY ve.created_at DESC, ve.id DESC
+                       LIMIT 1
+                   ) AS membership_plan_days
+            FROM app_users u
+            """ + where + " ORDER BY u.id DESC LIMIT ? OFFSET ?",
             tuple(params + [page_size, offset]),
         ).fetchall()
     return {
