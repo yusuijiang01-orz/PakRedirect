@@ -115,7 +115,11 @@ std::string takeSnapshot() {
 
     // RTLD_NOLOAD prevents loading or initializing a second game library.
     void* handle = dlopen(game.path.c_str(), RTLD_NOW | RTLD_NOLOAD);
-    if (handle == nullptr) return fail("SYMBOL_LOOKUP_FAILED", game.buildId);
+    if (handle == nullptr) {
+        const char* error = dlerror();
+        return fail(error == nullptr ? "DLOPEN_FAILED" : (std::string("DLOPEN_FAILED:") + error).c_str(),
+                game.buildId);
+    }
     auto closeHandle = [&handle]() {
         if (handle != nullptr) {
             dlclose(handle);
@@ -123,13 +127,30 @@ std::string takeSnapshot() {
         }
     };
 
+    dlerror();
     auto** playerGlobal = static_cast<void**>(dlsym(handle, "Player"));
+    const char* playerError = dlerror();
+    dlerror();
     auto getFreeSlots = reinterpret_cast<int (*)(void*)>(dlsym(handle, kFreeSlotsSymbol));
+    const char* freeSlotsError = dlerror();
+    dlerror();
     auto getItemWeight = reinterpret_cast<int (*)(void*, int*, int*)>(dlsym(handle, kWeightSymbol));
-    if (playerGlobal == nullptr || getFreeSlots == nullptr || getItemWeight == nullptr
-            || !readableRange(playerGlobal, sizeof(void*))) {
+    const char* weightError = dlerror();
+    if (playerGlobal == nullptr || playerError != nullptr) {
         closeHandle();
-        return fail("SYMBOL_LOOKUP_FAILED", game.buildId);
+        return fail("PLAYER_SYMBOL_MISSING", game.buildId);
+    }
+    if (getFreeSlots == nullptr || freeSlotsError != nullptr) {
+        closeHandle();
+        return fail("FREE_SLOT_SYMBOL_MISSING", game.buildId);
+    }
+    if (getItemWeight == nullptr || weightError != nullptr) {
+        closeHandle();
+        return fail("WEIGHT_SYMBOL_MISSING", game.buildId);
+    }
+    if (!readableRange(playerGlobal, sizeof(void*))) {
+        closeHandle();
+        return fail("PLAYER_GLOBAL_UNREADABLE", game.buildId);
     }
 
     void* player = *playerGlobal;
