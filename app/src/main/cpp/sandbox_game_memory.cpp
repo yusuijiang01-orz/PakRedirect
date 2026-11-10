@@ -147,7 +147,11 @@ std::string takeSnapshot() {
 
     if (freeSlots < 0 || freeSlots > 200 || currentWeight < 0
             || currentWeight > 1000000 || maxWeight <= 0 || maxWeight > 1000000) {
-        return fail("VALUES_NOT_READY", game.buildId);
+        char status[128];
+        std::snprintf(status, sizeof(status),
+                "VALUES_NOT_READY slots=%d weight=%d/%d",
+                freeSlots, currentWeight, maxWeight);
+        return fail(status, game.buildId);
     }
     char values[96];
     std::snprintf(values, sizeof(values), "OK|%s|%d|%d|%d", game.buildId.c_str(),
