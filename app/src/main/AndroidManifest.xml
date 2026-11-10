@@ -63,12 +63,11 @@
 
         <service
             android:name=".BagMemoryProbeService"
-            android:exported="true"
-            android:permission="android.permission.DUMP"
+            android:exported="false"
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="用户主动通过 ADB 开始的只读沙箱背包内存诊断，不执行游戏输入。" />
+                android:value="用户主动通过 RYLUX 悬浮窗开始的只读沙箱背包内存探测，不发送游戏输入。" />
         </service>
 
         <service

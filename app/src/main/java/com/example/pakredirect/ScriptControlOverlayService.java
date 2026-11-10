@@ -62,6 +62,7 @@ public final class ScriptControlOverlayService extends Service {
     private boolean collapsed;
     private boolean snappedRight;
     private boolean restartRequested;
+    private boolean memoryProbeActive;
     private final Runnable collapseWhenIdle = this::collapseToNearestEdge;
     private String runtimeState = ScriptExecutionControl.State.IDLE.name();
     private final BroadcastReceiver runtimeStatus = new BroadcastReceiver() {
@@ -70,6 +71,7 @@ public final class ScriptControlOverlayService extends Service {
             String state = intent.getStringExtra(ScriptRuntimeService.EXTRA_STATE);
             String message = intent.getStringExtra(ScriptRuntimeService.EXTRA_MESSAGE);
             runtimeState = state == null ? ScriptExecutionControl.State.IDLE.name() : state;
+            memoryProbeActive = "MEMORY_PROBE".equals(runtimeState);
             if (ScriptExecutionControl.State.RUNNING.name().equals(runtimeState)
                     || ScriptExecutionControl.State.FAILED.name().equals(runtimeState)
                     || (message != null && (message.startsWith("启动失败")
@@ -81,6 +83,8 @@ public final class ScriptControlOverlayService extends Service {
             if (runActionLabel != null) runActionLabel.setText(active ? "停止" : "启动");
             if (pauseActionLabel != null) pauseActionLabel.setText(
                     ScriptExecutionControl.State.PAUSED.name().equals(runtimeState) ? "继续" : "暂停");
+            if (memoryProbeActive) mainHandler.removeCallbacks(collapseWhenIdle);
+            else scheduleIdleCollapse();
         }
     };
 
@@ -145,8 +149,15 @@ public final class ScriptControlOverlayService extends Service {
         statusLabel.setContentDescription("运行状态；点击复制完整诊断并留在游戏");
         statusLabel.setOnClickListener(v -> {
             noteInteraction();
-            String detail = getSharedPreferences("script_runtime_diagnostics", MODE_PRIVATE)
-                    .getString("last_error", "尚无脚本失败诊断记录。");
+            android.content.SharedPreferences diagnostics = getSharedPreferences(
+                    "script_runtime_diagnostics", MODE_PRIVATE);
+            String memoryProbe = diagnostics.getString("last_memory_probe", "");
+            String lastError = diagnostics.getString("last_error", "");
+            boolean memoryProbeIsNewer = diagnostics.getLong("last_memory_probe_time", 0L)
+                    > diagnostics.getLong("last_error_time", 0L);
+            String detail = memoryProbeIsNewer && !memoryProbe.isEmpty()
+                    ? memoryProbe : lastError;
+            if (detail.isEmpty()) detail = memoryProbe.isEmpty() ? "尚无诊断记录。" : memoryProbe;
             android.content.ClipboardManager clipboard = (android.content.ClipboardManager)
                     getSystemService(CLIPBOARD_SERVICE);
             if (clipboard != null) {
@@ -166,12 +177,14 @@ public final class ScriptControlOverlayService extends Service {
         actions.setPadding(0, dp(3), 0, 0);
         actions.addView(actionCell("▶", "启动", BLUE, v -> {
             noteInteraction();
-            if (isRuntimeActive()) sendRuntimeAction(ScriptRuntimeService.ACTION_STOP);
+            if (memoryProbeActive) Toast.makeText(this, "只读内存探测正在运行", Toast.LENGTH_SHORT).show();
+            else if (isRuntimeActive()) sendRuntimeAction(ScriptRuntimeService.ACTION_STOP);
             else restartLastRun();
         }), actionCellParams(true));
         actions.addView(actionCell("Ⅱ", "暂停", SOFT, v -> {
             noteInteraction();
-            sendRuntimeAction(ScriptExecutionControl.State.PAUSED.name().equals(runtimeState)
+            if (memoryProbeActive) Toast.makeText(this, "只读探测不需要暂停", Toast.LENGTH_SHORT).show();
+            else sendRuntimeAction(ScriptExecutionControl.State.PAUSED.name().equals(runtimeState)
                     ? ScriptRuntimeService.ACTION_RESUME : ScriptRuntimeService.ACTION_PAUSE);
         }), actionCellParams(false));
         actions.addView(actionCell("⚙", "设置", SOFT, v -> {
@@ -192,6 +205,34 @@ public final class ScriptControlOverlayService extends Service {
             stopSelf();
         }), actionCellParams(false));
         panel.addView(actions);
+
+        LinearLayout probeAction = new LinearLayout(this);
+        probeAction.setOrientation(LinearLayout.HORIZONTAL);
+        probeAction.setGravity(Gravity.CENTER_VERTICAL);
+        probeAction.setPadding(dp(9), dp(4), dp(9), dp(4));
+        probeAction.setBackground(round(SOFT, 11, BORDER));
+        probeAction.setContentDescription("只读探测沙箱背包空格和负重；不会点击或操作游戏");
+        TextView probeIcon = text("▣", 17, BLUE, true);
+        probeIcon.setGravity(Gravity.CENTER);
+        probeAction.addView(probeIcon, new LinearLayout.LayoutParams(dp(28), dp(28)));
+        LinearLayout probeCopy = new LinearLayout(this);
+        probeCopy.setOrientation(LinearLayout.VERTICAL);
+        probeCopy.setGravity(Gravity.CENTER_VERTICAL);
+        TextView probeTitle = text("只读探测背包内存", 11, TEXT, true);
+        TextView probeSubtitle = text("读取空格和负重，不执行游戏操作", 9, MUTED, false);
+        probeCopy.addView(probeTitle, new LinearLayout.LayoutParams(-1, dp(18)));
+        probeCopy.addView(probeSubtitle, new LinearLayout.LayoutParams(-1, dp(16)));
+        LinearLayout.LayoutParams probeCopyParams = new LinearLayout.LayoutParams(0, -2, 1);
+        probeCopyParams.leftMargin = dp(5);
+        probeAction.addView(probeCopy, probeCopyParams);
+        TextView probeButtonLabel = text("读取", 11, TEXT, true);
+        probeButtonLabel.setGravity(Gravity.CENTER);
+        probeButtonLabel.setBackground(round(BLUE, 8, BLUE));
+        probeAction.addView(probeButtonLabel, new LinearLayout.LayoutParams(dp(48), dp(30)));
+        probeAction.setOnClickListener(v -> startBagMemoryProbe());
+        LinearLayout.LayoutParams probeActionParams = new LinearLayout.LayoutParams(-1, dp(42));
+        probeActionParams.topMargin = dp(4);
+        panel.addView(probeAction, probeActionParams);
 
         LinearLayout handle = new LinearLayout(this);
         handle.setOrientation(LinearLayout.VERTICAL);
@@ -354,6 +395,30 @@ public final class ScriptControlOverlayService extends Service {
     }
 
     private void sendRuntimeAction(String action) { sendRuntimeAction(action, null); }
+
+    private void startBagMemoryProbe() {
+        noteInteraction();
+        if (memoryProbeActive) {
+            Toast.makeText(this, "只读内存探测正在运行", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (isRuntimeActive()) {
+            Toast.makeText(this, "请先停止当前工作流，再运行只读探测", Toast.LENGTH_LONG).show();
+            return;
+        }
+        memoryProbeActive = true;
+        mainHandler.removeCallbacks(collapseWhenIdle);
+        if (statusLabel != null) statusLabel.setText("内存探测中 · 只读，不操作游戏");
+        Intent probe = new Intent(this, BagMemoryProbeService.class);
+        try {
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(probe);
+            else startService(probe);
+        } catch (RuntimeException error) {
+            memoryProbeActive = false;
+            scheduleIdleCollapse();
+            Toast.makeText(this, "无法启动只读探测：" + error.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
 
     private void sendRuntimeAction(String action, String config) {
         Intent command = new Intent(this, ScriptRuntimeService.class).setAction(action);
