@@ -1,6 +1,5 @@
 #include <jni.h>
 
-#include <dlfcn.h>
 #include <link.h>
 #include <elf.h>
 
@@ -17,9 +16,13 @@ constexpr char kWeightSymbol[] = "_ZN9KItemList13GetItemWeightEPiS0_";
 constexpr uintptr_t kBagListOffset = 0x70;
 constexpr uintptr_t kInventoryPointerOffset = 0x3c10;
 constexpr size_t kPlayerReadableSize = kBagListOffset + kInventoryPointerOffset + sizeof(void*);
+// Verified from the exact 610 ARM64 game library build ID above.
+constexpr uintptr_t kPlayerGlobalRva = 0x1295468;
+constexpr uintptr_t kGetItemWeightRva = 0x758d0c;
+constexpr uintptr_t kGetFreeBagCountRva = 0x78b65c;
 
 struct LoadedGameLibrary {
-    std::string path;
+    uintptr_t loadAddress = 0;
     std::string buildId;
     int matchCount = 0;
 };
@@ -67,7 +70,7 @@ int findGameLibrary(dl_phdr_info* info, size_t, void* opaque) {
     if (std::strcmp(basename, kLibraryName) != 0) return 0;
     ++loaded->matchCount;
     if (loaded->matchCount == 1) {
-        loaded->path = name;
+        loaded->loadAddress = static_cast<uintptr_t>(info->dlpi_addr);
         loaded->buildId = readBuildId(info);
     }
     return 0;
@@ -113,55 +116,27 @@ std::string takeSnapshot() {
     if (game.matchCount != 1) return fail("UNSUPPORTED_MULTIPLE_LIBRARIES", game.buildId);
     if (!supportedBuild(game.buildId)) return fail("UNSUPPORTED_BUILD", game.buildId);
 
-    // RTLD_NOLOAD prevents loading or initializing a second game library.
-    void* handle = dlopen(game.path.c_str(), RTLD_NOW | RTLD_NOLOAD);
-    if (handle == nullptr) {
-        const char* error = dlerror();
-        return fail(error == nullptr ? "DLOPEN_FAILED" : (std::string("DLOPEN_FAILED:") + error).c_str(),
-                game.buildId);
-    }
-    auto closeHandle = [&handle]() {
-        if (handle != nullptr) {
-            dlclose(handle);
-            handle = nullptr;
-        }
-    };
-
-    dlerror();
-    auto** playerGlobal = static_cast<void**>(dlsym(handle, "Player"));
-    const char* playerError = dlerror();
-    dlerror();
-    auto getFreeSlots = reinterpret_cast<int (*)(void*)>(dlsym(handle, kFreeSlotsSymbol));
-    const char* freeSlotsError = dlerror();
-    dlerror();
-    auto getItemWeight = reinterpret_cast<int (*)(void*, int*, int*)>(dlsym(handle, kWeightSymbol));
-    const char* weightError = dlerror();
-    if (playerGlobal == nullptr || playerError != nullptr) {
-        closeHandle();
-        return fail("PLAYER_SYMBOL_MISSING", game.buildId);
-    }
-    if (getFreeSlots == nullptr || freeSlotsError != nullptr) {
-        closeHandle();
-        return fail("FREE_SLOT_SYMBOL_MISSING", game.buildId);
-    }
-    if (getItemWeight == nullptr || weightError != nullptr) {
-        closeHandle();
-        return fail("WEIGHT_SYMBOL_MISSING", game.buildId);
-    }
-    if (!readableRange(playerGlobal, sizeof(void*))) {
-        closeHandle();
-        return fail("PLAYER_GLOBAL_UNREADABLE", game.buildId);
+    // Resolve only RVAs validated against the exact game build ID above.
+    // This runs inside the sandbox game process, so no root or cross-process
+    // memory access is required, and avoids reopening a library from a linker namespace.
+    const uintptr_t base = game.loadAddress;
+    auto** playerGlobal = reinterpret_cast<void**>(base + kPlayerGlobalRva);
+    auto getFreeSlots = reinterpret_cast<int (*)(void*)>(base + kGetFreeBagCountRva);
+    auto getItemWeight = reinterpret_cast<int (*)(void*, int*, int*)>(
+            base + kGetItemWeightRva);
+    if (base == 0 || !readableRange(playerGlobal, sizeof(void*))
+            || !readableRange(reinterpret_cast<void*>(getFreeSlots), 8)
+            || !readableRange(reinterpret_cast<void*>(getItemWeight), 4)) {
+        return fail("PROFILE_ADDRESS_UNREADABLE", game.buildId);
     }
 
     void* player = *playerGlobal;
     if (player == nullptr || !readableRange(player, kPlayerReadableSize)) {
-        closeHandle();
         return fail("PLAYER_NOT_READY", game.buildId);
     }
     auto* bagList = static_cast<unsigned char*>(player) + kBagListOffset;
     void* inventory = *reinterpret_cast<void**>(bagList + kInventoryPointerOffset);
     if (inventory == nullptr || !readableRange(inventory, sizeof(void*))) {
-        closeHandle();
         return fail("INVENTORY_NOT_READY", game.buildId);
     }
 
@@ -171,7 +146,6 @@ std::string takeSnapshot() {
     int currentWeight = -1;
     int maxWeight = -1;
     getItemWeight(bagList, &currentWeight, &maxWeight);
-    closeHandle();
 
     if (freeSlots < 0 || freeSlots > 200 || currentWeight < 0
             || currentWeight > 1000000 || maxWeight <= 0 || maxWeight > 1000000) {
