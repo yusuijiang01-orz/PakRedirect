@@ -162,8 +162,9 @@ public final class SandboxGameMemoryBridge {
         if (payload == null || payload.indexOf('\n') >= 0 || payload.indexOf('\r') >= 0) return;
         LocalSocket socket = new LocalSocket();
         try {
+            // Android does not implement the timeout overload for LocalSocket.
             socket.connect(new LocalSocketAddress(endpoint.socketName,
-                    LocalSocketAddress.Namespace.ABSTRACT), 1_000);
+                    LocalSocketAddress.Namespace.ABSTRACT));
             OutputStreamWriter writer = new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8);
             writer.write(endpoint.token);
             writer.write('|');
