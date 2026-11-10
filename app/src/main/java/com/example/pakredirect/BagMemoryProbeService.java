@@ -82,21 +82,22 @@ public final class BagMemoryProbeService extends Service {
             relay = null;
         }
         NotificationManager manager = getSystemService(NotificationManager.class);
-        if (manager != null) manager.notify(NOTIFICATION_ID, notification(message)
-                .toBuilder().setOngoing(false).build());
+        if (manager != null) manager.notify(NOTIFICATION_ID, notification(message, false));
         if (Build.VERSION.SDK_INT >= 24) stopForeground(STOP_FOREGROUND_DETACH);
         else stopForeground(false);
         stopSelf();
     }
 
-    private Notification notification(String message) {
+    private Notification notification(String message) { return notification(message, true); }
+
+    private Notification notification(String message, boolean ongoing) {
         Notification.Builder builder = Build.VERSION.SDK_INT >= 26
                 ? new Notification.Builder(this, CHANNEL) : new Notification.Builder(this);
         return builder.setSmallIcon(android.R.drawable.ic_menu_info_details)
                 .setContentTitle("RYLUX 背包读取（只读）")
                 .setContentText(message)
                 .setStyle(new Notification.BigTextStyle().bigText(message))
-                .setOngoing(true).build();
+                .setOngoing(ongoing).build();
     }
 
     @Override public void onDestroy() {
