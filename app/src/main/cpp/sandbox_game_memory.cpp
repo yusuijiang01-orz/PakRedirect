@@ -11,8 +11,6 @@
 namespace {
 
 constexpr char kLibraryName[] = "libcocos2dcpp.so";
-constexpr char kFreeSlotsSymbol[] = "_ZN7KPlayer15getFreeBagCountEv";
-constexpr char kWeightSymbol[] = "_ZN9KItemList13GetItemWeightEPiS0_";
 constexpr uintptr_t kBagListOffset = 0x70;
 constexpr uintptr_t kInventoryPointerOffset = 0x3c10;
 constexpr size_t kPlayerReadableSize = kBagListOffset + kInventoryPointerOffset + sizeof(void*);
