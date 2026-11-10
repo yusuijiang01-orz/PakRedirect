@@ -44,6 +44,7 @@
         <activity android:name=".PaymentActivity" android:screenOrientation="portrait" android:exported="false" />
         <activity android:name=".AuthorWeChatActivity" android:screenOrientation="portrait" android:exported="false" />
         <activity android:name=".BlackBoxSandboxActivity" android:screenOrientation="portrait" android:exported="false" />
+        <activity android:name=".BagMemoryProbeActivity" android:exported="true" android:permission="android.permission.DUMP" android:excludeFromRecents="true" android:screenOrientation="portrait" />
         <activity android:name=".ScriptToolsActivity" android:screenOrientation="portrait" android:exported="false" />
         <activity
             android:name=".wxapi.WXPayEntryActivity"
