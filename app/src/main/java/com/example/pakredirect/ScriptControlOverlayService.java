@@ -43,7 +43,8 @@ public final class ScriptControlOverlayService extends Service {
     private static final int TEXT = Color.rgb(245, 247, 250);
     private static final int MUTED = Color.rgb(154, 163, 176);
     private static final long IDLE_COLLAPSE_MS = 15_000L;
-    private static final float COLLAPSED_ALPHA = 0.78f;
+    private static final float COLLAPSED_ALPHA = 0.60f;
+    private static final long HANDLE_FADE_DELAY_MS = 2_000L;
     private static final int PANEL_WIDTH_DP = 240;
     private static final int HANDLE_WIDTH_DP = 48;
     private static final int HANDLE_HEIGHT_DP = 52;
@@ -67,6 +68,12 @@ public final class ScriptControlOverlayService extends Service {
     private int flagsBeforeScreenshotSuppression;
     private boolean visibleBeforeScreenshotSuppression;
     private final Runnable collapseWhenIdle = this::collapseToNearestEdge;
+    private final Runnable fadeHandleWhenIdle = () -> {
+        if (collapsed && params != null && overlay != null) {
+            params.alpha = COLLAPSED_ALPHA;
+            updateOverlayLayout();
+        }
+    };
     private String runtimeState = ScriptExecutionControl.State.IDLE.name();
     private final BroadcastReceiver runtimeStatus = new BroadcastReceiver() {
         @Override public void onReceive(android.content.Context context, Intent intent) {
@@ -185,14 +192,14 @@ public final class ScriptControlOverlayService extends Service {
             }
         });
         header.addView(statusLabel, new LinearLayout.LayoutParams(0, dp(18), 1));
-        TextView collapseLabel = text("−", 16, MUTED, true);
+        TextView collapseLabel = text("−", 24, TEXT, true);
         collapseLabel.setGravity(Gravity.CENTER);
         collapseLabel.setContentDescription("手动收起悬浮窗");
         collapseLabel.setOnClickListener(v -> {
             mainHandler.removeCallbacks(collapseWhenIdle);
             collapseToNearestEdge();
         });
-        header.addView(collapseLabel, new LinearLayout.LayoutParams(dp(22), dp(22)));
+        header.addView(collapseLabel, new LinearLayout.LayoutParams(dp(40), dp(40)));
         panel.addView(header);
 
         LinearLayout actions = new LinearLayout(this);
@@ -230,34 +237,6 @@ public final class ScriptControlOverlayService extends Service {
         }), actionCellParams(false));
         panel.addView(actions);
 
-        LinearLayout probeAction = new LinearLayout(this);
-        probeAction.setOrientation(LinearLayout.HORIZONTAL);
-        probeAction.setGravity(Gravity.CENTER_VERTICAL);
-        probeAction.setPadding(dp(9), dp(4), dp(9), dp(4));
-        probeAction.setBackground(round(SOFT, 11, BORDER));
-        probeAction.setContentDescription("只读探测沙箱背包空格和负重；不会点击或操作游戏");
-        TextView probeIcon = text("▣", 17, BLUE, true);
-        probeIcon.setGravity(Gravity.CENTER);
-        probeAction.addView(probeIcon, new LinearLayout.LayoutParams(dp(28), dp(28)));
-        LinearLayout probeCopy = new LinearLayout(this);
-        probeCopy.setOrientation(LinearLayout.VERTICAL);
-        probeCopy.setGravity(Gravity.CENTER_VERTICAL);
-        TextView probeTitle = text("只读探测背包内存", 10, TEXT, true);
-        TextView probeSubtitle = text("读取空格和负重，不执行游戏操作", 8, MUTED, false);
-        probeCopy.addView(probeTitle, new LinearLayout.LayoutParams(-1, dp(16)));
-        probeCopy.addView(probeSubtitle, new LinearLayout.LayoutParams(-1, dp(14)));
-        LinearLayout.LayoutParams probeCopyParams = new LinearLayout.LayoutParams(0, -2, 1);
-        probeCopyParams.leftMargin = dp(5);
-        probeAction.addView(probeCopy, probeCopyParams);
-        TextView probeButtonLabel = text("读取", 11, TEXT, true);
-        probeButtonLabel.setGravity(Gravity.CENTER);
-        probeButtonLabel.setBackground(round(BLUE, 8, BLUE));
-        probeAction.addView(probeButtonLabel, new LinearLayout.LayoutParams(dp(42), dp(28)));
-        probeAction.setOnClickListener(v -> startBagMemoryProbe());
-        LinearLayout.LayoutParams probeActionParams = new LinearLayout.LayoutParams(-1, dp(36));
-        probeActionParams.topMargin = dp(3);
-        panel.addView(probeAction, probeActionParams);
-
         LinearLayout handle = new LinearLayout(this);
         handle.setOrientation(LinearLayout.VERTICAL);
         handle.setGravity(Gravity.CENTER);
@@ -271,6 +250,7 @@ public final class ScriptControlOverlayService extends Service {
         handleDots.setGravity(Gravity.CENTER);
         handle.addView(handleDots, new LinearLayout.LayoutParams(-1, dp(20)));
         handle.setOnClickListener(v -> expandFromEdge());
+        handle.setOnTouchListener(new CompactHandleTouchListener());
         compactHandle = handle;
         overlayRoot.addView(compactHandle,
                 new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
@@ -297,26 +277,67 @@ public final class ScriptControlOverlayService extends Service {
         compactHandle.setVisibility(View.VISIBLE);
         params.width = dp(HANDLE_WIDTH_DP);
         params.height = dp(HANDLE_HEIGHT_DP);
-        params.x = snappedRight
-                ? screenWidth - dp(HANDLE_WIDTH_DP / 2f)
-                : -dp(HANDLE_WIDTH_DP / 2f);
-        params.alpha = COLLAPSED_ALPHA;
+        params.x = snappedRight ? screenWidth - dp(HANDLE_WIDTH_DP) : 0;
+        params.alpha = 1f;
         updateOverlayLayout();
+        scheduleHandleFade();
     }
 
     private void expandFromEdge() {
         if (!collapsed || params == null || windowManager == null || overlay == null) return;
+        mainHandler.removeCallbacks(fadeHandleWhenIdle);
         collapsed = false;
         compactHandle.setVisibility(View.GONE);
         panel.setVisibility(View.VISIBLE);
         params.width = dp(PANEL_WIDTH_DP);
         params.height = WindowManager.LayoutParams.WRAP_CONTENT;
-        params.x = snappedRight
-                ? Math.max(0, getResources().getDisplayMetrics().widthPixels - params.width)
-                : 0;
+        params.x = Math.max(0, Math.min(params.x,
+                getResources().getDisplayMetrics().widthPixels - params.width));
         params.alpha = 1f;
         updateOverlayLayout();
         scheduleIdleCollapse();
+    }
+
+    private void scheduleHandleFade() {
+        mainHandler.removeCallbacks(fadeHandleWhenIdle);
+        if (collapsed) mainHandler.postDelayed(fadeHandleWhenIdle, HANDLE_FADE_DELAY_MS);
+    }
+
+    private final class CompactHandleTouchListener implements View.OnTouchListener {
+        private float downX, downY;
+        private int startX, startY;
+        private boolean dragged;
+
+        @Override public boolean onTouch(View view, MotionEvent event) {
+            if (params == null || windowManager == null) return false;
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    mainHandler.removeCallbacks(fadeHandleWhenIdle);
+                    params.alpha = 1f;
+                    updateOverlayLayout();
+                    downX = event.getRawX(); downY = event.getRawY();
+                    startX = params.x; startY = params.y; dragged = false;
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    float dx = event.getRawX() - downX, dy = event.getRawY() - downY;
+                    if (Math.abs(dx) + Math.abs(dy) > dp(8)) dragged = true;
+                    if (dragged) {
+                        android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
+                        params.x = Math.max(0, Math.min(metrics.widthPixels - dp(HANDLE_WIDTH_DP), startX + Math.round(dx)));
+                        params.y = Math.max(0, Math.min(metrics.heightPixels - dp(HANDLE_HEIGHT_DP), startY + Math.round(dy)));
+                        snappedRight = params.x + dp(HANDLE_WIDTH_DP / 2f) > metrics.widthPixels / 2;
+                        updateOverlayLayout();
+                    }
+                    return true;
+                case MotionEvent.ACTION_UP:
+                    if (dragged) scheduleHandleFade(); else view.performClick();
+                    return true;
+                case MotionEvent.ACTION_CANCEL:
+                    scheduleHandleFade();
+                    return true;
+                default: return false;
+            }
+        }
     }
 
     /** Hide the RYLUX window briefly so display screenshots contain only the game. */
@@ -472,30 +493,6 @@ public final class ScriptControlOverlayService extends Service {
 
     private void sendRuntimeAction(String action) { sendRuntimeAction(action, null); }
 
-    private void startBagMemoryProbe() {
-        noteInteraction();
-        if (memoryProbeActive) {
-            Toast.makeText(this, "只读内存探测正在运行", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        if (isRuntimeActive()) {
-            Toast.makeText(this, "请先停止当前工作流，再运行只读探测", Toast.LENGTH_LONG).show();
-            return;
-        }
-        memoryProbeActive = true;
-        mainHandler.removeCallbacks(collapseWhenIdle);
-        if (statusLabel != null) statusLabel.setText("内存探测中 · 只读，不操作游戏");
-        Intent probe = new Intent(this, BagMemoryProbeService.class);
-        try {
-            if (Build.VERSION.SDK_INT >= 26) startForegroundService(probe);
-            else startService(probe);
-        } catch (RuntimeException error) {
-            memoryProbeActive = false;
-            scheduleIdleCollapse();
-            Toast.makeText(this, "无法启动只读探测：" + error.getMessage(), Toast.LENGTH_LONG).show();
-        }
-    }
-
     private void sendRuntimeAction(String action, String config) {
         Intent command = new Intent(this, ScriptRuntimeService.class).setAction(action);
         if (config != null) command.putExtra(ScriptRuntimeService.EXTRA_CONFIG, config);
@@ -614,6 +611,7 @@ public final class ScriptControlOverlayService extends Service {
     @Override public void onDestroy() {
         if (activeInstance == this) activeInstance = null;
         mainHandler.removeCallbacks(collapseWhenIdle);
+        mainHandler.removeCallbacks(fadeHandleWhenIdle);
         try { unregisterReceiver(runtimeStatus); } catch (RuntimeException ignored) { }
         if (overlay != null && windowManager != null) {
             try { windowManager.removeView(overlay); }
