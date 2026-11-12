@@ -484,6 +484,8 @@ public final class ScriptToolsActivity extends Activity {
             }
         });
         logHeader.addView(copyLog, new LinearLayout.LayoutParams(dp(68), dp(36)));
+        Button toggleLog = button("收起", SOFT);
+        logHeader.addView(toggleLog, new LinearLayout.LayoutParams(dp(68), dp(36)));
         logPanel.addView(logHeader);
         runtimeLogScroll = new ScrollView(this);
         runtimeLogText = label("正在读取日志…", 11, TEXT, false);
@@ -491,6 +493,14 @@ public final class ScriptToolsActivity extends Activity {
         runtimeLogScroll.addView(runtimeLogText, new ScrollView.LayoutParams(-1, -2));
         logPanel.addView(runtimeLogScroll, new LinearLayout.LayoutParams(-1, dp(100)));
         screen.addView(logPanel, new LinearLayout.LayoutParams(-1, dp(148)));
+        toggleLog.setOnClickListener(v -> {
+            boolean show = runtimeLogScroll.getVisibility() != View.VISIBLE;
+            runtimeLogScroll.setVisibility(show ? View.VISIBLE : View.GONE);
+            LinearLayout.LayoutParams layout = (LinearLayout.LayoutParams) logPanel.getLayoutParams();
+            layout.height = dp(show ? 148 : 48);
+            logPanel.setLayoutParams(layout);
+            toggleLog.setText(show ? "收起" : "展开");
+        });
         logHandler.removeCallbacks(refreshRuntimeLog);
         if (logScreenActive) logHandler.post(refreshRuntimeLog);
         host.addView(screen, new FrameLayout.LayoutParams(-1, -1));
