@@ -42,6 +42,8 @@ public final class ProtectedContentManager {
     private static final String API = "https://verify.lovenom.eu.org/api/v1";
     private static final String MAGIC = "RYLUXE01";
     private static final byte[] MAGIC_BYTES = MAGIC.getBytes(StandardCharsets.US_ASCII);
+    private static final String LUA_BUNDLE_NAME = "lua_bundle.zip";
+    private static final long MAX_LUA_BUNDLE_BYTES = 48L * 1024L * 1024L;
     private static final int PREFIX_BYTES = 12;
     private static final int MAX_HEADER_BYTES = 128 * 1024;
     private static final int MAX_MANIFEST_BYTES = 1024 * 1024;
@@ -221,6 +223,136 @@ public final class ProtectedContentManager {
             throw new IllegalArgumentException("加密 PAK 读取范围无效");
         }
         return new DecryptingInputStream(entry, relativeStart);
+    }
+
+    /** Verifies a Lua release manifest using the same device-authorized PAK content key. */
+    public static JSONObject verifyLuaManifest(Context context, String token, String manifestText) throws Exception {
+        JSONObject outer = new JSONObject(manifestText == null ? "" : manifestText);
+        String keyId = outer.optString("key_id", "").trim().toLowerCase(Locale.US);
+        String payloadB64 = outer.optString("payload_b64", "").trim();
+        String manifestHmac = outer.optString("manifest_hmac", "").trim().toLowerCase(Locale.US);
+        if (outer.optInt("schema", 0) != 1
+                || !MODULE_CODE.equals(outer.optString("module", ""))
+                || keyId.length() != 16
+                || payloadB64.isEmpty()
+                || !manifestHmac.matches("[0-9a-f]{64}")) {
+            throw new IllegalStateException("Lua 加密清单格式无效");
+        }
+
+        ManifestBundle authorization = authorizationForKey(context, token, keyId);
+        byte[] payloadBytes = Base64.decode(payloadB64, Base64.DEFAULT);
+        if (payloadBytes.length == 0 || payloadBytes.length > MAX_MANIFEST_BYTES) {
+            throw new IllegalStateException("Lua 加密清单长度无效");
+        }
+        if (!constantHexEquals(hmacSha256(authorization.contentKey, payloadBytes), manifestHmac)) {
+            throw new IllegalStateException("Lua 加密清单签名校验失败");
+        }
+        JSONObject payload = new JSONObject(new String(payloadBytes, StandardCharsets.UTF_8));
+        if (payload.optInt("schema", 0) != 2
+                || !MODULE_CODE.equals(payload.optString("module", ""))
+                || !keyId.equals(payload.optString("key_id", "").trim().toLowerCase(Locale.US))) {
+            throw new IllegalStateException("Lua 加密清单载荷无效");
+        }
+        return payload;
+    }
+
+    /** Decrypts a signed Lua ZIP using the existing RYLUXE01 PAK chunk format. */
+    public static void decryptLuaBundle(
+            Context context,
+            String token,
+            File encryptedFile,
+            File outputFile,
+            JSONObject packageInfo
+    ) throws Exception {
+        if (encryptedFile == null || !encryptedFile.isFile() || packageInfo == null) {
+            throw new IllegalArgumentException("Lua 加密包不可用");
+        }
+        JSONObject encryption = packageInfo.optJSONObject("encryption");
+        if (encryption == null || !"RYLUXE01".equals(encryption.optString("format", ""))) {
+            throw new IllegalStateException("Lua 加密格式不支持");
+        }
+        String keyId = encryption.optString("key_id", "").trim().toLowerCase(Locale.US);
+        long revision = encryption.optLong("revision", 0L);
+        long plainSize = encryption.optLong("plain_size", -1L);
+        String plainSha = encryption.optString("plain_sha256", "").trim().toLowerCase(Locale.US);
+        long encryptedSize = packageInfo.optLong("size", -1L);
+        String encryptedSha = packageInfo.optString("sha256", "").trim().toLowerCase(Locale.US);
+        if (!LUA_BUNDLE_NAME.equals(encryption.optString("name", ""))
+                || keyId.length() != 16
+                || revision <= 0
+                || plainSize <= 0 || plainSize > MAX_LUA_BUNDLE_BYTES
+                || !plainSha.matches("[0-9a-f]{64}")
+                || encryptedSize != encryptedFile.length()
+                || !encryptedSha.matches("[0-9a-f]{64}")
+                || !encryptedSha.equals(sha256(encryptedFile))) {
+            throw new IllegalStateException("Lua 加密包元数据或摘要不匹配");
+        }
+
+        ManifestBundle authorization = authorizationForKey(context, token, keyId);
+        EncryptedHeader header = readHeader(encryptedFile);
+        ProtectedEntry entry = new ProtectedEntry(
+                LUA_BUNDLE_NAME, "bundle.rpe", revision, plainSize, plainSha,
+                encryptedSize, encryptedSha, keyId
+        );
+        entry.file = encryptedFile;
+        entry.header = header;
+        entry.contentKey = authorization.contentKey.clone();
+        validateHeader(header, entry, authorization.contentKey);
+
+        File parent = outputFile.getAbsoluteFile().getParentFile();
+        if (parent == null || (!parent.exists() && !parent.mkdirs())) {
+            throw new IllegalStateException("无法创建 Lua 解密目录");
+        }
+        File temporary = new File(parent, outputFile.getName() + ".decrypting");
+        quietDelete(temporary);
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        long total = 0L;
+        try (InputStream input = new DecryptingInputStream(entry, 0L);
+             FileOutputStream file = new FileOutputStream(temporary);
+             OutputStream output = new java.io.BufferedOutputStream(file, 128 * 1024)) {
+            byte[] buffer = new byte[128 * 1024];
+            int count;
+            while ((count = input.read(buffer)) >= 0) {
+                if (count == 0) continue;
+                total += count;
+                if (total > plainSize || total > MAX_LUA_BUNDLE_BYTES) {
+                    throw new IllegalStateException("Lua 解密包超过声明大小");
+                }
+                digest.update(buffer, 0, count);
+                output.write(buffer, 0, count);
+            }
+            output.flush();
+            file.getFD().sync();
+        } catch (Throwable failure) {
+            quietDelete(temporary);
+            if (failure instanceof Exception) throw (Exception) failure;
+            throw new IllegalStateException("Lua 加密包解密失败", failure);
+        }
+        if (total != plainSize || !plainSha.equals(hex(digest.digest()))) {
+            quietDelete(temporary);
+            throw new IllegalStateException("Lua 解密包明文校验失败");
+        }
+        deleteIfExists(outputFile);
+        if (!temporary.renameTo(outputFile)) {
+            quietDelete(temporary);
+            throw new IllegalStateException("无法保存 Lua 解密包");
+        }
+    }
+
+    private static ManifestBundle authorizationForKey(Context context, String token, String expectedKeyId) throws Exception {
+        ManifestBundle installed = loadInstalledManifest(context);
+        if (installed != null && expectedKeyId.equals(installed.keyId)) return installed;
+        if (token == null || token.trim().isEmpty()) {
+            throw new IllegalStateException("需要登录并授权后才能解密 Lua 脚本");
+        }
+        ManifestBundle remote = fetchManifest(token);
+        if (!expectedKeyId.equals(remote.keyId)) {
+            throw new IllegalStateException("Lua 脚本密钥与当前 PAK 授权密钥不一致");
+        }
+        File dir = moduleDir(context);
+        if (!dir.exists() && !dir.mkdirs()) throw new IllegalStateException("无法保存 Lua 解密授权");
+        writeAtomic(new File(dir, AUTH_MANIFEST), remote.serverResponse.getBytes(StandardCharsets.UTF_8));
+        return remote;
     }
 
     private static ManifestBundle fetchManifest(String token) throws Exception {

@@ -70,6 +70,18 @@ public final class CnDownloadRouter {
         return new String[]{GITEE_RAW_BASE + "pak/" + safePath};
     }
 
+    /** Routes the authenticated Lua bundle from the repository's encrypted release directory. */
+    public static String[] luaRepoFileUrls(String fileName) {
+        String safeName = normalizeRepoPath(fileName);
+        if (!"manifest.json".equals(safeName)
+                && !"bundle.rpe".equals(safeName)
+                && !"bundle.zip".equals(safeName)) {
+            throw new IllegalArgumentException("Invalid Lua release file name");
+        }
+        String raw = "https://raw.githubusercontent.com/" + OWNER_REPO + "/main/lua/" + safeName;
+        return unique(GH_PROXY + raw, raw);
+    }
+
     /** Build mirrors from the directory selected by the authorized manifest. */
     public static String[] publicRepoFileUrls(String baseUrl, String fileName) {
         String base = baseUrl == null ? "" : baseUrl.trim();
