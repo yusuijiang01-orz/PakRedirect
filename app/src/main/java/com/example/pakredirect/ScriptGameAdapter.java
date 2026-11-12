@@ -6,8 +6,11 @@ import android.accessibilityservice.GestureDescription;
 import android.content.ComponentName;
 import android.content.pm.ApplicationInfo;
 import android.graphics.Bitmap;
+import android.graphics.Canvas;
 import android.graphics.ColorSpace;
+import android.graphics.Point;
 import android.graphics.Path;
+import android.graphics.Rect;
 import android.hardware.HardwareBuffer;
 import android.os.Build;
 import android.os.SystemClock;
@@ -56,6 +59,16 @@ public final class ScriptGameAdapter extends AccessibilityService {
         }
     }
 
+    private static final class ScreenshotWindow {
+        final int id;
+        final Rect bounds;
+
+        ScreenshotWindow(int id, Rect bounds) {
+            this.id = id;
+            this.bounds = bounds;
+        }
+    }
+
     public static boolean isConnected() { return instance != null; }
 
     static void setTargetMode(String mode) {
@@ -88,12 +101,16 @@ public final class ScriptGameAdapter extends AccessibilityService {
     @Override public void onAccessibilityEvent(AccessibilityEvent event) {
         if (event == null || (event.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
                 && event.getEventType() != AccessibilityEvent.TYPE_WINDOWS_CHANGED)) return;
-        // Keep the Android activity class and window identity with the package.
-        // A host-package event alone also describes the RYLUX workbench.
-        foregroundEvent = new ForegroundEvent(
-                event.getPackageName() == null ? "" : event.getPackageName().toString(),
-                event.getClassName() == null ? "" : event.getClassName().toString(),
-                event.getWindowId());
+        String packageName = event.getPackageName() == null ? "" : event.getPackageName().toString();
+        String className = event.getClassName() == null ? "" : event.getClassName().toString();
+        // Window-visibility changes from the RYLUX overlay can have no package
+        // or describe the workbench itself. Do not let those events erase the
+        // last real game/proxy event used to identify a window with no root node.
+        boolean ryluxWorkbenchWindow = getPackageName().equals(packageName)
+                && !ScriptForegroundTarget.isProxyActivity(className);
+        if (!packageName.isEmpty() && !ryluxWorkbenchWindow) {
+            foregroundEvent = new ForegroundEvent(packageName, className, event.getWindowId());
+        }
         updateCrashDialog(event);
     }
     @Override public void onInterrupt() { }
@@ -602,6 +619,12 @@ public final class ScriptGameAdapter extends AccessibilityService {
         if (Build.VERSION.SDK_INT < 30) {
             throw new UnsupportedOperationException("系统版本过低：截图需要 Android 11 或更新版本");
         }
+        if (Build.VERSION.SDK_INT >= 34) {
+            return captureTargetWindow(timeoutMs);
+        }
+        // Android 11–13 do not have the per-window screenshot API. Retain the
+        // old unobstructed-display fallback there; Android 14+ never toggles
+        // overlay visibility, so screenshots do not make the panel blink.
         if (!ScriptControlOverlayService.setScreenshotCaptureSuppressed(true, 1_000L)) {
             throw new IllegalStateException("无法暂时从游戏截图中隐藏 RYLUX 悬浮窗");
         }
@@ -609,7 +632,7 @@ public final class ScriptGameAdapter extends AccessibilityService {
             // Wait for WindowManager to commit the hidden overlay before the
             // display compositor produces a screenshot.
             SystemClock.sleep(90L);
-            return captureDisplayWithoutOverlay(timeoutMs);
+            return captureDisplayInternal(timeoutMs, false);
         } finally {
             if (!ScriptControlOverlayService.setScreenshotCaptureSuppressed(false, 1_000L)) {
                 Log.w(TAG, "could not restore RYLUX overlay after screenshot capture");
@@ -617,17 +640,22 @@ public final class ScriptGameAdapter extends AccessibilityService {
         }
     }
 
-    private Bitmap captureDisplayWithoutOverlay(long timeoutMs) throws Exception {
+    private Bitmap captureTargetWindow(long timeoutMs) throws Exception {
+        return captureDisplayInternal(timeoutMs, true);
+    }
+
+    private Bitmap captureDisplayInternal(long timeoutMs, boolean targetWindowOnly) throws Exception {
         long deadline = SystemClock.elapsedRealtime() + Math.max(1L, timeoutMs);
         int lastErrorCode = 0;
         int internalErrorRetries = 0;
         do {
             requireTargetGameForeground();
+            ScreenshotWindow targetWindow = targetWindowOnly ? resolveActiveApplicationWindow() : null;
             CountDownLatch done = new CountDownLatch(1);
             Bitmap[] result = new Bitmap[1];
             Throwable[] failure = new Throwable[1];
             int[] errorCode = new int[1];
-            takeScreenshot(Display.DEFAULT_DISPLAY, getMainExecutor(), new TakeScreenshotCallback() {
+            TakeScreenshotCallback callback = new TakeScreenshotCallback() {
                 @Override public void onSuccess(ScreenshotResult screenshot) {
                     HardwareBuffer buffer = screenshot.getHardwareBuffer();
                     try {
@@ -636,9 +664,20 @@ public final class ScriptGameAdapter extends AccessibilityService {
                         if (hardware == null) {
                             failure[0] = new IllegalStateException("截图缓冲区不可用");
                         } else {
-                            result[0] = hardware.copy(Bitmap.Config.ARGB_8888, false);
+                            Bitmap captured = hardware.copy(Bitmap.Config.ARGB_8888, false);
                             hardware.recycle();
-                            if (result[0] == null) failure[0] = new IllegalStateException("无法读取截图像素");
+                            if (captured == null) {
+                                failure[0] = new IllegalStateException("无法读取截图像素");
+                            } else if (targetWindowOnly) {
+                                try {
+                                    result[0] = expandWindowFrameToDisplay(captured, targetWindow.bounds);
+                                } catch (Throwable normalizeFailure) {
+                                    if (!captured.isRecycled()) captured.recycle();
+                                    failure[0] = normalizeFailure;
+                                }
+                            } else {
+                                result[0] = captured;
+                            }
                         }
                     } catch (Throwable error) {
                         failure[0] = error;
@@ -652,7 +691,12 @@ public final class ScriptGameAdapter extends AccessibilityService {
                     errorCode[0] = code;
                     done.countDown();
                 }
-            });
+            };
+            if (targetWindowOnly) {
+                takeScreenshotOfWindow(targetWindow.id, getMainExecutor(), callback);
+            } else {
+                takeScreenshot(Display.DEFAULT_DISPLAY, getMainExecutor(), callback);
+            }
             long remaining = deadline - SystemClock.elapsedRealtime();
             if (remaining <= 0 || !done.await(remaining, TimeUnit.MILLISECONDS)) {
                 throw new IllegalStateException("等待游戏截图超时");
@@ -663,6 +707,13 @@ public final class ScriptGameAdapter extends AccessibilityService {
             long retryDelay = 250L;
             if (lastErrorCode == ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT) {
                 internalErrorRetries = 0;
+            } else if (Build.VERSION.SDK_INT >= 34
+                    && lastErrorCode == ERROR_TAKE_SCREENSHOT_INVALID_WINDOW) {
+                // A game activity can replace its window during scene changes.
+                // Re-resolve the active application window on the next attempt.
+                SystemClock.sleep(Math.min(100L,
+                        Math.max(0L, deadline - SystemClock.elapsedRealtime())));
+                continue;
             } else if (lastErrorCode == ERROR_TAKE_SCREENSHOT_INTERNAL_ERROR) {
                 // BlackBox/emulator transitions can briefly make Android's screenshot backend
                 // return INTERNAL_ERROR even though the guest window is still foreground.
@@ -680,6 +731,57 @@ public final class ScriptGameAdapter extends AccessibilityService {
             if (delay > 0) SystemClock.sleep(delay);
         } while (SystemClock.elapsedRealtime() < deadline);
         throw new IllegalStateException("系统截图请求过于频繁，等待重试超时（错误码 " + lastErrorCode + "）");
+    }
+
+    private ScreenshotWindow resolveActiveApplicationWindow() {
+        List<AccessibilityWindowInfo> windows;
+        try {
+            windows = getWindows();
+        } catch (RuntimeException unavailable) {
+            windows = null;
+        }
+        if (windows != null) {
+            try {
+                ScreenshotWindow eventMatch = null;
+                for (AccessibilityWindowInfo window : windows) {
+                    if (window == null || window.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+                    Rect bounds = new Rect();
+                    window.getBoundsInScreen(bounds);
+                    ScreenshotWindow candidate = new ScreenshotWindow(window.getId(), bounds);
+                    if (window.isActive()) return candidate;
+                    if (candidate.id == foregroundEvent.windowId) eventMatch = candidate;
+                }
+                if (eventMatch != null) return eventMatch;
+            } finally {
+                for (AccessibilityWindowInfo window : windows) {
+                    if (window != null) window.recycle();
+                }
+            }
+        }
+        throw new TargetGameNotForegroundException("无法定位当前游戏窗口；未截取整屏或悬浮窗（"
+                + describeForegroundState() + "）");
+    }
+
+    private Bitmap expandWindowFrameToDisplay(Bitmap windowFrame, Rect windowBounds) {
+        if (windowFrame == null || windowFrame.isRecycled()) {
+            throw new IllegalArgumentException("游戏窗口截图不可用");
+        }
+        Display display = getSystemService(android.view.WindowManager.class).getDefaultDisplay();
+        Point displaySize = new Point();
+        display.getRealSize(displaySize);
+        if (windowFrame.getWidth() == displaySize.x && windowFrame.getHeight() == displaySize.y) {
+            return windowFrame;
+        }
+        if (windowBounds == null || windowBounds.isEmpty()
+                || displaySize.x <= 0 || displaySize.y <= 0) {
+            throw new IllegalStateException("无法把游戏窗口截图映射回设备坐标");
+        }
+        Bitmap displayFrame = Bitmap.createBitmap(displaySize.x, displaySize.y, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(displayFrame);
+        canvas.drawColor(android.graphics.Color.BLACK);
+        canvas.drawBitmap(windowFrame, null, windowBounds, null);
+        windowFrame.recycle();
+        return displayFrame;
     }
 
     private static String screenshotErrorDescription(int errorCode) {

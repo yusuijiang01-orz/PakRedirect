@@ -91,8 +91,8 @@ public final class ScriptControlOverlayService extends Service {
                     ScriptExecutionControl.State.PAUSED.name().equals(runtimeState) ? "继续" : "暂停");
             if (runtimeRunning) {
                 // Keep the expanded controller steady during a run. The game
-                // adapter hides it only for each screenshot, so it cannot
-                // contaminate image matching.
+                // adapter captures the game window directly on Android 14+,
+                // so the visible overlay does not contaminate image matching.
                 mainHandler.removeCallbacks(collapseWhenIdle);
             } else if (runtimeFinished && collapsed) {
                 // Bring completion and failure details back into view after
