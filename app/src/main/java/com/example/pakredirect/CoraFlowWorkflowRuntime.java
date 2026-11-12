@@ -287,17 +287,32 @@ public final class CoraFlowWorkflowRuntime {
             if (asset.isEmpty()) throw new IllegalStateException("“" + name + "”没有配置图片素材");
             Bitmap frame = capture();
             try {
-                Match match = findTemplate(frame, asset, region(config.optJSONArray("region")),
-                        (float) config.optDouble("threshold", 0.8));
+                Rect searchRegion = region(config.optJSONArray("region"));
+                float threshold = (float) config.optDouble("threshold", 0.8);
+                float fallbackThreshold = (float) config.optDouble("fallback_threshold", threshold);
+                Match match = findTemplate(frame, asset, searchRegion, threshold);
+                boolean fallbackMatch = false;
+                if (match == null && fallbackThreshold < threshold) {
+                    match = findTemplate(frame, asset, searchRegion, fallbackThreshold);
+                    fallbackMatch = match != null;
+                }
                 if ("is_image_exist".equals(type)) {
-                    note(match == null ? "未命中 → 否。" : "识别命中 " + percent(match.score) + " → 是。");
+                    note(match == null ? "未命中" + (fallbackThreshold < threshold
+                                    ? "（主阈值 " + percent(threshold * 100) + "，备用阈值 "
+                                            + percent(fallbackThreshold * 100) + "）" : "") + " → 否。"
+                            : (fallbackMatch ? "备用阈值命中 " : "识别命中 ")
+                                    + percent(match.score * 100) + " → 是。");
                     return match != null;
                 }
                 if (match != null) {
                     double y = match.y + config.optDouble("offset", 0) * frame.getHeight() / coordinateHeight;
                     tapPixels(match.x, y, frame.getWidth(), frame.getHeight());
-                    note("素材命中 " + percent(match.score) + "；已点击匹配中心。");
-                } else note("当前画面未找到素材，继续下一节点。");
+                    note((fallbackMatch ? "素材备用阈值命中 " : "素材命中 ")
+                            + percent(match.score * 100) + "；已点击匹配中心。");
+                } else note("当前画面未找到素材" + (fallbackThreshold < threshold
+                        ? "（主阈值 " + percent(threshold * 100) + "，备用阈值 "
+                                + percent(fallbackThreshold * 100) + "）" : "")
+                        + "，继续下一节点。");
                 return null;
             } finally { frame.recycle(); }
         }
@@ -820,7 +835,7 @@ public final class CoraFlowWorkflowRuntime {
         try {
             Match shop = findTemplate(shopStart, shopTitlePath, new Rect(610, 45, 840, 118), 0.86f);
             if (shop == null) throw new IllegalStateException("当前画面没有匹配到大夫商店“商号”标题；背包单独页面不能出售。");
-            note("确认处于大夫商店（标题命中 " + percent(shop.score) + "）；开始装备扫描。");
+            note("确认处于大夫商店（标题命中 " + percent(shop.score * 100) + "）；开始装备扫描。");
         } finally { shopStart.recycle(); }
         click(1075, 170);
         control.sleep(250);
@@ -911,7 +926,7 @@ public final class CoraFlowWorkflowRuntime {
                     InventoryMetric beforeSlots = readInventoryMetric(item, new Rect(1682, 927, 1775, 963));
                     if (beforeLoad == null && beforeSlots == null) throw new IllegalStateException("无法可靠读取出售前负重和空格；没有点击出售。");
                     note("第 " + slot + "/35 格确认是" + (isWhite ? "白" : "蓝") + "色装备，Bán 命中 "
-                            + percent(sellButton.score) + "；出售前负重 " + metricText(beforeLoad) + "，空格 " + metricText(beforeSlots) + "。");
+                            + percent(sellButton.score * 100) + "；出售前负重 " + metricText(beforeLoad) + "，空格 " + metricText(beforeSlots) + "。");
                     tapPixels(sellButton.x, sellButton.y, item.getWidth(), item.getHeight());
                     control.sleep(350);
                     Bitmap confirm = capture();

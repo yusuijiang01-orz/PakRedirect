@@ -602,6 +602,22 @@ public final class ScriptGameAdapter extends AccessibilityService {
         if (Build.VERSION.SDK_INT < 30) {
             throw new UnsupportedOperationException("系统版本过低：截图需要 Android 11 或更新版本");
         }
+        if (!ScriptControlOverlayService.setScreenshotCaptureSuppressed(true, 1_000L)) {
+            throw new IllegalStateException("无法暂时从游戏截图中隐藏 RYLUX 悬浮窗");
+        }
+        try {
+            // Wait for WindowManager to commit the hidden overlay before the
+            // display compositor produces a screenshot.
+            SystemClock.sleep(90L);
+            return captureDisplayWithoutOverlay(timeoutMs);
+        } finally {
+            if (!ScriptControlOverlayService.setScreenshotCaptureSuppressed(false, 1_000L)) {
+                Log.w(TAG, "could not restore RYLUX overlay after screenshot capture");
+            }
+        }
+    }
+
+    private Bitmap captureDisplayWithoutOverlay(long timeoutMs) throws Exception {
         long deadline = SystemClock.elapsedRealtime() + Math.max(1L, timeoutMs);
         int lastErrorCode = 0;
         int internalErrorRetries = 0;

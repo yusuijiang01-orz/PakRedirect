@@ -42,11 +42,11 @@ public final class ScriptControlOverlayService extends Service {
     private static final int BORDER = Color.rgb(47, 53, 64);
     private static final int TEXT = Color.rgb(245, 247, 250);
     private static final int MUTED = Color.rgb(154, 163, 176);
-    private static final long IDLE_COLLAPSE_MS = 5_000L;
-    private static final float COLLAPSED_ALPHA = 0.5f;
-    private static final int PANEL_WIDTH_DP = 320;
-    private static final int HANDLE_WIDTH_DP = 64;
-    private static final int HANDLE_HEIGHT_DP = 72;
+    private static final long IDLE_COLLAPSE_MS = 15_000L;
+    private static final float COLLAPSED_ALPHA = 0.78f;
+    private static final int PANEL_WIDTH_DP = 240;
+    private static final int HANDLE_WIDTH_DP = 48;
+    private static final int HANDLE_HEIGHT_DP = 52;
     private static volatile ScriptControlOverlayService activeInstance;
 
     private WindowManager windowManager;
@@ -63,6 +63,9 @@ public final class ScriptControlOverlayService extends Service {
     private boolean snappedRight;
     private boolean restartRequested;
     private boolean memoryProbeActive;
+    private int screenshotSuppressionDepth;
+    private int flagsBeforeScreenshotSuppression;
+    private boolean visibleBeforeScreenshotSuppression;
     private final Runnable collapseWhenIdle = this::collapseToNearestEdge;
     private String runtimeState = ScriptExecutionControl.State.IDLE.name();
     private final BroadcastReceiver runtimeStatus = new BroadcastReceiver() {
@@ -87,12 +90,10 @@ public final class ScriptControlOverlayService extends Service {
             if (pauseActionLabel != null) pauseActionLabel.setText(
                     ScriptExecutionControl.State.PAUSED.name().equals(runtimeState) ? "继续" : "暂停");
             if (runtimeRunning) {
-                // Display screenshots include application overlays. Keep the
-                // controller out of the game's recognition and click regions
-                // for the entire run, rather than waiting for an idle gap that
-                // may never occur during a fast workflow loop.
+                // Keep the expanded controller steady during a run. The game
+                // adapter hides it only for each screenshot, so it cannot
+                // contaminate image matching.
                 mainHandler.removeCallbacks(collapseWhenIdle);
-                collapseToNearestEdge();
             } else if (runtimeFinished && collapsed) {
                 // Bring completion and failure details back into view after
                 // the controller was tucked away for unobstructed execution.
@@ -127,7 +128,7 @@ public final class ScriptControlOverlayService extends Service {
                         | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT);
         params.gravity = Gravity.TOP | Gravity.START;
-        params.x = dp(18);
+        params.x = dp(12);
         params.y = dp(180);
         try {
             windowManager.addView(overlay, params);
@@ -146,7 +147,7 @@ public final class ScriptControlOverlayService extends Service {
         overlayRoot = new FrameLayout(this);
         panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(10), dp(8), dp(10), dp(8));
+        panel.setPadding(dp(8), dp(6), dp(8), dp(6));
         panel.setBackground(round(CARD, 18, BORDER));
         panel.setContentDescription("RYLUX 脚本控制面板");
         overlayRoot.addView(panel, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP | Gravity.START));
@@ -154,10 +155,10 @@ public final class ScriptControlOverlayService extends Service {
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
         TextView mark = text("RYLUX", 12, TEXT, true);
-        header.addView(mark, new LinearLayout.LayoutParams(dp(50), dp(20)));
+        header.addView(mark, new LinearLayout.LayoutParams(dp(44), dp(18)));
         mark.setContentDescription("拖动 RYLUX 悬浮控制面板");
         mark.setOnTouchListener(new OverlayDragTouchListener());
-        statusLabel = text("● 已就绪 · 点击启动后运行", 10, MUTED, false);
+        statusLabel = text("● 已就绪 · 点击启动", 9, MUTED, false);
         statusLabel.setMaxLines(1);
         statusLabel.setEllipsize(TextUtils.TruncateAt.END);
         statusLabel.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -183,13 +184,21 @@ public final class ScriptControlOverlayService extends Service {
                 Toast.makeText(this, detail, Toast.LENGTH_LONG).show();
             }
         });
-        header.addView(statusLabel, new LinearLayout.LayoutParams(0, dp(20), 1));
+        header.addView(statusLabel, new LinearLayout.LayoutParams(0, dp(18), 1));
+        TextView collapseLabel = text("−", 16, MUTED, true);
+        collapseLabel.setGravity(Gravity.CENTER);
+        collapseLabel.setContentDescription("手动收起悬浮窗");
+        collapseLabel.setOnClickListener(v -> {
+            mainHandler.removeCallbacks(collapseWhenIdle);
+            collapseToNearestEdge();
+        });
+        header.addView(collapseLabel, new LinearLayout.LayoutParams(dp(22), dp(22)));
         panel.addView(header);
 
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
         actions.setGravity(Gravity.CENTER_VERTICAL);
-        actions.setPadding(0, dp(3), 0, 0);
+        actions.setPadding(0, dp(2), 0, 0);
         actions.addView(actionCell("▶", "启动", BLUE, v -> {
             noteInteraction();
             if (memoryProbeActive) Toast.makeText(this, "只读内存探测正在运行", Toast.LENGTH_SHORT).show();
@@ -233,20 +242,20 @@ public final class ScriptControlOverlayService extends Service {
         LinearLayout probeCopy = new LinearLayout(this);
         probeCopy.setOrientation(LinearLayout.VERTICAL);
         probeCopy.setGravity(Gravity.CENTER_VERTICAL);
-        TextView probeTitle = text("只读探测背包内存", 11, TEXT, true);
-        TextView probeSubtitle = text("读取空格和负重，不执行游戏操作", 9, MUTED, false);
-        probeCopy.addView(probeTitle, new LinearLayout.LayoutParams(-1, dp(18)));
-        probeCopy.addView(probeSubtitle, new LinearLayout.LayoutParams(-1, dp(16)));
+        TextView probeTitle = text("只读探测背包内存", 10, TEXT, true);
+        TextView probeSubtitle = text("读取空格和负重，不执行游戏操作", 8, MUTED, false);
+        probeCopy.addView(probeTitle, new LinearLayout.LayoutParams(-1, dp(16)));
+        probeCopy.addView(probeSubtitle, new LinearLayout.LayoutParams(-1, dp(14)));
         LinearLayout.LayoutParams probeCopyParams = new LinearLayout.LayoutParams(0, -2, 1);
         probeCopyParams.leftMargin = dp(5);
         probeAction.addView(probeCopy, probeCopyParams);
         TextView probeButtonLabel = text("读取", 11, TEXT, true);
         probeButtonLabel.setGravity(Gravity.CENTER);
         probeButtonLabel.setBackground(round(BLUE, 8, BLUE));
-        probeAction.addView(probeButtonLabel, new LinearLayout.LayoutParams(dp(48), dp(30)));
+        probeAction.addView(probeButtonLabel, new LinearLayout.LayoutParams(dp(42), dp(28)));
         probeAction.setOnClickListener(v -> startBagMemoryProbe());
-        LinearLayout.LayoutParams probeActionParams = new LinearLayout.LayoutParams(-1, dp(42));
-        probeActionParams.topMargin = dp(4);
+        LinearLayout.LayoutParams probeActionParams = new LinearLayout.LayoutParams(-1, dp(36));
+        probeActionParams.topMargin = dp(3);
         panel.addView(probeAction, probeActionParams);
 
         LinearLayout handle = new LinearLayout(this);
@@ -271,7 +280,9 @@ public final class ScriptControlOverlayService extends Service {
 
     private void scheduleIdleCollapse() {
         mainHandler.removeCallbacks(collapseWhenIdle);
-        if (!collapsed && overlay != null) mainHandler.postDelayed(collapseWhenIdle, IDLE_COLLAPSE_MS);
+        if (!collapsed && overlay != null && !isRuntimeActive() && !memoryProbeActive) {
+            mainHandler.postDelayed(collapseWhenIdle, IDLE_COLLAPSE_MS);
+        }
     }
 
     private void noteInteraction() { scheduleIdleCollapse(); }
@@ -306,6 +317,56 @@ public final class ScriptControlOverlayService extends Service {
         params.alpha = 1f;
         updateOverlayLayout();
         scheduleIdleCollapse();
+    }
+
+    /** Hide the RYLUX window briefly so display screenshots contain only the game. */
+    static boolean setScreenshotCaptureSuppressed(boolean suppressed, long timeoutMs) {
+        ScriptControlOverlayService service = activeInstance;
+        if (service == null || service.overlay == null || service.params == null) return true;
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            return service.applyScreenshotCaptureSuppression(suppressed);
+        }
+        CountDownLatch updated = new CountDownLatch(1);
+        boolean[] success = new boolean[1];
+        service.mainHandler.post(() -> {
+            try { success[0] = service.applyScreenshotCaptureSuppression(suppressed); }
+            finally { updated.countDown(); }
+        });
+        try {
+            return updated.await(Math.max(1L, timeoutMs), TimeUnit.MILLISECONDS) && success[0];
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
+    private boolean applyScreenshotCaptureSuppression(boolean suppressed) {
+        if (overlay == null || params == null || windowManager == null) return true;
+        if (suppressed) {
+            if (screenshotSuppressionDepth++ > 0) return true;
+            visibleBeforeScreenshotSuppression = overlay.getVisibility() == View.VISIBLE;
+            flagsBeforeScreenshotSuppression = params.flags;
+            params.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+            try {
+                windowManager.updateViewLayout(overlay, params);
+                overlay.setVisibility(View.INVISIBLE);
+                return true;
+            } catch (RuntimeException failure) {
+                screenshotSuppressionDepth = 0;
+                params.flags = flagsBeforeScreenshotSuppression;
+                return false;
+            }
+        }
+        if (screenshotSuppressionDepth == 0) return true;
+        if (--screenshotSuppressionDepth > 0) return true;
+        overlay.setVisibility(visibleBeforeScreenshotSuppression ? View.VISIBLE : View.INVISIBLE);
+        params.flags = flagsBeforeScreenshotSuppression;
+        try {
+            windowManager.updateViewLayout(overlay, params);
+            return true;
+        } catch (RuntimeException failure) {
+            return false;
+        }
     }
 
     private void updateOverlayLayout() {
@@ -448,7 +509,7 @@ public final class ScriptControlOverlayService extends Service {
     }
 
     private LinearLayout.LayoutParams actionCellParams(boolean first) {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(54), 1);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(48), 1);
         if (!first) lp.leftMargin = dp(3);
         return lp;
     }
@@ -459,12 +520,12 @@ public final class ScriptControlOverlayService extends Service {
         cell.setGravity(Gravity.CENTER);
         cell.setBackground(round(color, 11, color == BLUE ? BLUE : BORDER));
         cell.setContentDescription(title);
-        TextView icon = text(glyph, 19, TEXT, true);
+        TextView icon = text(glyph, 16, TEXT, true);
         icon.setGravity(Gravity.CENTER);
-        cell.addView(icon, new LinearLayout.LayoutParams(-1, dp(27)));
-        TextView label = text(title, 10, TEXT, true);
+        cell.addView(icon, new LinearLayout.LayoutParams(-1, dp(24)));
+        TextView label = text(title, 9, TEXT, true);
         label.setGravity(Gravity.CENTER);
-        cell.addView(label, new LinearLayout.LayoutParams(-1, dp(18)));
+        cell.addView(label, new LinearLayout.LayoutParams(-1, dp(16)));
         if ("启动".equals(title)) runActionLabel = label;
         if ("暂停".equals(title)) pauseActionLabel = label;
         cell.setOnClickListener(listener);
