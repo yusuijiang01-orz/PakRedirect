@@ -91,6 +91,41 @@ public final class ScriptToolsActivity extends Activity {
     private TextView environment;
     private TextView accessibilityState;
     private TextView targetSummary;
+    private TextView runtimeLogText;
+    private ScrollView runtimeLogScroll;
+    private boolean logScreenActive;
+    private final Handler logHandler = new Handler(Looper.getMainLooper());
+    private final Runnable refreshRuntimeLog = new Runnable() {
+        @Override public void run() {
+            if (!logScreenActive || runtimeLogText == null) return;
+            new Thread(() -> {
+                String result = readRecentRuntimeLog();
+                logHandler.post(() -> {
+                    if (!logScreenActive || runtimeLogText == null) return;
+                    if (!result.contentEquals(runtimeLogText.getText())) {
+                        runtimeLogText.setText(result);
+                        runtimeLogScroll.post(() -> runtimeLogScroll.fullScroll(View.FOCUS_DOWN));
+                    }
+                    logHandler.postDelayed(this, 2000L);
+                });
+            }, "rylux-workbench-log-reader").start();
+        }
+    };
+
+    private String readRecentRuntimeLog() {
+        java.io.File file = new java.io.File(new java.io.File(getFilesDir(), "logs"), ScriptRuntimeLog.FILE_NAME);
+        if (!file.isFile()) return "暂无运行日志";
+        java.util.ArrayDeque<String> lines = new java.util.ArrayDeque<>();
+        try (java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(
+                new java.io.FileInputStream(file), java.nio.charset.StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (lines.size() == 100) lines.removeFirst();
+                lines.addLast(line);
+            }
+        } catch (IOException error) { return "读取日志失败：" + error.getMessage(); }
+        return lines.isEmpty() ? "暂无运行日志" : android.text.TextUtils.join("\n", lines);
+    }
     private boolean workbenchReady;
     private boolean entitlementCheckPending;
     private Intent entitlementPendingIntent;
@@ -145,6 +180,9 @@ public final class ScriptToolsActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        logScreenActive = true;
+        logHandler.removeCallbacks(refreshRuntimeLog);
+        logHandler.post(refreshRuntimeLog);
         if (workbenchReady && !MembershipAccess.hasCachedAccess(this)) {
             closeWorkbenchForExpiredMembership();
             return;
@@ -156,11 +194,15 @@ public final class ScriptToolsActivity extends Activity {
     }
 
     @Override protected void onPause() {
+        logScreenActive = false;
+        logHandler.removeCallbacks(refreshRuntimeLog);
         entitlementHandler.removeCallbacks(entitlementWatchdog);
         super.onPause();
     }
 
     @Override protected void onDestroy() {
+        logScreenActive = false;
+        logHandler.removeCallbacksAndMessages(null);
         entitlementHandler.removeCallbacks(entitlementWatchdog);
         super.onDestroy();
     }
@@ -426,6 +468,31 @@ public final class ScriptToolsActivity extends Activity {
         addNumber(trade, "购买物品数量阈值", "物品数量低于阈值才购买", "10", "个", 0, 99999);
         addNumber(trade, "每次购买数量", "每次购买数量", "10", "个", 1, 99999);
 
+        LinearLayout logPanel = new LinearLayout(this);
+        logPanel.setOrientation(LinearLayout.VERTICAL);
+        logPanel.setPadding(dp(12), dp(4), dp(12), dp(4));
+        logPanel.setBackgroundColor(CARD);
+        LinearLayout logHeader = new LinearLayout(this);
+        logHeader.setGravity(Gravity.CENTER_VERTICAL);
+        logHeader.addView(label("运行日志（最近 100 行）", 13, TEXT, true), new LinearLayout.LayoutParams(0, dp(36), 1));
+        Button copyLog = button("复制", SOFT);
+        copyLog.setOnClickListener(v -> {
+            android.content.ClipboardManager clipboard = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            if (clipboard != null && runtimeLogText != null) {
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("RYLUX 运行日志", runtimeLogText.getText()));
+                Toast.makeText(this, "日志已复制", Toast.LENGTH_SHORT).show();
+            }
+        });
+        logHeader.addView(copyLog, new LinearLayout.LayoutParams(dp(68), dp(36)));
+        logPanel.addView(logHeader);
+        runtimeLogScroll = new ScrollView(this);
+        runtimeLogText = label("正在读取日志…", 11, TEXT, false);
+        runtimeLogText.setTextIsSelectable(true);
+        runtimeLogScroll.addView(runtimeLogText, new ScrollView.LayoutParams(-1, -2));
+        logPanel.addView(runtimeLogScroll, new LinearLayout.LayoutParams(-1, dp(100)));
+        screen.addView(logPanel, new LinearLayout.LayoutParams(-1, dp(148)));
+        logHandler.removeCallbacks(refreshRuntimeLog);
+        if (logScreenActive) logHandler.post(refreshRuntimeLog);
         host.addView(screen, new FrameLayout.LayoutParams(-1, -1));
         setContentView(host);
         selectTab(Math.max(0, Math.min(tabPages.size() - 1, selectedTab)));
