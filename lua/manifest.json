@@ -1,7 +1,1 @@
-{
-  "schema": 1,
-  "version": "2026.11.08.1",
-  "bundle": "bundle.zip",
-  "size": 846748,
-  "sha256": "31fcb2b99ce2a948079ea779d912ae2ce32e39905028b0307b2f168b0f29643b"
-}
+{"schema":1,"version":"coraflow-3.31-rylux-1","bundle":"bundle.zip","size":39018,"sha256":"a1339ce7a96e347900a36f222e1f74781f7d647c4585d57c1e6f7e1deba52b18"}
