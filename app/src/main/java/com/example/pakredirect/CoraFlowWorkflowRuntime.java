@@ -578,9 +578,13 @@ public final class CoraFlowWorkflowRuntime {
             Rect cell = new Rect(grid.left + column * cellWidth + 3, grid.top + row * cellHeight + 3,
                     column == 4 ? grid.right : grid.left + (column + 1) * cellWidth - 3,
                     row == 6 ? grid.bottom : grid.top + (row + 1) * cellHeight - 3);
-            Match match = findTemplate(frame, icon, cell, threshold);
+            // Match the desktop CoraFlow inventory matcher: the saved potion
+            // crops contain the dark slot background, so only sample colored
+            // bottle pixels. Otherwise an empty dark slot can look like a
+            // low-confidence potion candidate and stop the workflow.
+            Match match = findTemplate(frame, icon, cell, threshold, true);
             if (match == null) {
-                if (findTemplate(frame, icon, cell, Math.max(0.7f, threshold - 0.03f)) != null) {
+                if (findTemplate(frame, icon, cell, Math.max(0.7f, threshold - 0.03f), true) != null) {
                     throw new IllegalStateException("第 " + slot + "/35 格发现药瓶图标候选，但未达到严格阈值；不按 0 处理。");
                 }
                 continue;
@@ -637,6 +641,11 @@ public final class CoraFlowWorkflowRuntime {
     }
 
     private Match findTemplate(Bitmap frame, Bitmap original, Rect region, float threshold) {
+        return findTemplate(frame, original, region, threshold, false);
+    }
+
+    private Match findTemplate(Bitmap frame, Bitmap original, Rect region, float threshold,
+                               boolean coloredInventoryPixelsOnly) {
         if (original == null || original.isRecycled()) return null;
         Rect bounds = pixelRegion(region, frame.getWidth(), frame.getHeight());
         int targetWidth = Math.max(1, Math.round(original.getWidth() * frame.getWidth() / (float) coordinateWidth));
@@ -655,7 +664,9 @@ public final class CoraFlowWorkflowRuntime {
         int positionStep = Math.max(1, Math.min(targetWidth, targetHeight) / 28);
         int sampleCount = 0;
         for (int y = 0; y < targetHeight; y += sampleStep) for (int x = 0; x < targetWidth; x += sampleStep) {
-            if ((target[y * targetWidth + x] >>> 24) >= 32) sampleCount++;
+            int pixel = target[y * targetWidth + x];
+            if ((pixel >>> 24) >= 32
+                    && (!coloredInventoryPixelsOnly || isColoredInventoryPixel(pixel))) sampleCount++;
         }
         if (sampleCount == 0) return null;
         threshold = Math.max(0, Math.min(1, threshold));
@@ -674,7 +685,8 @@ public final class CoraFlowWorkflowRuntime {
                 for (int ty = 0; ty < targetHeight; ty += sampleStep) {
                     for (int tx = 0; tx < targetWidth; tx += sampleStep) {
                         int expected = target[ty * targetWidth + tx];
-                        if ((expected >>> 24) < 32) continue;
+                        if ((expected >>> 24) < 32
+                                || (coloredInventoryPixelsOnly && !isColoredInventoryPixel(expected))) continue;
                         int actual = screen[(y + ty) * frame.getWidth() + x + tx];
                         error += (Math.abs(Color.red(expected) - Color.red(actual))
                                 + Math.abs(Color.green(expected) - Color.green(actual))
@@ -698,7 +710,8 @@ public final class CoraFlowWorkflowRuntime {
         int verifiedX = -1, verifiedY = -1;
         double verifiedScore = threshold;
         for (int y = y1; y <= y2; y++) for (int x = x1; x <= x2; x++) {
-            double score = scoreAt(screen, frame.getWidth(), target, targetWidth, targetHeight, x, y, 1);
+            double score = scoreAt(screen, frame.getWidth(), target, targetWidth, targetHeight,
+                    x, y, 1, coloredInventoryPixelsOnly);
             if (score >= verifiedScore) { verifiedScore = score; verifiedX = x; verifiedY = y; }
         }
         return verifiedX < 0 ? null : new Match(verifiedX + targetWidth / 2f,
@@ -706,12 +719,14 @@ public final class CoraFlowWorkflowRuntime {
     }
 
     private static double scoreAt(int[] screen, int screenWidth, int[] target, int targetWidth,
-                                  int targetHeight, int x, int y, int step) {
+                                  int targetHeight, int x, int y, int step,
+                                  boolean coloredInventoryPixelsOnly) {
         int seen = 0;
         double error = 0;
         for (int ty = 0; ty < targetHeight; ty += step) for (int tx = 0; tx < targetWidth; tx += step) {
             int expected = target[ty * targetWidth + tx];
-            if ((expected >>> 24) < 32) continue;
+            if ((expected >>> 24) < 32
+                    || (coloredInventoryPixelsOnly && !isColoredInventoryPixel(expected))) continue;
             int actual = screen[(y + ty) * screenWidth + x + tx];
             error += (Math.abs(Color.red(expected) - Color.red(actual))
                     + Math.abs(Color.green(expected) - Color.green(actual))
@@ -719,6 +734,16 @@ public final class CoraFlowWorkflowRuntime {
             seen++;
         }
         return seen == 0 ? 0 : 1d - error / seen / 255d;
+    }
+
+    private static boolean isColoredInventoryPixel(int color) {
+        int red = Color.red(color), green = Color.green(color), blue = Color.blue(color);
+        int brightest = Math.max(red, Math.max(green, blue));
+        int darkest = Math.min(red, Math.min(green, blue));
+        // Keep the same colored-pixel filter used by CoraFlow's desktop
+        // inventory matcher. It removes dark slot/background pixels while
+        // retaining the red/blue bottle and its highlights.
+        return brightest >= 60 && brightest - darkest >= 24;
     }
 
     private Match findColor(Bitmap frame, String value, Rect region, int tolerance) {
