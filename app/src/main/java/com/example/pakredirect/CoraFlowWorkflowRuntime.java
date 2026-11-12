@@ -651,7 +651,10 @@ public final class CoraFlowWorkflowRuntime {
         }
         if (sampleCount == 0) return null;
         threshold = Math.max(0, Math.min(1, threshold));
-        double maxError = (1d - threshold) * 255d;
+        // A coarse-grid position can be a few pixels away from the real match.
+        // Use it only to find a candidate; the full-resolution pass decides.
+        double coarseThreshold = Math.max(0d, threshold - 0.08d);
+        double maxError = (1d - coarseThreshold) * 255d * sampleCount;
         int bestX = -1, bestY = -1;
         double bestScore = -1;
         for (int y = bounds.top; y <= bounds.bottom - targetHeight; y += positionStep) {
@@ -669,7 +672,9 @@ public final class CoraFlowWorkflowRuntime {
                                 + Math.abs(Color.green(expected) - Color.green(actual))
                                 + Math.abs(Color.blue(expected) - Color.blue(actual))) / 3d;
                         seen++;
-                        if (error / Math.max(1, seen) > maxError) { over = true; break; }
+                        // Remaining samples can reduce the average error. Reject
+                        // only when even perfect remaining pixels cannot pass.
+                        if (error > maxError) { over = true; break; }
                     }
                     if (over) break;
                 }
@@ -678,15 +683,18 @@ public final class CoraFlowWorkflowRuntime {
                 if (score > bestScore) { bestScore = score; bestX = x; bestY = y; }
             }
         }
-        if (bestX < 0 || bestScore < threshold) return null;
+        if (bestX < 0 || bestScore < coarseThreshold) return null;
         int fine = Math.max(1, positionStep);
         int x1 = Math.max(bounds.left, bestX - fine + 1), x2 = Math.min(bounds.right - targetWidth, bestX + fine - 1);
         int y1 = Math.max(bounds.top, bestY - fine + 1), y2 = Math.min(bounds.bottom - targetHeight, bestY + fine - 1);
+        int verifiedX = -1, verifiedY = -1;
+        double verifiedScore = threshold;
         for (int y = y1; y <= y2; y++) for (int x = x1; x <= x2; x++) {
             double score = scoreAt(screen, frame.getWidth(), target, targetWidth, targetHeight, x, y, 1);
-            if (score >= threshold) return new Match(x + targetWidth / 2f, y + targetHeight / 2f, (float) score);
+            if (score >= verifiedScore) { verifiedScore = score; verifiedX = x; verifiedY = y; }
         }
-        return new Match(bestX + targetWidth / 2f, bestY + targetHeight / 2f, (float) bestScore);
+        return verifiedX < 0 ? null : new Match(verifiedX + targetWidth / 2f,
+                verifiedY + targetHeight / 2f, (float) verifiedScore);
     }
 
     private static double scoreAt(int[] screen, int screenWidth, int[] target, int targetWidth,
