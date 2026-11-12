@@ -82,6 +82,17 @@ public final class CnDownloadRouter {
         return unique(GH_PROXY + raw, raw);
     }
 
+    /** Mirror-first routes for the signed, encrypted CoraFlow workflow package. */
+    public static String[] workflowRepoFileUrls(String fileName) {
+        String safeName = normalizeRepoPath(fileName);
+        if (!"manifest.json".equals(safeName) && !"workflow.rpe".equals(safeName)) {
+            throw new IllegalArgumentException("Invalid CoraFlow workflow package name");
+        }
+        String path = "workflow/" + safeName;
+        String raw = "https://raw.githubusercontent.com/" + OWNER_REPO + "/main/" + path;
+        return unique(GITEE_RAW_BASE + path, CF_WORKER + raw, GH_PROXY + raw, raw);
+    }
+
     /** Build mirrors from the directory selected by the authorized manifest. */
     public static String[] publicRepoFileUrls(String baseUrl, String fileName) {
         String base = baseUrl == null ? "" : baseUrl.trim();

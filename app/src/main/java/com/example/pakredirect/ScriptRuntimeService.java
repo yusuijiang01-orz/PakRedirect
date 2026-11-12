@@ -211,40 +211,14 @@ public final class ScriptRuntimeService extends Service {
             stopSelf(latestStartId);
             return;
         }
-        String[] blockers = LegacyLuaRuntime.compatibilityBlockers(this);
-        if (blockers.length > 0) {
-            publish("启动被兼容检查拦截：" + String.join("；", blockers));
-            stopSelf(latestStartId);
-            return;
-        }
-        try {
-            routeBridge.start();
-        } catch (java.io.IOException failure) {
-            publish("启动失败：Lua 路线桥接无法监听：" + failure.getMessage());
-            stopSelf(latestStartId);
-            return;
-        }
-        if (ScriptToolsActivity.TARGET_MODE_SANDBOX.equals(config.optString("目标运行环境",
-                ScriptToolsActivity.TARGET_MODE_SANDBOX))) {
-            try {
-                bagSnapshotRelay.start();
-                publish("沙箱背包内存读取桥已就绪，等待游戏快照");
-            } catch (java.io.IOException failure) {
-                Log.e("RYLUX-Lua", "沙箱背包内存桥启动失败；不会继续无背包监控的挂机", failure);
-                routeBridge.close();
-                publish("启动失败：沙箱背包数据桥无法启动，为避免满包后继续攻击，脚本未启动");
-                stopSelf(latestStartId);
-                return;
-            }
-        } else {
-            bagSnapshotRelay.close();
-        }
+        routeBridge.close();
+        bagSnapshotRelay.close();
         control = new ScriptExecutionControl();
         control.start();
         final ScriptExecutionControl runControl = control;
         workerRunning = true;
         state = ScriptExecutionControl.State.RUNNING.name();
-        lastMessage = "Lua 宿主已启动";
+        lastMessage = "RYLUX CoraFlow JSON 执行器已启动";
         startForeground(NOTIFICATION_ID, notification(lastMessage));
         publish(lastMessage);
         executor.execute(() -> {
@@ -525,11 +499,10 @@ public final class ScriptRuntimeService extends Service {
             awaitTargetGameForeground();
             gameObserved.set(true);
             verifyStartupDisplayCapture();
-            waitForFirstUseTermsIfNeeded();
-            LegacyLuaRuntime runtime = new LegacyLuaRuntime(this, runControl, config,
-                    this::publish, this::saveFailure, routeBridge, runtimeLog, bagSnapshotRelay);
+            CoraFlowWorkflowRuntime.WorkflowPackage workflow =
+                    CoraFlowWorkflowUpdateManager.load(this, config, this::publish);
             try {
-                runtime.run();
+                new CoraFlowWorkflowRuntime(workflow, runControl, this::publish).run();
                 Throwable workerFailure = runControl.getFailure();
                 if (workerFailure != null) throw workerFailure;
             } catch (Throwable scriptFailure) {
@@ -539,7 +512,9 @@ public final class ScriptRuntimeService extends Service {
                 }
                 if (scriptFailure instanceof Exception) throw (Exception) scriptFailure;
                 if (scriptFailure instanceof Error) throw (Error) scriptFailure;
-                throw new IllegalStateException("Lua 脚本异常退出", scriptFailure);
+                throw new IllegalStateException("CoraFlow JSON 工作流异常退出", scriptFailure);
+            } finally {
+                workflow.close();
             }
             return gameObserved.get();
         } finally {

@@ -340,10 +340,20 @@ public final class ScriptToolsActivity extends Activity {
         Button previewOverlay = button("预览 RYLUX 脚本悬浮窗", SOFT);
         previewOverlay.setOnClickListener(v -> showOverlayPreview());
         addButton(run, previewOverlay);
-        run.addView(label("运行宿主使用 LuaJ、系统截图与触控；旧脚本的不兼容接口会在运行前检查。", 12, MUTED, false));
+        run.addView(label("运行宿主直接执行已签名的 CoraFlow JSON 工作流；截图、OCR 与触控由 Android 端完成。", 12, MUTED, false));
         Button start = button("配置方案并启动", BLUE);
         start.setOnClickListener(v -> confirmAndStart());
         addButton(run, start);
+
+        LinearLayout workflow = section("CoraFlow JSON 参数", "这些设置会绑定到工作流中的对应判断节点。任一清包阈值满足时前往大夫；出售白/蓝装备，保留带回血或回内词条的蓝装；红蓝药低于 2 才补，目标不超过 20，每次最多买 5。远端加密工作流仍需通过授权校验后才能运行。");
+        addNumber(workflow, "coraflow.inventory.freeSlotsAtOrBelow", "剩余格子达到或低于此数时清包", "4", "格", 0, 35);
+        addNumber(workflow, "coraflow.inventory.remainingWeightAtOrBelow", "剩余负重达到或低于此数时清包", "28", "重量", 0, 200);
+        addSwitch(workflow, "coraflow.equipment.sellWhite", "出售白色装备", true);
+        addSwitch(workflow, "coraflow.equipment.sellBlue", "出售蓝色装备", true);
+        addSwitch(workflow, "coraflow.equipment.keepBlueRecovery", "保留带回血/回内词条的蓝装", true);
+        addNumber(workflow, "coraflow.medicine.refillBelow", "红蓝药低于此数量时补充", "2", "个", 0, 20);
+        addNumber(workflow, "coraflow.medicine.maxTotal", "红蓝药目标数量上限", "20", "个", 2, 20);
+        addNumber(workflow, "coraflow.medicine.batchMax", "单次最多购买数量", "5", "个", 1, 5);
 
         root = (LinearLayout) tabPages.get(1).getChildAt(0);
         LinearLayout route = section("挂机与路线", "面向汉化版输入中文地图名，也支持搜索越南语旧名。");
@@ -728,8 +738,8 @@ public final class ScriptToolsActivity extends Activity {
 
     private String environmentText() {
         return "游戏环境：" + gameStatus()
-                + "\nLua 运行宿主：LuaJ 已接入，旧 API 兼容检查中\n截图/OCR/触控：" + accessibilityStatus()
-                + "\nOCR 使用本地 ML Kit 替代，尚未达到旧 TURING 字库的识别一致性";
+                + "\n运行引擎：RYLUX 原生 CoraFlow JSON 节点执行器\n截图/OCR/触控：" + accessibilityStatus()
+                + "\nOCR 使用设备端 ML Kit";
     }
 
     private String accessibilityStatus() {
@@ -844,9 +854,9 @@ public final class ScriptToolsActivity extends Activity {
                 + "\n脚本与模板资源：" + (assetsComplete()
                         ? REQUIRED_ASSETS.length + "/" + REQUIRED_ASSETS.length + " 已打包" : "资源不完整")
                 + "\n配置检查：" + configurationIssues()
-                + "\nLua 运行宿主：LuaJ 已接入\n游戏输入适配器：" + accessibilityStatus()
-                + "\n兼容说明：OCR 使用 ML Kit 替代旧字库；系统命令仅开放 /proc/uptime；文本输入依赖游戏提供可访问输入框"
-                + "\n脚本兼容阻塞项：" + scriptCompatibilityBlockers()
+                + "\n运行引擎：RYLUX 原生 CoraFlow JSON\n游戏输入适配器：" + accessibilityStatus()
+                + "\n工作流：运行时验证加密清单与包摘要，解密后在内存中载入 JSON 和素材"
+                + "\nCoraFlow 执行阻塞项：" + scriptCompatibilityBlockers()
                 + "\n悬浮窗权限：" + (Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(this) ? "已就绪" : "未开启")
                 + (canStart
                         ? "\n\n检查已通过。点击下方按钮继续到启动确认。"
@@ -1067,7 +1077,8 @@ public final class ScriptToolsActivity extends Activity {
     }
 
     private String scriptCompatibilityBlockers() {
-        return String.join("；", LegacyLuaRuntime.compatibilityBlockers(this));
+        // The selected runtime executes the signed CoraFlow JSON graph directly.
+        return "";
     }
 
     private String onOff(String key) {

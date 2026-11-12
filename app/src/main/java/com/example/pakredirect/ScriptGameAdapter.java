@@ -436,6 +436,54 @@ public final class ScriptGameAdapter extends AccessibilityService {
         }
     }
 
+    /** Sends a small set of safe key actions through the focused game editor. */
+    public boolean inputKey(String requestedKey) {
+        requireTargetGameForeground();
+        String key = requestedKey == null ? "" : requestedKey.trim();
+        String normalized = key.toLowerCase(java.util.Locale.ROOT);
+        if ("escape".equals(normalized) || "esc".equals(normalized) || "back".equals(normalized)) {
+            return performGlobalAction(GLOBAL_ACTION_BACK);
+        }
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null) return false;
+        AccessibilityNodeInfo focused = null;
+        try {
+            focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT);
+            if (focused == null) focused = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY);
+            if (focused == null || !focused.isEditable()) return false;
+            CharSequence nodePackage = focused.getPackageName();
+            ForegroundEvent event = foregroundEvent;
+            if (nodePackage == null || focused.getWindowId() != event.windowId) return false;
+            boolean directGameNode = TARGET_GAME_PACKAGE.contentEquals(nodePackage);
+            boolean sandboxProxyNode = getPackageName().contentEquals(event.packageName)
+                    && ScriptForegroundTarget.isProxyActivity(event.className)
+                    && getPackageName().contentEquals(nodePackage);
+            if (!directGameNode && !sandboxProxyNode) return false;
+            if ("enter".equals(normalized) || "return".equals(normalized)) {
+                if (Build.VERSION.SDK_INT < 30) return false;
+                return focused.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.getId());
+            }
+            CharSequence current = focused.getText();
+            String value = current == null ? "" : current.toString();
+            if ("backspace".equals(normalized) || "delete".equals(normalized)) {
+                if (value.isEmpty()) return true;
+                int end = value.offsetByCodePoints(value.length(), -1);
+                value = value.substring(0, end);
+            } else if ("space".equals(normalized)) {
+                value += " ";
+            } else {
+                if (key.isEmpty() || key.length() > 8) return false;
+                value += key;
+            }
+            Bundle arguments = new Bundle();
+            arguments.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value);
+            return focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments);
+        } finally {
+            if (focused != null) focused.recycle();
+            root.recycle();
+        }
+    }
+
     public boolean clearFocusedText() { return setFocusedText(""); }
 
     /**

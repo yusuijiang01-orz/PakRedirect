@@ -44,6 +44,8 @@ public final class ProtectedContentManager {
     private static final byte[] MAGIC_BYTES = MAGIC.getBytes(StandardCharsets.US_ASCII);
     private static final String LUA_BUNDLE_NAME = "lua_bundle.zip";
     private static final long MAX_LUA_BUNDLE_BYTES = 48L * 1024L * 1024L;
+    private static final String WORKFLOW_BUNDLE_NAME = "coraflow_workflow.zip";
+    private static final long MAX_WORKFLOW_BUNDLE_BYTES = 16L * 1024L * 1024L;
     private static final int PREFIX_BYTES = 12;
     private static final int MAX_HEADER_BYTES = 128 * 1024;
     private static final int MAX_MANIFEST_BYTES = 1024 * 1024;
@@ -254,6 +256,82 @@ public final class ProtectedContentManager {
             throw new IllegalStateException("Lua 加密清单载荷无效");
         }
         return payload;
+    }
+
+    /** Verifies the signed manifest for the encrypted CoraFlow workflow package. */
+    public static JSONObject verifyWorkflowManifest(Context context, String token, String manifestText) throws Exception {
+        JSONObject payload = verifyLuaManifest(context, token, manifestText);
+        JSONObject encryption = payload.optJSONObject("encryption");
+        if (encryption == null
+                || !WORKFLOW_BUNDLE_NAME.equals(encryption.optString("name", ""))
+                || !"RYLUXE01".equals(encryption.optString("format", ""))) {
+            throw new IllegalStateException("CoraFlow 工作流加密清单不匹配");
+        }
+        return payload;
+    }
+
+    /** Decrypts the signed CoraFlow ZIP in memory; plaintext is never written to disk. */
+    public static byte[] decryptWorkflowBundle(
+            Context context,
+            String token,
+            File encryptedFile,
+            JSONObject packageInfo
+    ) throws Exception {
+        if (encryptedFile == null || !encryptedFile.isFile() || packageInfo == null) {
+            throw new IllegalArgumentException("CoraFlow 工作流加密包不可用");
+        }
+        JSONObject encryption = packageInfo.optJSONObject("encryption");
+        if (encryption == null || !"RYLUXE01".equals(encryption.optString("format", ""))) {
+            throw new IllegalStateException("CoraFlow 工作流加密格式不支持");
+        }
+        String keyId = encryption.optString("key_id", "").trim().toLowerCase(Locale.US);
+        long revision = encryption.optLong("revision", 0L);
+        long plainSize = encryption.optLong("plain_size", -1L);
+        String plainSha = encryption.optString("plain_sha256", "").trim().toLowerCase(Locale.US);
+        long encryptedSize = packageInfo.optLong("size", -1L);
+        String encryptedSha = packageInfo.optString("sha256", "").trim().toLowerCase(Locale.US);
+        if (!WORKFLOW_BUNDLE_NAME.equals(encryption.optString("name", ""))
+                || keyId.length() != 16
+                || revision <= 0
+                || plainSize <= 0 || plainSize > MAX_WORKFLOW_BUNDLE_BYTES
+                || !plainSha.matches("[0-9a-f]{64}")
+                || encryptedSize != encryptedFile.length()
+                || !encryptedSha.matches("[0-9a-f]{64}")
+                || !encryptedSha.equals(sha256(encryptedFile))) {
+            throw new IllegalStateException("CoraFlow 工作流加密包元数据或摘要不匹配");
+        }
+
+        ManifestBundle authorization = authorizationForKey(context, token, keyId);
+        EncryptedHeader header = readHeader(encryptedFile);
+        ProtectedEntry entry = new ProtectedEntry(
+                WORKFLOW_BUNDLE_NAME, "workflow.rpe", revision, plainSize, plainSha,
+                encryptedSize, encryptedSha, keyId
+        );
+        entry.file = encryptedFile;
+        entry.header = header;
+        entry.contentKey = authorization.contentKey.clone();
+        validateHeader(header, entry, authorization.contentKey);
+
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        ByteArrayOutputStream output = new ByteArrayOutputStream((int) plainSize);
+        long total = 0L;
+        try (InputStream input = new DecryptingInputStream(entry, 0L)) {
+            byte[] buffer = new byte[64 * 1024];
+            int count;
+            while ((count = input.read(buffer)) >= 0) {
+                if (count == 0) continue;
+                total += count;
+                if (total > plainSize || total > MAX_WORKFLOW_BUNDLE_BYTES) {
+                    throw new IllegalStateException("CoraFlow 工作流解密包超过声明大小");
+                }
+                digest.update(buffer, 0, count);
+                output.write(buffer, 0, count);
+            }
+        }
+        if (total != plainSize || !plainSha.equals(hex(digest.digest()))) {
+            throw new IllegalStateException("CoraFlow 工作流明文校验失败");
+        }
+        return output.toByteArray();
     }
 
     /** Decrypts a signed Lua ZIP using the existing RYLUXE01 PAK chunk format. */
