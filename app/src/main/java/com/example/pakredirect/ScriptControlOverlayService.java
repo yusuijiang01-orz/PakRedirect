@@ -72,7 +72,8 @@ public final class ScriptControlOverlayService extends Service {
             String message = intent.getStringExtra(ScriptRuntimeService.EXTRA_MESSAGE);
             runtimeState = state == null ? ScriptExecutionControl.State.IDLE.name() : state;
             memoryProbeActive = "MEMORY_PROBE".equals(runtimeState);
-            if (ScriptExecutionControl.State.RUNNING.name().equals(runtimeState)
+            boolean runtimeRunning = ScriptExecutionControl.State.RUNNING.name().equals(runtimeState);
+            if (runtimeRunning
                     || ScriptExecutionControl.State.FAILED.name().equals(runtimeState)
                     || (message != null && (message.startsWith("启动失败")
                     || message.startsWith("启动被兼容检查拦截")))) {
@@ -83,7 +84,14 @@ public final class ScriptControlOverlayService extends Service {
             if (runActionLabel != null) runActionLabel.setText(active ? "停止" : "启动");
             if (pauseActionLabel != null) pauseActionLabel.setText(
                     ScriptExecutionControl.State.PAUSED.name().equals(runtimeState) ? "继续" : "暂停");
-            if (memoryProbeActive) mainHandler.removeCallbacks(collapseWhenIdle);
+            if (runtimeRunning) {
+                // Display screenshots include application overlays. Keep the
+                // controller out of the game's recognition and click regions
+                // for the entire run, rather than waiting for an idle gap that
+                // may never occur during a fast workflow loop.
+                mainHandler.removeCallbacks(collapseWhenIdle);
+                collapseToNearestEdge();
+            } else if (memoryProbeActive) mainHandler.removeCallbacks(collapseWhenIdle);
             else scheduleIdleCollapse();
         }
     };
