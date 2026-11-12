@@ -73,8 +73,10 @@ public final class ScriptControlOverlayService extends Service {
             runtimeState = state == null ? ScriptExecutionControl.State.IDLE.name() : state;
             memoryProbeActive = "MEMORY_PROBE".equals(runtimeState);
             boolean runtimeRunning = ScriptExecutionControl.State.RUNNING.name().equals(runtimeState);
+            boolean runtimeFinished = ScriptExecutionControl.State.STOPPED.name().equals(runtimeState)
+                    || ScriptExecutionControl.State.COMPLETED.name().equals(runtimeState)
+                    || ScriptExecutionControl.State.FAILED.name().equals(runtimeState);
             if (runtimeRunning
-                    || ScriptExecutionControl.State.FAILED.name().equals(runtimeState)
                     || (message != null && (message.startsWith("启动失败")
                     || message.startsWith("启动被兼容检查拦截")))) {
                 restartRequested = false;
@@ -91,6 +93,11 @@ public final class ScriptControlOverlayService extends Service {
                 // may never occur during a fast workflow loop.
                 mainHandler.removeCallbacks(collapseWhenIdle);
                 collapseToNearestEdge();
+            } else if (runtimeFinished && collapsed) {
+                // Bring completion and failure details back into view after
+                // the controller was tucked away for unobstructed execution.
+                mainHandler.removeCallbacks(collapseWhenIdle);
+                expandFromEdge();
             } else if (memoryProbeActive) mainHandler.removeCallbacks(collapseWhenIdle);
             else scheduleIdleCollapse();
         }
