@@ -285,6 +285,14 @@ public final class CoraFlowWorkflowRuntime {
         if ("is_image_exist".equals(type) || "click_if_image_exist".equals(type)) {
             String asset = config.optString("image", "").trim();
             if (asset.isEmpty()) throw new IllegalStateException("“" + name + "”没有配置图片素材");
+            if (asset.endsWith("/RYLUX_登录_账号按钮_完整.png")) {
+                int accountButton = game.accountLoginButton("click_if_image_exist".equals(type));
+                if (accountButton < 0) throw new IllegalStateException("账号登录按钮已识别，但系统拒绝点击；已停止。");
+                if (accountButton > 0) {
+                    note("is_image_exist".equals(type) ? "已识别账号登录按钮控件 → 是。" : "已通过账号登录按钮控件执行点击。");
+                    return "is_image_exist".equals(type) ? Boolean.TRUE : null;
+                }
+            }
             Bitmap frame = capture();
             try {
                 Rect searchRegion = region(config.optJSONArray("region"));

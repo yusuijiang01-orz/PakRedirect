@@ -355,6 +355,36 @@ public final class ScriptGameAdapter extends AccessibilityService {
         return false;
     }
 
+    /** Return 1 for the verified login button, 0 when absent, -1 when its click fails. */
+    public int accountLoginButton(boolean click) {
+        requireTargetGameForeground();
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null) return 0;
+        java.util.List<AccessibilityNodeInfo> matches = null;
+        try {
+            matches = root.findAccessibilityNodeInfosByText("Đăng nhập");
+            if (matches == null) return 0;
+            android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+            for (AccessibilityNodeInfo node : matches) {
+                if (node == null || node.getText() == null || !"Đăng nhập".equalsIgnoreCase(node.getText().toString().trim())
+                        || !"android.widget.Button".contentEquals(node.getClassName() == null ? "" : node.getClassName())
+                        || !node.isVisibleToUser() || !node.isEnabled() || !node.isClickable()) continue;
+                CharSequence pkg = node.getPackageName();
+                if (pkg == null || (!TARGET_GAME_PACKAGE.contentEquals(pkg) && !getPackageName().contentEquals(pkg))) continue;
+                Rect bounds = new Rect();
+                node.getBoundsInScreen(bounds);
+                int x = bounds.centerX(), y = bounds.centerY();
+                if (bounds.isEmpty() || x < dm.widthPixels * 0.10 || x > dm.widthPixels * 0.60
+                        || y < dm.heightPixels * 0.65 || y > dm.heightPixels * 0.95) continue;
+                return !click || node.performAction(AccessibilityNodeInfo.ACTION_CLICK) ? 1 : -1;
+            }
+            return 0;
+        } finally {
+            if (matches != null) for (AccessibilityNodeInfo node : matches) if (node != null) node.recycle();
+            root.recycle();
+        }
+    }
+
     private String describeForegroundState() {
         ForegroundEvent event = foregroundEvent;
         String activePackage = "";
