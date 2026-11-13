@@ -532,11 +532,7 @@ public final class ScriptToolsActivity extends Activity {
         root.setPadding(dp(18), dp(4), dp(18), dp(28));
         page.addView(root, new ScrollView.LayoutParams(-1, -2));
 
-        String targetDescription = entryTargetMode == null
-                ? "脚本可以控制桌面安装版，也可以控制 RYLUX 沙箱副本；请选择实际要操作的那一个。"
-                : (TARGET_MODE_DESKTOP.equals(entryTargetMode)
-                        ? "此工作台由游戏详情页打开，运行目标固定为桌面安装版封神榜手游。"
-                        : "此工作台由沙箱页打开，运行目标固定为 RYLUX 沙箱中的游戏副本。");
+        String targetDescription = "工作台会按打开入口预选运行目标；如果实际游戏在 RYLUX 沙箱中，可在此切换为沙箱副本。运行前检查会再次确认目标。";
         LinearLayout selection = section("目标游戏", targetDescription
                 + " Android 不允许 RYLUX 可靠强制结束桌面客户端，桌面版重启时会退回桌面并尝试重新打开。");
         RadioGroup targets = new RadioGroup(this);
@@ -558,16 +554,10 @@ public final class ScriptToolsActivity extends Activity {
         availability.setPadding(0, dp(8), 0, 0);
         selection.addView(availability);
         targets.setOnCheckedChangeListener((group, checkedId) -> {
-            if (entryTargetMode != null) return;
             String mode = checkedId == desktopTarget.getId() ? TARGET_MODE_DESKTOP : TARGET_MODE_SANDBOX;
             put(TARGET_MODE_KEY, mode);
             availability.setText(gameStatus());
         });
-        if (entryTargetMode != null) {
-            targets.setEnabled(false);
-            desktopTarget.setEnabled(false);
-            sandboxTarget.setEnabled(false);
-        }
 
         LinearLayout advanced = section("运行环境与诊断", "权限仍由你在系统页面手动开启；进入工作台不会启动游戏或脚本。");
         environment = label(environmentText(), 12, MUTED, false);
@@ -825,8 +815,8 @@ public final class ScriptToolsActivity extends Activity {
     }
 
     private String targetMode() {
-        if (entryTargetMode != null) return entryTargetMode;
-        return TARGET_MODE_DESKTOP.equals(values.optString(TARGET_MODE_KEY, TARGET_MODE_SANDBOX))
+        String fallback = entryTargetMode == null ? TARGET_MODE_SANDBOX : entryTargetMode;
+        return TARGET_MODE_DESKTOP.equals(values.optString(TARGET_MODE_KEY, fallback))
                 ? TARGET_MODE_DESKTOP : TARGET_MODE_SANDBOX;
     }
 
