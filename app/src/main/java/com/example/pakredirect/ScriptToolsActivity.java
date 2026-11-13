@@ -93,18 +93,23 @@ public final class ScriptToolsActivity extends Activity {
     private TextView targetSummary;
     private TextView runtimeLogText;
     private ScrollView runtimeLogScroll;
+    private Dialog runtimeLogDialog;
     private boolean logScreenActive;
     private final Handler logHandler = new Handler(Looper.getMainLooper());
     private final Runnable refreshRuntimeLog = new Runnable() {
         @Override public void run() {
-            if (!logScreenActive || runtimeLogText == null) return;
+            if (!isRuntimeLogViewerActive()) return;
             new Thread(() -> {
                 String result = readRecentRuntimeLog();
                 logHandler.post(() -> {
-                    if (!logScreenActive || runtimeLogText == null) return;
+                    if (!isRuntimeLogViewerActive()) return;
                     if (!result.contentEquals(runtimeLogText.getText())) {
+                        boolean wasAtBottom = runtimeLogScroll.getScrollY()
+                                + runtimeLogScroll.getHeight() >= runtimeLogText.getHeight() - dp(24);
                         runtimeLogText.setText(result);
-                        runtimeLogScroll.post(() -> runtimeLogScroll.fullScroll(View.FOCUS_DOWN));
+                        if (wasAtBottom) {
+                            runtimeLogScroll.post(() -> runtimeLogScroll.fullScroll(View.FOCUS_DOWN));
+                        }
                     }
                     logHandler.postDelayed(this, 2000L);
                 });
@@ -125,6 +130,97 @@ public final class ScriptToolsActivity extends Activity {
             }
         } catch (IOException error) { return "读取日志失败：" + error.getMessage(); }
         return lines.isEmpty() ? "暂无运行日志" : android.text.TextUtils.join("\n", lines);
+    }
+
+    private boolean isRuntimeLogViewerActive() {
+        return logScreenActive && runtimeLogDialog != null && runtimeLogDialog.isShowing()
+                && runtimeLogText != null && runtimeLogScroll != null;
+    }
+
+    private void showRuntimeLogViewer() {
+        Dialog dialog = new Dialog(this);
+        runtimeLogDialog = dialog;
+
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(14), dp(12), dp(14), dp(12));
+        panel.setBackground(RyluxDesignSystem.card(this, 22));
+
+        LinearLayout header = new LinearLayout(this);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout heading = new LinearLayout(this);
+        heading.setOrientation(LinearLayout.VERTICAL);
+        heading.addView(label("运行日志", 19, TEXT, true));
+        TextView hint = label("显示最新 100 行，可复制后粘贴分享", 12, MUTED, false);
+        hint.setPadding(0, dp(2), 0, 0);
+        heading.addView(hint);
+        header.addView(heading, new LinearLayout.LayoutParams(0, -2, 1));
+        Button close = button("×", SOFT);
+        close.setTextSize(22);
+        header.addView(close, new LinearLayout.LayoutParams(dp(46), dp(44)));
+        close.setOnClickListener(v -> dialog.dismiss());
+        panel.addView(header);
+
+        runtimeLogScroll = new ScrollView(this);
+        runtimeLogScroll.setFillViewport(true);
+        runtimeLogScroll.setBackground(RyluxDesignSystem.card(this, 14));
+        runtimeLogText = label("正在读取日志…", 11, TEXT, false);
+        runtimeLogText.setTypeface(Typeface.MONOSPACE);
+        runtimeLogText.setTextIsSelectable(true);
+        runtimeLogText.setPadding(dp(12), dp(10), dp(12), dp(10));
+        runtimeLogScroll.addView(runtimeLogText, new ScrollView.LayoutParams(-1, -2));
+        LinearLayout.LayoutParams logLp = new LinearLayout.LayoutParams(-1, 0, 1);
+        logLp.topMargin = dp(10);
+        logLp.bottomMargin = dp(10);
+        panel.addView(runtimeLogScroll, logLp);
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        Button refresh = button("刷新", SOFT);
+        Button copy = button("复制全部", BLUE);
+        LinearLayout.LayoutParams actionLp = new LinearLayout.LayoutParams(dp(92), dp(44));
+        actionLp.rightMargin = dp(8);
+        actions.addView(refresh, actionLp);
+        actions.addView(copy, new LinearLayout.LayoutParams(dp(112), dp(44)));
+        panel.addView(actions);
+        refresh.setOnClickListener(v -> {
+            logHandler.removeCallbacks(refreshRuntimeLog);
+            refreshRuntimeLog.run();
+        });
+        copy.setOnClickListener(v -> {
+            CharSequence content = runtimeLogText == null ? "" : runtimeLogText.getText();
+            android.content.ClipboardManager clipboard = (android.content.ClipboardManager)
+                    getSystemService(CLIPBOARD_SERVICE);
+            if (clipboard != null) {
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("RYLUX 运行日志", content));
+                Toast.makeText(this, "最近 100 行日志已复制", Toast.LENGTH_SHORT).show();
+            }
+        });
+
+        dialog.setContentView(panel);
+        dialog.setCanceledOnTouchOutside(true);
+        dialog.setOnShowListener(ignored -> {
+            logHandler.removeCallbacks(refreshRuntimeLog);
+            refreshRuntimeLog.run();
+        });
+        dialog.setOnDismissListener(ignored -> {
+            logHandler.removeCallbacks(refreshRuntimeLog);
+            if (runtimeLogDialog == dialog) {
+                runtimeLogDialog = null;
+                runtimeLogText = null;
+                runtimeLogScroll = null;
+            }
+        });
+        dialog.show();
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            int screenWidth = getResources().getDisplayMetrics().widthPixels;
+            int screenHeight = getResources().getDisplayMetrics().heightPixels;
+            window.setLayout(Math.min(dp(640), screenWidth - dp(32)),
+                    Math.min(Math.round(screenHeight * 0.82f), screenHeight - dp(64)));
+            window.setGravity(Gravity.CENTER);
+        }
     }
     private boolean workbenchReady;
     private boolean entitlementCheckPending;
@@ -468,41 +564,6 @@ public final class ScriptToolsActivity extends Activity {
         addNumber(trade, "购买物品数量阈值", "物品数量低于阈值才购买", "10", "个", 0, 99999);
         addNumber(trade, "每次购买数量", "每次购买数量", "10", "个", 1, 99999);
 
-        LinearLayout logPanel = new LinearLayout(this);
-        logPanel.setOrientation(LinearLayout.VERTICAL);
-        logPanel.setPadding(dp(12), dp(4), dp(12), dp(4));
-        logPanel.setBackgroundColor(CARD);
-        LinearLayout logHeader = new LinearLayout(this);
-        logHeader.setGravity(Gravity.CENTER_VERTICAL);
-        logHeader.addView(label("运行日志（最近 100 行）", 13, TEXT, true), new LinearLayout.LayoutParams(0, dp(36), 1));
-        Button copyLog = button("复制", SOFT);
-        copyLog.setOnClickListener(v -> {
-            android.content.ClipboardManager clipboard = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-            if (clipboard != null && runtimeLogText != null) {
-                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("RYLUX 运行日志", runtimeLogText.getText()));
-                Toast.makeText(this, "日志已复制", Toast.LENGTH_SHORT).show();
-            }
-        });
-        logHeader.addView(copyLog, new LinearLayout.LayoutParams(dp(68), dp(36)));
-        Button toggleLog = button("收起", SOFT);
-        logHeader.addView(toggleLog, new LinearLayout.LayoutParams(dp(68), dp(36)));
-        logPanel.addView(logHeader);
-        runtimeLogScroll = new ScrollView(this);
-        runtimeLogText = label("正在读取日志…", 11, TEXT, false);
-        runtimeLogText.setTextIsSelectable(true);
-        runtimeLogScroll.addView(runtimeLogText, new ScrollView.LayoutParams(-1, -2));
-        logPanel.addView(runtimeLogScroll, new LinearLayout.LayoutParams(-1, dp(100)));
-        screen.addView(logPanel, new LinearLayout.LayoutParams(-1, dp(148)));
-        toggleLog.setOnClickListener(v -> {
-            boolean show = runtimeLogScroll.getVisibility() != View.VISIBLE;
-            runtimeLogScroll.setVisibility(show ? View.VISIBLE : View.GONE);
-            LinearLayout.LayoutParams layout = (LinearLayout.LayoutParams) logPanel.getLayoutParams();
-            layout.height = dp(show ? 148 : 48);
-            logPanel.setLayoutParams(layout);
-            toggleLog.setText(show ? "收起" : "展开");
-        });
-        logHandler.removeCallbacks(refreshRuntimeLog);
-        if (logScreenActive) logHandler.post(refreshRuntimeLog);
         host.addView(screen, new FrameLayout.LayoutParams(-1, -1));
         setContentView(host);
         selectTab(Math.max(0, Math.min(tabPages.size() - 1, selectedTab)));
@@ -531,6 +592,11 @@ public final class ScriptToolsActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(18), dp(4), dp(18), dp(28));
         page.addView(root, new ScrollView.LayoutParams(-1, -2));
+
+        LinearLayout logs = section("运行日志", "打开后查看最新 100 行，并可一键复制全部内容。日志仅保存在本机。 ");
+        Button openLogs = button("打开日志查看器", BLUE);
+        addButton(logs, openLogs);
+        openLogs.setOnClickListener(v -> showRuntimeLogViewer());
 
         String targetDescription = "工作台会按打开入口预选运行目标；如果实际游戏在 RYLUX 沙箱中，可在此切换为沙箱副本。运行前检查会再次确认目标。";
         LinearLayout selection = section("目标游戏", targetDescription
