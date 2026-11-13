@@ -491,44 +491,74 @@ public final class ScriptGameAdapter extends AccessibilityService {
         if ("escape".equals(normalized) || "esc".equals(normalized) || "back".equals(normalized)) {
             return performGlobalAction(GLOBAL_ACTION_BACK);
         }
+        String shellCommand = null;
+        if ("enter".equals(normalized) || "return".equals(normalized)) {
+            shellCommand = "input keyevent 66";
+        } else if ("backspace".equals(normalized) || "delete".equals(normalized)) {
+            shellCommand = "input keyevent 67";
+        } else if (key.matches("[A-Za-z0-9._-]{1,8}")) {
+            // Cocos2d-x draws its coordinate fields on the GL surface. The
+            // focused field often has no focused AccessibilityNodeInfo, so
+            // ACTION_SET_TEXT cannot reach it. On rooted emulators/devices,
+            // use Android's input dispatcher just like the ADB workflow does.
+            shellCommand = "input text " + key;
+        }
         AccessibilityNodeInfo root = getRootInActiveWindow();
-        if (root == null) return false;
+        if (root == null) return runShellInputFallback(shellCommand, key);
         AccessibilityNodeInfo focused = null;
         try {
             focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT);
             if (focused == null) focused = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY);
-            if (focused == null || !focused.isEditable()) return false;
-            CharSequence nodePackage = focused.getPackageName();
-            ForegroundEvent event = foregroundEvent;
-            if (nodePackage == null || focused.getWindowId() != event.windowId) return false;
-            boolean directGameNode = TARGET_GAME_PACKAGE.contentEquals(nodePackage);
-            boolean sandboxProxyNode = getPackageName().contentEquals(event.packageName)
-                    && ScriptForegroundTarget.isProxyActivity(event.className)
-                    && getPackageName().contentEquals(nodePackage);
-            if (!directGameNode && !sandboxProxyNode) return false;
-            if ("enter".equals(normalized) || "return".equals(normalized)) {
-                if (Build.VERSION.SDK_INT < 30) return false;
-                return focused.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.getId());
+            if (focused != null && focused.isEditable()) {
+                CharSequence nodePackage = focused.getPackageName();
+                ForegroundEvent event = foregroundEvent;
+                boolean sameWindow = nodePackage != null && focused.getWindowId() == event.windowId;
+                boolean directGameNode = sameWindow && TARGET_GAME_PACKAGE.contentEquals(nodePackage);
+                boolean sandboxProxyNode = sameWindow && getPackageName().contentEquals(event.packageName)
+                        && ScriptForegroundTarget.isProxyActivity(event.className)
+                        && getPackageName().contentEquals(nodePackage);
+                if (directGameNode || sandboxProxyNode) {
+                    if ("enter".equals(normalized) || "return".equals(normalized)) {
+                        if (Build.VERSION.SDK_INT >= 30 && focused.performAction(
+                                AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.getId())) {
+                            return true;
+                        }
+                    } else {
+                        CharSequence current = focused.getText();
+                        String value = current == null ? "" : current.toString();
+                        if ("backspace".equals(normalized) || "delete".equals(normalized)) {
+                            if (value.isEmpty()) return true;
+                            int end = value.offsetByCodePoints(value.length(), -1);
+                            value = value.substring(0, end);
+                        } else if ("space".equals(normalized)) {
+                            value += " ";
+                        } else if (key.matches("[A-Za-z0-9._-]{1,8}")) {
+                            value += key;
+                        } else {
+                            return false;
+                        }
+                        Bundle arguments = new Bundle();
+                        arguments.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value);
+                        if (focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)) return true;
+                    }
+                }
             }
-            CharSequence current = focused.getText();
-            String value = current == null ? "" : current.toString();
-            if ("backspace".equals(normalized) || "delete".equals(normalized)) {
-                if (value.isEmpty()) return true;
-                int end = value.offsetByCodePoints(value.length(), -1);
-                value = value.substring(0, end);
-            } else if ("space".equals(normalized)) {
-                value += " ";
-            } else {
-                if (key.isEmpty() || key.length() > 8) return false;
-                value += key;
-            }
-            Bundle arguments = new Bundle();
-            arguments.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value);
-            return focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments);
+            return runShellInputFallback(shellCommand, key);
         } finally {
             if (focused != null) focused.recycle();
             root.recycle();
         }
+    }
+
+    private boolean runShellInputFallback(String command, String key) {
+        if (command == null) return false;
+        RootShell.Result result = RootShell.run(command);
+        if (result.ok()) {
+            Log.i(TAG, "Accessibility 无法输入“" + key + "”，已通过 Android 输入分发器补发");
+            return true;
+        }
+        Log.w(TAG, "Accessibility 与 Android 输入分发器均无法输入“" + key + "”：" + result);
+        return false;
     }
 
     public boolean clearFocusedText() { return setFocusedText(""); }
