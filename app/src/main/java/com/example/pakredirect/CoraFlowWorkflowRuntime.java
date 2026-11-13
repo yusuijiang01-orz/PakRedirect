@@ -590,14 +590,36 @@ public final class CoraFlowWorkflowRuntime {
                 continue;
             }
             hits++;
-            Rect countRegion = new Rect(cell.left + cell.width() / 2, cell.top + cell.height() * 2 / 3,
-                    cell.right, cell.bottom);
-            OcrRead read = readOcr(frame, countRegion, false, 4);
-            Integer value = parseNumber(read.text);
-            if (value == null || value <= 0 || read.confidence < minConfidence) {
-                throw new IllegalStateException("第 " + (row + 1) + " 行第 " + (column + 1)
-                        + " 列命中药瓶图标但数量 OCR 不可靠（" + read.text + "，" + percent(read.confidence) + "）；停止统计。");
+            // Match CoraFlow's inventoryCountRegion: stack counts are rendered
+            // at the lower-left of each slot (the old lower-right crop missed
+            // them entirely on the last-row potion stacks).
+            Rect countRegion = new Rect(cell.left + Math.round(cell.width() * 0.03f),
+                    cell.top + Math.round(cell.height() * 0.58f),
+                    cell.left + Math.round(cell.width() * 0.60f),
+                    cell.top + Math.round(cell.height() * 0.95f));
+            OcrRead bestRead = null;
+            Integer value = null;
+            for (int scale : new int[]{4, 3, 2}) {
+                OcrRead candidate = readOcr(frame, countRegion, false, scale);
+                Integer candidateValue = parseNumber(candidate.text);
+                if (candidateValue != null && candidateValue > 0
+                        && (bestRead == null || candidate.confidence > bestRead.confidence)) {
+                    bestRead = candidate;
+                    value = candidateValue;
+                }
+                if (candidateValue != null && candidateValue > 0 && candidate.confidence >= minConfidence) {
+                    bestRead = candidate;
+                    value = candidateValue;
+                    break;
+                }
             }
+            if (bestRead == null || value == null || bestRead.confidence < minConfidence) {
+                String text = bestRead == null ? "" : bestRead.text;
+                float confidence = bestRead == null ? 0 : bestRead.confidence;
+                throw new IllegalStateException("第 " + (row + 1) + " 行第 " + (column + 1)
+                        + " 列命中药瓶图标但数量 OCR 不可靠（" + text + "，" + percent(confidence) + "）；停止统计。");
+            }
+            if (bestRead.confidence < 80) note("药瓶数量 OCR 经过多尺度复读，采用置信度最高结果。");
             count += value;
             note("药瓶图标定位：第 " + (row + 1) + " 行第 " + (column + 1) + " 列，数量 " + value + "。");
         }
