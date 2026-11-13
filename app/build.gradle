@@ -15,8 +15,8 @@ android {
             // x86 tunnel library making x86 emulators select an unusable ABI.
             abiFilters 'arm64-v8a', 'armeabi-v7a'
         }
-        versionCode = (project.findProperty('ryluxVersionCode') ?: '145').toInteger()
-        versionName = (project.findProperty('ryluxVersionName') ?: '2.5.21-account-login').toString()
+        versionCode = (project.findProperty('ryluxVersionCode') ?: '146').toInteger()
+        versionName = (project.findProperty('ryluxVersionName') ?: '2.5.22-potion-ocr-fix').toString()
         manifestPlaceholders = [ryluxWechatAppId: (project.findProperty('ryluxWechatAppId') ?: 'wx_replace_with_merchant_appid').toString()]
         externalNativeBuild {
             ndkBuild {

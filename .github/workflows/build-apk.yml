@@ -6,7 +6,7 @@ on:
       version_name:
         description: 'Version name for this test build'
         required: true
-        default: '2.5.21-account-login'
+        default: '2.5.22-potion-ocr-fix'
       version_code:
         description: 'Monotonically increasing Android versionCode'
         required: true
@@ -39,8 +39,8 @@ jobs:
       contents: write
 
     env:
-      RYLUX_VERSION_NAME: ${{ inputs.version_name || '2.5.21-account-login' }}
-      RYLUX_VERSION_CODE: ${{ inputs.version_code || '145' }}
+      RYLUX_VERSION_NAME: ${{ inputs.version_name || '2.5.22-potion-ocr-fix' }}
+      RYLUX_VERSION_CODE: ${{ inputs.version_code || '146' }}
       RYLUX_KEYSTORE_B64: ${{ secrets.RYLUX_KEYSTORE_B64 }}
       RYLUX_KEYSTORE_PASSWORD: ${{ secrets.RYLUX_KEYSTORE_PASSWORD }}
       RYLUX_KEY_ALIAS: ${{ secrets.RYLUX_KEY_ALIAS }}
