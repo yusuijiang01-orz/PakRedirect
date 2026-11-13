@@ -1241,7 +1241,7 @@ public class MainActivity extends Activity {
             if (result != null && result.allowed) {
                 startActivity(new Intent(MainActivity.this, ScriptToolsActivity.class)
                         .putExtra(ScriptToolsActivity.EXTRA_TARGET_MODE,
-                                ScriptToolsActivity.TARGET_MODE_DESKTOP));
+                                ScriptToolsActivity.TARGET_MODE_SANDBOX));
             } else {
                 toast(result == null ? "无法验证会员状态，请检查网络后重试" : result.message);
             }
