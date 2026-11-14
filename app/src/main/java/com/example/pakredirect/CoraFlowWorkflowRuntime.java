@@ -16,6 +16,7 @@ import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -107,6 +108,7 @@ public final class CoraFlowWorkflowRuntime {
     private final Consumer<String> listener;
     private final ScriptGameAdapter game;
     private final ScriptOcr ocr;
+    private final BooleanSupplier gameLauncher;
     private final Map<String, Bitmap> scaledTemplates = new HashMap<>();
     private final Map<String, int[]> previousRegions = new HashMap<>();
     private final Map<String, Integer> visits = new HashMap<>();
@@ -120,13 +122,47 @@ public final class CoraFlowWorkflowRuntime {
     private int steps;
 
     public CoraFlowWorkflowRuntime(WorkflowPackage workflowPackage, ScriptExecutionControl control,
-                                   Consumer<String> listener) {
+                                   Consumer<String> listener, BooleanSupplier gameLauncher) {
         if (workflowPackage == null || control == null) throw new IllegalArgumentException("CoraFlow runtime arguments are required");
         this.workflowPackage = workflowPackage;
         this.control = control;
         this.listener = listener;
         this.game = ScriptGameAdapter.requireConnected();
         this.ocr = new ScriptOcr();
+        this.gameLauncher = gameLauncher;
+    }
+
+    static boolean startsWithStartupGate(WorkflowPackage workflowPackage) {
+        if (workflowPackage == null) return false;
+        JSONArray nodes = workflowPackage.workflow.optJSONArray("nodes");
+        JSONArray edges = workflowPackage.workflow.optJSONArray("edges");
+        if (nodes == null || edges == null) return false;
+        String startId = null;
+        for (int i = 0; i < nodes.length(); i++) {
+            JSONObject node = nodes.optJSONObject(i);
+            if (node != null && "start".equals(nodeType(node))) {
+                startId = node.optString("id", "");
+                break;
+            }
+        }
+        if (startId == null || startId.isEmpty()) return false;
+        String firstId = null;
+        for (int i = 0; i < edges.length(); i++) {
+            JSONObject edge = edges.optJSONObject(i);
+            if (edge != null && startId.equals(edge.optString("source", ""))
+                    && !"condition".equals(edge.optString("type", ""))) {
+                firstId = edge.optString("target", "");
+                break;
+            }
+        }
+        if (firstId == null || firstId.isEmpty()) return false;
+        for (int i = 0; i < nodes.length(); i++) {
+            JSONObject node = nodes.optJSONObject(i);
+            if (node == null || !firstId.equals(node.optString("id", ""))) continue;
+            String type = nodeType(node);
+            return "is_app_running".equals(type) || "launch_game".equals(type);
+        }
+        return false;
     }
 
     public void run() throws Exception {
@@ -148,19 +184,22 @@ public final class CoraFlowWorkflowRuntime {
                 if ("start".equals(type) && start == null) start = node;
             }
             if (start == null) throw new IllegalStateException("画布中找不到“开始”节点");
-            Bitmap initial = capture();
-            try {
-                screenWidth = initial.getWidth();
-                screenHeight = initial.getHeight();
-                note("RYLUX JSON 执行器已载入 “" + graph.optString("name", "CoraFlow 工作流")
-                        + "” · " + nodes.length() + " 节点 / " + edges.length() + " 连线 · 画面 "
-                        + initial.getWidth() + "×" + initial.getHeight());
-            } finally { initial.recycle(); }
-
             JSONObject sizeConfig = firstConfig(nodes, "set_window_size");
             if (sizeConfig != null) {
                 coordinateWidth = positiveInt(sizeConfig.optInt("width", 1920), 1920);
                 coordinateHeight = positiveInt(sizeConfig.optInt("height", 1080), 1080);
+            }
+            if (startsWithStartupGate(workflowPackage)) {
+                note("工作流先检查并启动目标游戏；确认游戏前台后才截图，避免启动前因无画面而失败。");
+            } else {
+                Bitmap initial = capture();
+                try {
+                    screenWidth = initial.getWidth();
+                    screenHeight = initial.getHeight();
+                    note("RYLUX JSON 执行器已载入 “" + graph.optString("name", "CoraFlow 工作流")
+                            + "” · " + nodes.length() + " 节点 / " + edges.length() + " 连线 · 画面 "
+                            + initial.getWidth() + "×" + initial.getHeight());
+                } finally { initial.recycle(); }
             }
             note("工作流坐标基准：" + coordinateWidth + "×" + coordinateHeight);
             String currentId = nextEdge(edges, start.optString("id", ""), null);
@@ -250,6 +289,16 @@ public final class CoraFlowWorkflowRuntime {
 
     private Boolean executeGraphNode(String type, String id, String name, JSONObject config,
                                      JSONArray edges, Map<String, JSONObject> nodes) throws Exception {
+        if ("is_app_running".equals(type)) {
+            requireTargetGamePackage(config, name);
+            boolean foreground = ScriptGameAdapter.isTargetGameForeground();
+            note(foreground ? "目标游戏已在前台 → 是。" : "目标游戏未在前台 → 否；后续可启动或切回游戏。");
+            return foreground;
+        }
+        if ("launch_game".equals(type)) {
+            launchTargetGame(config, name);
+            return null;
+        }
         if ("loop".equals(type)) {
             LoopFrame active = loops.peekLast();
             if (active == null || !active.nodeId.equals(id)) {
@@ -270,6 +319,20 @@ public final class CoraFlowWorkflowRuntime {
         if ("end_loop".equals(type)) {
             LoopFrame frame = loops.peekLast();
             if (frame == null) throw new IllegalStateException("“" + name + "”没有对应的循环节点");
+            if (config.optBoolean("break_loop", false)) {
+                String expectedLoopId = config.optString("loop_node_id", "").trim();
+                if (!expectedLoopId.isEmpty() && !expectedLoopId.equals(frame.nodeId)) {
+                    throw new IllegalStateException("“" + name + "”要求退出循环 " + expectedLoopId
+                            + "，但当前循环是 " + frame.nodeId + "；已停止以防破坏外层循环。");
+                }
+                loops.removeLast();
+                String next = nextEdge(edges, id, null);
+                if (next != null) overrideNext = next;
+                else if (!loops.isEmpty()) overrideNext = loops.peekLast().bodyStart;
+                else overrideNext = null;
+                note("按条件提前退出循环“" + frame.nodeId + "”（已执行 " + frame.iteration + " 轮）。");
+                return null;
+            }
             if (frame.count < 0 || frame.iteration < frame.count) {
                 frame.iteration++;
                 overrideNext = frame.bodyStart;
@@ -368,6 +431,38 @@ public final class CoraFlowWorkflowRuntime {
             return null;
         }
         throw new IllegalStateException("不支持的 CoraFlow 节点类型：“" + type + "”");
+    }
+
+    private void requireTargetGamePackage(JSONObject config, String name) {
+        String packageName = config.optString("package_name", "").trim();
+        if (!ScriptGameAdapter.TARGET_GAME_PACKAGE.equals(packageName)) {
+            throw new IllegalStateException("“" + name + "”只能检查或启动已配置的封神榜游戏包名");
+        }
+    }
+
+    private void launchTargetGame(JSONObject config, String name) throws Exception {
+        requireTargetGamePackage(config, name);
+        if (gameLauncher == null || !gameLauncher.getAsBoolean()) {
+            throw new IllegalStateException("“" + name + "”未能启动目标游戏");
+        }
+        long waitMs = Math.max(10_000L, Math.min(120_000L,
+                config.optLong("launch_wait_ms", 60_000L)));
+        long deadline = SystemClock.elapsedRealtime() + waitMs;
+        while (!ScriptGameAdapter.isTargetGameForeground()
+                && SystemClock.elapsedRealtime() < deadline) {
+            checkpoint();
+            control.sleep(250L);
+        }
+        if (!ScriptGameAdapter.isTargetGameForeground()) {
+            throw new IllegalStateException("“" + name + "”启动后 " + (waitMs / 1000)
+                    + " 秒仍未进入前台；已停止，未继续点击。");
+        }
+        Bitmap frame = capture();
+        try {
+            screenWidth = frame.getWidth();
+            screenHeight = frame.getHeight();
+            note("目标游戏已启动并进入前台；显示分辨率 " + screenWidth + "×" + screenHeight + "。");
+        } finally { frame.recycle(); }
     }
 
     private String overrideNext;
@@ -1352,7 +1447,7 @@ public final class CoraFlowWorkflowRuntime {
     }
 
     private static boolean isDual(String type) {
-        return "is_image_exist".equals(type) || "is_color_exist".equals(type)
+        return "is_image_exist".equals(type) || "is_app_running".equals(type) || "is_color_exist".equals(type)
                 || "recognize_number".equals(type) || "recognize_text".equals(type)
                 || "check_region_change".equals(type);
     }

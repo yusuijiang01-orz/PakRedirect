@@ -144,6 +144,17 @@ public final class ScriptGameAdapter extends AccessibilityService {
         return current != null && current.hasTargetGameForeground();
     }
 
+    private ComponentName getVirtualTopActivity() {
+        try {
+            Object value = BActivityManager.class.getMethod("getTopActivity", int.class)
+                    .invoke(BActivityManager.get(), 0);
+            return value instanceof ComponentName ? (ComponentName) value : null;
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) {
+            // Older BlackBox builds do not expose the virtual top activity API.
+            return null;
+        }
+    }
+
     static boolean isTargetCrashDialogVisible() {
         ScriptGameAdapter current = instance;
         return current != null && current.hasRecentTargetCrashDialog();
@@ -210,7 +221,7 @@ public final class ScriptGameAdapter extends AccessibilityService {
         if (!currentWindow || ScriptForegroundTarget.isUnavailableWindowPackage(activeWindowPackage)
                 || getPackageName().equals(activeWindowPackage)) {
             try {
-                ComponentName top = BActivityManager.get().getTopActivity(0);
+                ComponentName top = getVirtualTopActivity();
                 if (top != null) virtualTopPackage = top.getPackageName();
             } catch (RuntimeException ignored) {
                 // A failed BlackBox query must keep input blocked.
@@ -420,7 +431,7 @@ public final class ScriptGameAdapter extends AccessibilityService {
         }
         String virtualTop = "";
         try {
-            ComponentName top = BActivityManager.get().getTopActivity(0);
+            ComponentName top = getVirtualTopActivity();
             if (top != null) virtualTop = top.flattenToShortString();
         } catch (RuntimeException failure) {
             virtualTop = "读取失败:" + failure.getClass().getSimpleName();

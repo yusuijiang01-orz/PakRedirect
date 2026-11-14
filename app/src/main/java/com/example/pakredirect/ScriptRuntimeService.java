@@ -496,13 +496,19 @@ public final class ScriptRuntimeService extends Service {
         watcher.setDaemon(true);
         watcher.start();
         try {
-            awaitTargetGameForeground();
-            gameObserved.set(true);
-            verifyStartupDisplayCapture();
             CoraFlowWorkflowRuntime.WorkflowPackage workflow =
                     CoraFlowWorkflowUpdateManager.load(this, config, this::publish);
             try {
-                new CoraFlowWorkflowRuntime(workflow, runControl, this::publish).run();
+                if (CoraFlowWorkflowRuntime.startsWithStartupGate(workflow)) {
+                    publish("启动流程先检查游戏；未启动时由工作流启动，确认前台后再截图和操作");
+                } else {
+                    awaitTargetGameForeground();
+                    gameObserved.set(true);
+                    verifyStartupDisplayCapture();
+                    waitForFirstUseTermsIfNeeded();
+                }
+                new CoraFlowWorkflowRuntime(workflow, runControl, this::publish,
+                        () -> launchConfiguredGame(targetMode)).run();
                 Throwable workerFailure = runControl.getFailure();
                 if (workerFailure != null) throw workerFailure;
             } catch (Throwable scriptFailure) {
