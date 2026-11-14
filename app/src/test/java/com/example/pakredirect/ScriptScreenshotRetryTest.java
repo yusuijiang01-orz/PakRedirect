@@ -9,7 +9,9 @@ public final class ScriptScreenshotRetryTest {
         assertEquals(250L, ScriptScreenshotRetry.internalErrorDelayMs(1));
         assertEquals(500L, ScriptScreenshotRetry.internalErrorDelayMs(2));
         assertEquals(750L, ScriptScreenshotRetry.internalErrorDelayMs(3));
-        assertEquals(-1L, ScriptScreenshotRetry.internalErrorDelayMs(4));
+        assertEquals(1_000L, ScriptScreenshotRetry.internalErrorDelayMs(4));
+        assertEquals(1_250L, ScriptScreenshotRetry.internalErrorDelayMs(5));
+        assertEquals(-1L, ScriptScreenshotRetry.internalErrorDelayMs(6));
     }
 
     @Test public void waitsOutAndroidScreenshotRateLimitBeforeRetrying() {

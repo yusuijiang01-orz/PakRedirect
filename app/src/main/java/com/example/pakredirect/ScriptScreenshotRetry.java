@@ -2,7 +2,7 @@ package com.example.pakredirect;
 
 /** Bounded backoff for transient Android accessibility screenshot failures. */
 final class ScriptScreenshotRetry {
-    private static final int MAX_INTERNAL_ERROR_RETRIES = 3;
+    private static final int MAX_INTERNAL_ERROR_RETRIES = 5;
     private static final long INTERVAL_ERROR_DELAY_MS = 1_500L;
 
     private ScriptScreenshotRetry() { }

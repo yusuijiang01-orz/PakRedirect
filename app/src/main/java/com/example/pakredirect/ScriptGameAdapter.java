@@ -40,6 +40,7 @@ public final class ScriptGameAdapter extends AccessibilityService {
     private volatile ForegroundEvent foregroundEvent = ForegroundEvent.EMPTY;
     private volatile String targetGameLabel = "";
     private volatile boolean useDisplayScreenshotFallback;
+    private volatile boolean displayScreenshotFallbackPrepared;
     private volatile String crashDialogPackage = "";
     private volatile String crashDialogClass = "";
     private volatile String crashDialogText = "";
@@ -77,7 +78,11 @@ public final class ScriptGameAdapter extends AccessibilityService {
         targetMode = ScriptToolsActivity.TARGET_MODE_DESKTOP.equals(mode)
                 ? ScriptToolsActivity.TARGET_MODE_DESKTOP : ScriptToolsActivity.TARGET_MODE_SANDBOX;
         ScriptGameAdapter current = instance;
-        if (current != null) current.targetGameLabel = current.loadTargetGameLabel();
+        if (current != null) {
+            current.targetGameLabel = current.loadTargetGameLabel();
+            current.useDisplayScreenshotFallback = defaultToDisplayScreenshot();
+            current.displayScreenshotFallbackPrepared = false;
+        }
     }
 
     public static ScriptGameAdapter requireConnected() {
@@ -95,7 +100,8 @@ public final class ScriptGameAdapter extends AccessibilityService {
     @Override protected void onServiceConnected() {
         super.onServiceConnected();
         foregroundEvent = ForegroundEvent.EMPTY;
-        useDisplayScreenshotFallback = false;
+        useDisplayScreenshotFallback = defaultToDisplayScreenshot();
+        displayScreenshotFallbackPrepared = false;
         screenshotRequestGate.reset();
         instance = this;
         targetGameLabel = loadTargetGameLabel();
@@ -128,7 +134,8 @@ public final class ScriptGameAdapter extends AccessibilityService {
     @Override public void onRebind(android.content.Intent intent) {
         super.onRebind(intent);
         foregroundEvent = ForegroundEvent.EMPTY;
-        useDisplayScreenshotFallback = false;
+        useDisplayScreenshotFallback = defaultToDisplayScreenshot();
+        displayScreenshotFallbackPrepared = false;
         screenshotRequestGate.reset();
         instance = this;
         Log.i(TAG, "accessibility service rebound; instance=" + System.identityHashCode(this));
@@ -698,6 +705,7 @@ public final class ScriptGameAdapter extends AccessibilityService {
         }
         if (Build.VERSION.SDK_INT >= 34) {
             if (useDisplayScreenshotFallback) {
+                prepareDisplayScreenshotFallback();
                 return captureDisplayInternal(timeoutMs, false);
             }
             return captureTargetWindow(timeoutMs);
@@ -730,9 +738,9 @@ public final class ScriptGameAdapter extends AccessibilityService {
             // for this accessibility-service session instead of retrying the
             // unsupported window path on every workflow node.
             useDisplayScreenshotFallback = true;
-            boolean collapsed = ScriptControlOverlayService.collapseForScreenshotFallback(1_000L);
+            prepareDisplayScreenshotFallback();
             Log.w(TAG, "per-window screenshot returned INTERNAL_ERROR; switching to display capture"
-                    + (collapsed ? " with compact RYLUX handle" : "; overlay could not be compacted"),
+                    + (displayScreenshotFallbackPrepared ? " with compact RYLUX handle" : "; overlay could not be compacted"),
                     windowFailure);
             try {
                 return captureDisplayInternal(timeoutMs, false);
@@ -746,6 +754,22 @@ public final class ScriptGameAdapter extends AccessibilityService {
 
     private static final class WindowScreenshotInternalError extends IllegalStateException {
         WindowScreenshotInternalError(String message) { super(message); }
+    }
+
+    private static boolean defaultToDisplayScreenshot() {
+        return Build.VERSION.SDK_INT >= 34
+                && ScriptToolsActivity.TARGET_MODE_SANDBOX.equals(targetMode);
+    }
+
+    private void prepareDisplayScreenshotFallback() {
+        if (displayScreenshotFallbackPrepared) return;
+        displayScreenshotFallbackPrepared = ScriptControlOverlayService
+                .collapseForScreenshotFallback(1_000L);
+        if (displayScreenshotFallbackPrepared) {
+            Log.i(TAG, "using whole-display screenshots with compact RYLUX handle");
+        } else {
+            Log.w(TAG, "using whole-display screenshots; RYLUX overlay could not be compacted");
+        }
     }
 
     private Bitmap captureDisplayInternal(long timeoutMs, boolean targetWindowOnly) throws Exception {
