@@ -127,7 +127,7 @@ public final class CoraFlowWorkflowRuntime {
         this.workflowPackage = workflowPackage;
         this.control = control;
         this.listener = listener;
-        this.game = ScriptGameAdapter.requireConnected();
+        this.game = ScriptGameAdapter.requireConnected(control);
         this.ocr = new ScriptOcr();
         this.gameLauncher = gameLauncher;
     }

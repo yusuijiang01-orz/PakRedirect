@@ -206,11 +206,6 @@ public final class ScriptRuntimeService extends Service {
                 ScriptToolsActivity.TARGET_MODE_SANDBOX));
         runtimeLog.configure(config.optBoolean(ScriptRuntimeLog.AUTO_SAVE, true),
                 config.optBoolean(ScriptRuntimeLog.SOURCE_CONTEXT, true));
-        if (!ScriptGameAdapter.isConnected()) {
-            publish("启动失败：请先启用 RYLUX 游戏输入服务");
-            stopSelf(latestStartId);
-            return;
-        }
         routeBridge.close();
         bagSnapshotRelay.close();
         control = new ScriptExecutionControl();
@@ -397,6 +392,13 @@ public final class ScriptRuntimeService extends Service {
     private boolean runMonitoredAttempt(JSONObject config, ScriptExecutionControl runControl,
                                         String targetMode,
                                         ScriptGameProcessMonitor processMonitor) throws Exception {
+        if (!ScriptGameAdapter.isConnected()) {
+            publish("运行：等待 RYLUX 游戏输入服务连接");
+        }
+        // Android can briefly unbind and recreate an enabled AccessibilityService
+        // while the app switches from its confirmation UI to the game window. Do
+        // not turn that short lifecycle gap into a false "service disabled" failure.
+        ScriptGameAdapter.requireConnected(runControl);
         AtomicBoolean watching = new AtomicBoolean(true);
         AtomicBoolean gameObserved = new AtomicBoolean(false);
         AtomicReference<Throwable> watchdogFailure = new AtomicReference<>();
