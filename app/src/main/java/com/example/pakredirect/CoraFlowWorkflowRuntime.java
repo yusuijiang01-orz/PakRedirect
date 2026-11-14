@@ -9,10 +9,13 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.text.Normalizer;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -72,7 +75,15 @@ public final class CoraFlowWorkflowRuntime {
     private static final class OcrRead {
         final String text;
         final float confidence;
-        OcrRead(String text, float confidence) { this.text = text; this.confidence = confidence; }
+        final List<CoraFlowTextClickMatcher.Line> lines;
+        OcrRead(String text, float confidence) {
+            this(text, confidence, Collections.emptyList());
+        }
+        OcrRead(String text, float confidence, List<CoraFlowTextClickMatcher.Line> lines) {
+            this.text = text;
+            this.confidence = confidence;
+            this.lines = lines == null ? Collections.emptyList() : lines;
+        }
     }
 
     private static final class NumberSample {
@@ -492,7 +503,14 @@ public final class CoraFlowWorkflowRuntime {
                 result = readOcr(frame, region(config.optJSONArray("region")), chinese,
                         config.optInt("ocr_scale", 2));
             } finally { frame.recycle(); }
-            if (result.confidence >= minimum && ("recognize_text".equals(type) || parseNumber(result.text) != null)) break;
+            if (result.confidence >= minimum && ("recognize_text".equals(type) || parseNumber(result.text) != null)) {
+                if ("recognize_text".equals(type) && config.optBoolean("click_on_match", false)
+                        && textMatches(result.text, config) && !hasConfidentClickLine(result, config)) {
+                    if (attempt < retries) continue;
+                } else {
+                    break;
+                }
+            }
         }
         if (result == null) throw new IllegalStateException("“" + name + "”OCR 没有返回结果");
         String raw = result.text.replaceAll("\\s+", " ").trim();
@@ -506,10 +524,11 @@ public final class CoraFlowWorkflowRuntime {
         }
         if ("recognize_text".equals(type)) {
             String expected = config.optString("text_to_find", "");
-            String haystack = normalizeText(raw, config.optBoolean("text_case_sensitive", false));
-            String needle = normalizeText(expected, config.optBoolean("text_case_sensitive", false));
-            boolean matched = "equals".equals(config.optString("text_match_mode", "contains"))
-                    ? haystack.equals(needle) : haystack.contains(needle);
+            boolean matched = textMatches(raw, config);
+            if (matched && config.optBoolean("click_on_match", false)) {
+                matched = clickRecognizedText(result, expected, config, name,
+                        config.optBoolean("text_case_sensitive", false));
+            }
             note("OCR 文字“" + raw + "”，匹配“" + expected + "”（" + percent(result.confidence)
                     + "）→ " + (matched ? "是" : "否") + "。");
             return matched;
@@ -737,18 +756,70 @@ public final class CoraFlowWorkflowRuntime {
                     Math.max(input.getWidth(), input.getHeight()));
             float confidence = 0;
             int scores = 0;
+            List<CoraFlowTextClickMatcher.Line> recognizedLines = new ArrayList<>();
             try {
                 JSONArray lines = new JSONArray(result.json);
                 for (int i = 0; i < lines.length(); i++) {
                     JSONObject line = lines.optJSONObject(i);
-                    if (line != null && line.has("score")) { confidence += (float) line.optDouble("score", 0); scores++; }
+                    if (line == null) continue;
+                    if (line.has("score")) { confidence += (float) line.optDouble("score", 0); scores++; }
+                    if (!line.has("x") || !line.has("y")) continue;
+                    double sourceX = rect.left + line.optDouble("x", 0) / (double) factor;
+                    double sourceY = rect.top + line.optDouble("y", 0) / (double) factor;
+                    double workflowX = sourceX * coordinateWidth / source.getWidth();
+                    double workflowY = sourceY * coordinateHeight / source.getHeight();
+                    double lineConfidence = Math.max(0, Math.min(1, line.optDouble("score", 0))) * 100d;
+                    recognizedLines.add(new CoraFlowTextClickMatcher.Line(
+                            line.optString("text", line.optString("words", "")),
+                            lineConfidence, workflowX, workflowY));
                 }
             } catch (JSONException ignored) { }
-            return new OcrRead(result.text, scores == 0 ? 0 : confidence / scores * 100f);
+            return new OcrRead(result.text, scores == 0 ? 0 : confidence / scores * 100f,
+                    recognizedLines);
         } finally {
             if (input != crop && !input.isRecycled()) input.recycle();
             if (!crop.isRecycled()) crop.recycle();
         }
+    }
+
+    private boolean hasConfidentClickLine(OcrRead read, JSONObject config) {
+        boolean exact = "equals".equals(config.optString("text_match_mode", "contains"));
+        CoraFlowTextClickMatcher.Result match = CoraFlowTextClickMatcher.find(read.lines,
+                config.optString("text_to_find", ""), exact,
+                config.optBoolean("text_case_sensitive", false));
+        return match.line != null && !match.ambiguous
+                && match.line.confidence >= config.optDouble("click_min_confidence", 75);
+    }
+
+    private boolean textMatches(String text, JSONObject config) {
+        String haystack = normalizeText(text, config.optBoolean("text_case_sensitive", false));
+        String needle = normalizeText(config.optString("text_to_find", ""),
+                config.optBoolean("text_case_sensitive", false));
+        return "equals".equals(config.optString("text_match_mode", "contains"))
+                ? haystack.equals(needle) : haystack.contains(needle);
+    }
+
+    private boolean clickRecognizedText(OcrRead read, String expected, JSONObject config,
+                                        String name, boolean caseSensitive) throws Exception {
+        boolean exact = "equals".equals(config.optString("text_match_mode", "contains"));
+        CoraFlowTextClickMatcher.Result match = CoraFlowTextClickMatcher.find(
+                read.lines, expected, exact, caseSensitive);
+        double minimum = Math.max(0, Math.min(100, config.optDouble("click_min_confidence", 75)));
+        if (match.line == null || match.ambiguous || match.line.confidence < minimum) {
+            String reason = match.line == null ? "没有可点击的文字定位框"
+                    : match.ambiguous ? "文字候选位置有歧义"
+                    : "词框置信度 " + percent(match.line.confidence) + " 低于点击阈值 "
+                    + percent(minimum);
+            note("OCR 匹配到“" + expected + "”，但" + reason + "；未发送点击，按 false 分支继续。");
+            return false;
+        }
+        double x = match.line.x + config.optDouble("click_offset_x", 0);
+        double y = match.line.y + config.optDouble("click_offset_y", 0);
+        click(x, y);
+        note("OCR 定位“" + expected + "”并点击文字行中心（词框置信度 "
+                + percent(match.line.confidence) + "，坐标 " + Math.round(x) + ","
+                + Math.round(y) + "）：“" + name + "”。");
+        return true;
     }
 
     private Match findTemplate(Bitmap frame, String path, Rect region, float threshold) throws Exception {
@@ -1515,7 +1586,8 @@ public final class CoraFlowWorkflowRuntime {
     }
 
     private static String normalizeText(String text, boolean caseSensitive) {
-        String value = text == null ? "" : text.replaceAll("\\s+", "");
+        String value = Normalizer.normalize(text == null ? "" : text, Normalizer.Form.NFKC)
+                .replaceAll("[\\s\\p{P}\\p{S}]+", "");
         return caseSensitive ? value : value.toLowerCase(Locale.ROOT);
     }
 
