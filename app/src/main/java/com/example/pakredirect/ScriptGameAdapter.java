@@ -482,28 +482,89 @@ public final class ScriptGameAdapter extends AccessibilityService {
     /** Set text in the currently focused editable node exposed by the game. */
     public boolean setFocusedText(String text) {
         requireTargetGameForeground();
-        AccessibilityNodeInfo root = getRootInActiveWindow();
-        if (root == null) return false;
+        boolean sandboxMode = !ScriptToolsActivity.TARGET_MODE_DESKTOP.equals(targetMode);
+        String requested = text == null ? "" : text;
+        ForegroundEvent event = foregroundEvent;
+
+        // In BlackBox the accessibility event can belong to the IME after a
+        // game EditText is focused. The active app window and virtual top
+        // activity still prove that the sandbox game is foregrounded, while
+        // the last event's package/window ID no longer identifies that field.
+        AccessibilityNodeInfo activeRoot = getRootInActiveWindow();
+        if (activeRoot != null) {
+            try {
+                if (setFocusedTextInRoot(activeRoot, requested, sandboxMode, event)) return true;
+            } finally {
+                activeRoot.recycle();
+            }
+        }
+
+        if (sandboxMode && hasTargetGameForeground()) {
+            List<AccessibilityWindowInfo> windows;
+            try {
+                windows = getWindows();
+            } catch (RuntimeException unavailable) {
+                Log.w(TAG, "Sandbox input: cannot enumerate app windows", unavailable);
+                return false;
+            }
+            if (windows != null) {
+                try {
+                    for (AccessibilityWindowInfo window : windows) {
+                        if (window == null || window.getType() != AccessibilityWindowInfo.TYPE_APPLICATION
+                                || !window.isActive()) continue;
+                        AccessibilityNodeInfo root = null;
+                        try {
+                            root = window.getRoot();
+                            if (root != null && getPackageName().contentEquals(root.getPackageName())
+                                    && setFocusedTextInRoot(root, requested, true, event)) return true;
+                        } catch (RuntimeException unavailable) {
+                            Log.w(TAG, "Sandbox input: cannot read active game window", unavailable);
+                        } finally {
+                            if (root != null) root.recycle();
+                        }
+                    }
+                } finally {
+                    for (AccessibilityWindowInfo window : windows) {
+                        if (window != null) window.recycle();
+                    }
+                }
+            }
+        }
+        Log.w(TAG, "Focused game text input unavailable; sandbox=" + sandboxMode
+                + ", foreground=" + hasTargetGameForeground());
+        return false;
+    }
+
+    private boolean setFocusedTextInRoot(AccessibilityNodeInfo root, String requested,
+                                         boolean sandboxMode, ForegroundEvent event) {
         AccessibilityNodeInfo focused = null;
         try {
             focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT);
             if (focused == null) focused = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY);
             if (focused == null || !focused.isEditable()) return false;
             CharSequence nodePackage = focused.getPackageName();
-            ForegroundEvent event = foregroundEvent;
-            if (nodePackage == null || focused.getWindowId() != event.windowId) return false;
-            boolean directGameNode = TARGET_GAME_PACKAGE.contentEquals(nodePackage);
-            boolean sandboxProxyNode = getPackageName().contentEquals(event.packageName)
-                    && ScriptForegroundTarget.isProxyActivity(event.className)
+            CharSequence rootPackage = root.getPackageName();
+            boolean sandboxGameNode = sandboxMode && nodePackage != null && rootPackage != null
+                    && hasTargetGameForeground()
+                    && getPackageName().contentEquals(rootPackage)
                     && getPackageName().contentEquals(nodePackage);
-            if (!directGameNode && !sandboxProxyNode) return false;
+            boolean directGameNode = !sandboxMode && nodePackage != null
+                    && TARGET_GAME_PACKAGE.contentEquals(nodePackage)
+                    && focused.getWindowId() == event.windowId;
+            if (!directGameNode && !sandboxGameNode) return false;
+
+            CharSequence current = focused.getText();
+            if (requested.contentEquals(current == null ? "" : current)) return true;
             Bundle arguments = new Bundle();
-            arguments.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
-                    text == null ? "" : text);
-            return focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments);
+            arguments.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, requested);
+            boolean accepted = focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments);
+            if (!accepted) {
+                Log.w(TAG, "Focused game EditText rejected accessibility set-text; sandbox=" + sandboxMode
+                        + ", nodeWindow=" + focused.getWindowId() + ", eventWindow=" + event.windowId);
+            }
+            return accepted;
         } finally {
             if (focused != null) focused.recycle();
-            root.recycle();
         }
     }
 
