@@ -90,7 +90,10 @@ public final class CnDownloadRouter {
         }
         String path = "workflow/" + safeName;
         String raw = "https://raw.githubusercontent.com/" + OWNER_REPO + "/main/" + path;
-        return unique(GITEE_RAW_BASE + path, CF_WORKER + raw, GH_PROXY + raw, raw);
+        // The GitHub Raw and Cloudflare paths have served cached, signed but
+        // older manifests. Prefer the mirror that currently tracks main, then
+        // retain the remaining origins as fallbacks.
+        return unique(GH_PROXY + raw, GITEE_RAW_BASE + path, CF_WORKER + raw, raw);
     }
 
     /** Build mirrors from the directory selected by the authorized manifest. */

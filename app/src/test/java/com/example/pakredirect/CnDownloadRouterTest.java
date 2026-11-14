@@ -7,6 +7,20 @@ import static org.junit.Assert.assertEquals;
 
 public class CnDownloadRouterTest {
     @Test
+    public void coraflowWorkflowUsesCurrentMirrorBeforeKnownStaleCaches() {
+        String raw = "https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/workflow/manifest.json";
+        String[] candidates = CnDownloadRouter.workflowRepoFileUrls("manifest.json");
+
+        assertEquals("https://gh-proxy.com/" + raw, candidates[0]);
+        assertArrayEquals(new String[]{
+                "https://gh-proxy.com/" + raw,
+                "https://gitee.com/perish-with-honor/rlyux/raw/master/workflow/manifest.json",
+                "https://rylux-cdn.335399288.workers.dev/" + raw,
+                raw,
+        }, candidates);
+    }
+
+    @Test
     public void protectedLinkspakUsesManifestSelectedProductionDirectory() {
         String url = "https://raw.githubusercontent.com/yusuijiang01-orz/PakRedirect/main/pak/linkspak.txt";
 
