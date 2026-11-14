@@ -13,6 +13,17 @@ public final class ScriptScreenshotRetryTest {
     }
 
     @Test public void waitsOutAndroidScreenshotRateLimitBeforeRetrying() {
-        assertEquals(1_000L, ScriptScreenshotRetry.intervalErrorDelayMs());
+        assertEquals(1_500L, ScriptScreenshotRetry.intervalErrorDelayMs());
+    }
+
+    @Test public void screenshotRequestGateKeepsAServiceWideMinimumSpacing() {
+        ScriptScreenshotRequestGate gate = new ScriptScreenshotRequestGate();
+        assertEquals(0L, gate.delayUntilNextRequestMs(10_000L));
+        gate.recordRequest(10_000L);
+        assertEquals(750L, gate.delayUntilNextRequestMs(10_500L));
+        assertEquals(0L, gate.delayUntilNextRequestMs(11_250L));
+        gate.recordRequest(11_250L);
+        gate.reset();
+        assertEquals(0L, gate.delayUntilNextRequestMs(11_250L));
     }
 }

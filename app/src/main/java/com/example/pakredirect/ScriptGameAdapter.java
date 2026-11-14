@@ -44,6 +44,7 @@ public final class ScriptGameAdapter extends AccessibilityService {
     private volatile String crashDialogClass = "";
     private volatile String crashDialogText = "";
     private volatile long crashDialogObservedAt;
+    private final ScriptScreenshotRequestGate screenshotRequestGate = new ScriptScreenshotRequestGate();
 
     private static final long CRASH_DIALOG_TTL_MS = 60_000L;
 
@@ -95,6 +96,7 @@ public final class ScriptGameAdapter extends AccessibilityService {
         super.onServiceConnected();
         foregroundEvent = ForegroundEvent.EMPTY;
         useDisplayScreenshotFallback = false;
+        screenshotRequestGate.reset();
         instance = this;
         targetGameLabel = loadTargetGameLabel();
         Log.i(TAG, "accessibility service connected; instance=" + System.identityHashCode(this));
@@ -127,6 +129,7 @@ public final class ScriptGameAdapter extends AccessibilityService {
         super.onRebind(intent);
         foregroundEvent = ForegroundEvent.EMPTY;
         useDisplayScreenshotFallback = false;
+        screenshotRequestGate.reset();
         instance = this;
         Log.i(TAG, "accessibility service rebound; instance=" + System.identityHashCode(this));
     }
@@ -751,6 +754,8 @@ public final class ScriptGameAdapter extends AccessibilityService {
         int internalErrorRetries = 0;
         do {
             requireTargetGameForeground();
+            awaitScreenshotRequestSlot(deadline);
+            requireTargetGameForeground();
             ScreenshotWindow targetWindow = targetWindowOnly ? resolveActiveApplicationWindow() : null;
             CountDownLatch done = new CountDownLatch(1);
             Bitmap[] result = new Bitmap[1];
@@ -793,6 +798,7 @@ public final class ScriptGameAdapter extends AccessibilityService {
                     done.countDown();
                 }
             };
+            screenshotRequestGate.recordRequest(SystemClock.elapsedRealtime());
             if (targetWindowOnly) {
                 takeScreenshotOfWindow(targetWindow.id, getMainExecutor(), callback);
             } else {
@@ -835,6 +841,17 @@ public final class ScriptGameAdapter extends AccessibilityService {
             if (delay > 0) SystemClock.sleep(delay);
         } while (SystemClock.elapsedRealtime() < deadline);
         throw new IllegalStateException("系统截图请求过于频繁，等待重试超时（错误码 " + lastErrorCode + "）");
+    }
+
+    private void awaitScreenshotRequestSlot(long deadline) {
+        long now = SystemClock.elapsedRealtime();
+        long waitMs = screenshotRequestGate.delayUntilNextRequestMs(now);
+        if (waitMs <= 0) return;
+        long remaining = deadline - now;
+        if (waitMs >= remaining) {
+            throw new IllegalStateException("等待 Android 截图最小请求间隔超时");
+        }
+        SystemClock.sleep(waitMs);
     }
 
     private ScreenshotWindow resolveActiveApplicationWindow() {
