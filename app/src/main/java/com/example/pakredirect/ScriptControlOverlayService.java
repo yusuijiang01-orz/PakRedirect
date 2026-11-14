@@ -283,6 +283,34 @@ public final class ScriptControlOverlayService extends Service {
         scheduleHandleFade();
     }
 
+    /** Keep whole-display screenshot fallback clear without hiding/flashing the controls. */
+    static boolean collapseForScreenshotFallback(long timeoutMs) {
+        ScriptControlOverlayService service = activeInstance;
+        if (service == null || service.overlay == null || service.params == null) return true;
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            service.mainHandler.removeCallbacks(service.collapseWhenIdle);
+            service.collapseToNearestEdge();
+            return service.collapsed;
+        }
+        CountDownLatch updated = new CountDownLatch(1);
+        boolean[] collapsed = new boolean[1];
+        service.mainHandler.post(() -> {
+            try {
+                service.mainHandler.removeCallbacks(service.collapseWhenIdle);
+                service.collapseToNearestEdge();
+                collapsed[0] = service.collapsed;
+            } finally {
+                updated.countDown();
+            }
+        });
+        try {
+            return updated.await(Math.max(1L, timeoutMs), TimeUnit.MILLISECONDS) && collapsed[0];
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
     private void expandFromEdge() {
         if (!collapsed || params == null || windowManager == null || overlay == null) return;
         mainHandler.removeCallbacks(fadeHandleWhenIdle);

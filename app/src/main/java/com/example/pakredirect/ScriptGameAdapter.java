@@ -39,6 +39,7 @@ public final class ScriptGameAdapter extends AccessibilityService {
     private static volatile String targetMode = ScriptToolsActivity.TARGET_MODE_SANDBOX;
     private volatile ForegroundEvent foregroundEvent = ForegroundEvent.EMPTY;
     private volatile String targetGameLabel = "";
+    private volatile boolean useDisplayScreenshotFallback;
     private volatile String crashDialogPackage = "";
     private volatile String crashDialogClass = "";
     private volatile String crashDialogText = "";
@@ -93,6 +94,7 @@ public final class ScriptGameAdapter extends AccessibilityService {
     @Override protected void onServiceConnected() {
         super.onServiceConnected();
         foregroundEvent = ForegroundEvent.EMPTY;
+        useDisplayScreenshotFallback = false;
         instance = this;
         targetGameLabel = loadTargetGameLabel();
         Log.i(TAG, "accessibility service connected; instance=" + System.identityHashCode(this));
@@ -124,6 +126,7 @@ public final class ScriptGameAdapter extends AccessibilityService {
     @Override public void onRebind(android.content.Intent intent) {
         super.onRebind(intent);
         foregroundEvent = ForegroundEvent.EMPTY;
+        useDisplayScreenshotFallback = false;
         instance = this;
         Log.i(TAG, "accessibility service rebound; instance=" + System.identityHashCode(this));
     }
@@ -691,6 +694,9 @@ public final class ScriptGameAdapter extends AccessibilityService {
             throw new UnsupportedOperationException("系统版本过低：截图需要 Android 11 或更新版本");
         }
         if (Build.VERSION.SDK_INT >= 34) {
+            if (useDisplayScreenshotFallback) {
+                return captureDisplayInternal(timeoutMs, false);
+            }
             return captureTargetWindow(timeoutMs);
         }
         // Android 11–13 do not have the per-window screenshot API. Retain the
@@ -712,7 +718,31 @@ public final class ScriptGameAdapter extends AccessibilityService {
     }
 
     private Bitmap captureTargetWindow(long timeoutMs) throws Exception {
-        return captureDisplayInternal(timeoutMs, true);
+        try {
+            return captureDisplayInternal(timeoutMs, true);
+        } catch (WindowScreenshotInternalError windowFailure) {
+            // Android 14+ per-window screenshots can return INTERNAL_ERROR for
+            // BlackBox guest windows even while the same game is visible on the
+            // display. Fall back to the display capture once, then keep using it
+            // for this accessibility-service session instead of retrying the
+            // unsupported window path on every workflow node.
+            useDisplayScreenshotFallback = true;
+            boolean collapsed = ScriptControlOverlayService.collapseForScreenshotFallback(1_000L);
+            Log.w(TAG, "per-window screenshot returned INTERNAL_ERROR; switching to display capture"
+                    + (collapsed ? " with compact RYLUX handle" : "; overlay could not be compacted"),
+                    windowFailure);
+            try {
+                return captureDisplayInternal(timeoutMs, false);
+            } catch (Exception displayFailure) {
+                displayFailure.addSuppressed(windowFailure);
+                throw new IllegalStateException("游戏窗口截图失败，整屏截图回退也失败："
+                        + displayFailure.getMessage(), displayFailure);
+            }
+        }
+    }
+
+    private static final class WindowScreenshotInternalError extends IllegalStateException {
+        WindowScreenshotInternalError(String message) { super(message); }
     }
 
     private Bitmap captureDisplayInternal(long timeoutMs, boolean targetWindowOnly) throws Exception {
@@ -792,8 +822,10 @@ public final class ScriptGameAdapter extends AccessibilityService {
                 // Retry a few times with bounded backoff, then surface the original failure.
                 retryDelay = ScriptScreenshotRetry.internalErrorDelayMs(++internalErrorRetries);
                 if (retryDelay < 0) {
-                    throw new IllegalStateException("系统截图失败：" + screenshotErrorDescription(lastErrorCode)
-                            + "（错误码 " + lastErrorCode + "，重试 3 次仍失败）");
+                    String message = "系统截图失败：" + screenshotErrorDescription(lastErrorCode)
+                            + "（错误码 " + lastErrorCode + "，重试 3 次仍失败）";
+                    if (targetWindowOnly) throw new WindowScreenshotInternalError(message);
+                    throw new IllegalStateException(message);
                 }
             } else {
                 throw new IllegalStateException("系统截图失败：" + screenshotErrorDescription(lastErrorCode)
