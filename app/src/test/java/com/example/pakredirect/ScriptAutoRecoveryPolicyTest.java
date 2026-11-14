@@ -36,4 +36,14 @@ public final class ScriptAutoRecoveryPolicyTest {
         assertEquals(20_000L, ScriptAutoRecoveryPolicy.backoffMs(3));
         assertEquals(45_000L, ScriptAutoRecoveryPolicy.backoffMs(9));
     }
+
+    @Test public void restartsStalledDesktopOrSandboxOnlyWhenEnabledAndObserved() {
+        assertTrue(ScriptAutoRecoveryPolicy.shouldRestartStalledGame(true, true, false, true, 0));
+        assertFalse(ScriptAutoRecoveryPolicy.shouldRestartStalledGame(false, true, false, true, 0));
+        assertFalse(ScriptAutoRecoveryPolicy.shouldRestartStalledGame(true, false, false, true, 0));
+        assertFalse(ScriptAutoRecoveryPolicy.shouldRestartStalledGame(true, true, true, true, 0));
+        assertFalse(ScriptAutoRecoveryPolicy.shouldRestartStalledGame(true, true, false, true,
+                ScriptAutoRecoveryPolicy.MAX_RESTARTS_PER_WINDOW));
+        assertFalse(ScriptAutoRecoveryPolicy.shouldRestartStalledGame(true, true, false, false, 0));
+    }
 }

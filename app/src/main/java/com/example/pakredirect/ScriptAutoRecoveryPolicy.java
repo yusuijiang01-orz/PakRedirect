@@ -15,10 +15,10 @@ final class ScriptAutoRecoveryPolicy {
                 && restartsInWindow < MAX_RESTARTS_PER_WINDOW;
     }
 
-    static boolean shouldRestartStalledSandbox(boolean enabled, boolean gameWasObserved,
-                                                boolean stopRequested, boolean sandboxTarget,
-                                                int restartsInWindow) {
-        return enabled && gameWasObserved && !stopRequested && sandboxTarget
+    static boolean shouldRestartStalledGame(boolean enabled, boolean gameWasObserved,
+                                             boolean stopRequested, boolean stalledGame,
+                                             int restartsInWindow) {
+        return enabled && gameWasObserved && !stopRequested && stalledGame
                 && restartsInWindow < MAX_RESTARTS_PER_WINDOW;
     }
 

@@ -22,7 +22,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
-/** Explicitly started foreground host for the recovered Lua script. */
+/** Explicitly started foreground host for CoraFlow workflows and legacy scripts. */
 public final class ScriptRuntimeService extends Service {
     public static final String ACTION_START = "com.example.pakredirect.script.START";
     public static final String ACTION_PAUSE = "com.example.pakredirect.script.PAUSE";
@@ -257,8 +257,11 @@ public final class ScriptRuntimeService extends Service {
                 ScriptGameProcessMonitor.State processState = processMonitor.inspect(this, targetMode);
                 gameWasObserved |= processMonitor.hasObservedRunningProcess();
                 Throwable currentWorkerFailure = runControl.getFailure();
-                boolean stalledSandbox = isSandboxScreenStall(targetMode, failure,
-                        currentWorkerFailure);
+                boolean stalledGame = isGameScreenStall(failure, currentWorkerFailure);
+                boolean stalledSandbox = stalledGame
+                        && ScriptToolsActivity.TARGET_MODE_SANDBOX.equals(targetMode);
+                boolean stalledDesktop = stalledGame
+                        && ScriptToolsActivity.TARGET_MODE_DESKTOP.equals(targetMode);
                 long now = android.os.SystemClock.elapsedRealtime();
                 if (now - restartWindowStarted >= ScriptAutoRecoveryPolicy.RESTART_WINDOW_MS) {
                     restartWindowStarted = now;
@@ -266,9 +269,8 @@ public final class ScriptRuntimeService extends Service {
                 }
                 boolean shouldRestart = ScriptAutoRecoveryPolicy.shouldRestart(autoLogin,
                         gameWasObserved, false, processState, restartsInWindow)
-                        || ScriptAutoRecoveryPolicy.shouldRestartStalledSandbox(autoLogin,
-                        gameWasObserved, false,
-                        ScriptToolsActivity.TARGET_MODE_SANDBOX.equals(targetMode) && stalledSandbox,
+                        || ScriptAutoRecoveryPolicy.shouldRestartStalledGame(autoLogin,
+                        gameWasObserved, false, stalledGame,
                         restartsInWindow);
                 if (shouldRestart) {
                     restartsInWindow++;
@@ -276,20 +278,20 @@ public final class ScriptRuntimeService extends Service {
                     if (runControl.getState() == ScriptExecutionControl.State.FAILED) {
                         if (runControl.hasActiveWorkers()) {
                             reportFailure(new IllegalStateException(
-                                    "游戏已退出，但仍有 Lua 工作线程未结束；为避免重复触控，自动恢复已停止"));
+                                    "游戏已退出，但工作流执行线程未结束；为避免重复触控，自动恢复已停止"));
                             return;
                         }
                         try {
                             runControl.start();
                         } catch (RuntimeException cannotRestart) {
                             reportFailure(new IllegalStateException(
-                                    "游戏已退出，但上一轮 Lua 工作线程尚未完全结束；为避免重复触控，自动恢复已停止",
+                                    "游戏已退出，但上一轮工作流线程尚未完全结束；为避免重复触控，自动恢复已停止",
                                     cannotRestart));
                             return;
                         }
                     }
                     long backoff = ScriptAutoRecoveryPolicy.backoffMs(restartsInWindow);
-                    publish((stalledSandbox ? "沙箱画面连续 2 分钟基本无变化，"
+                    publish((stalledGame ? "游戏世界画面连续 2 分钟基本无变化，"
                             : "已检测到游戏崩溃/无响应，")
                             + (backoff / 1000) + " 秒后自动重启并重新登录（"
                             + restartsInWindow + "/" + ScriptAutoRecoveryPolicy.MAX_RESTARTS_PER_WINDOW + "）");
@@ -333,6 +335,20 @@ public final class ScriptRuntimeService extends Service {
                             return;
                         }
                     }
+                    if (stalledDesktop) {
+                        try {
+                            if (!requestStopDesktopGameForRecovery(runControl)) {
+                                IllegalStateException stopFailure = new IllegalStateException(
+                                        "已检测到桌面游戏卡屏，但系统未能确认已把游戏移到后台；已停止自动重启以避免重复启动");
+                                if (runControl.fail(stopFailure)) reportFailure(stopFailure);
+                                return;
+                            }
+                        } catch (ScriptExecutionControl.StopRequestedException stopped) {
+                            runControl.complete();
+                            publish("已停止");
+                            return;
+                        }
+                    }
                     if (!launchConfiguredGame(targetMode)) {
                         IllegalStateException launchFailure = new IllegalStateException(
                                 "自动恢复无法启动所选的封神榜客户端；请检查安装状态与目标来源");
@@ -349,13 +365,13 @@ public final class ScriptRuntimeService extends Service {
                     if (runControl.getState() == ScriptExecutionControl.State.FAILED) {
                         if (runControl.hasActiveWorkers()) {
                             reportFailure(new IllegalStateException(
-                                    "游戏仍在运行，但仍有 Lua 工作线程未结束；已停止以避免并发触控"));
+                                    "游戏仍在运行，但工作流执行线程未结束；已停止以避免并发触控"));
                             return;
                         }
                         try { runControl.start(); }
                         catch (RuntimeException cannotResume) {
                             reportFailure(new IllegalStateException(
-                                    "游戏仍在运行，但旧 Lua 工作线程未退出；已停止以避免并发触控",
+                                    "游戏仍在运行，但上一轮工作流线程未退出；已停止以避免并发触控",
                                     cannotResume));
                             return;
                         }
@@ -439,10 +455,10 @@ public final class ScriptRuntimeService extends Service {
                     return;
                 }
                 ScriptExecutionControl.State controlState = runControl.getState();
-                boolean keepWatchingAfterLuaFailure = sandboxTarget && autoLogin
+                boolean keepWatchingAfterWorkflowFailure = sandboxTarget && autoLogin
                         && controlState == ScriptExecutionControl.State.FAILED;
-                if (sandboxTarget && (controlState == ScriptExecutionControl.State.RUNNING
-                        || keepWatchingAfterLuaFailure)
+                if ((controlState == ScriptExecutionControl.State.RUNNING
+                        || keepWatchingAfterWorkflowFailure)
                         && processState == ScriptGameProcessMonitor.State.RUNNING
                         && ScriptGameAdapter.isTargetGameForeground()) {
                     long sampleAt = android.os.SystemClock.elapsedRealtime();
@@ -451,37 +467,44 @@ public final class ScriptRuntimeService extends Service {
                         Bitmap frame = null;
                         try {
                             frame = ScriptGameAdapter.requireConnected(runControl).captureDisplay(5_000L);
-                            ScriptFrameStallDetector.Observation observation =
-                                    stallDetector.observe(frame, android.os.SystemClock.elapsedRealtime());
-                            if (observation.initialized) {
-                                Log.i("RYLUX-Lua", "sandbox screen watchdog similarity="
-                                        + String.format(java.util.Locale.US, "%.4f", observation.similarity)
-                                        + " stableSeconds=" + (observation.stableForMs / 1_000L));
-                                if (observation.stableForMs >= 30_000L
-                                        && android.os.SystemClock.elapsedRealtime() - lastStallStatusAt
-                                        >= 30_000L) {
-                                    lastStallStatusAt = android.os.SystemClock.elapsedRealtime();
-                                    publish("沙箱画面持续无变化："
-                                            + (observation.stableForMs / 1_000L) + " 秒 / 120 秒");
+                            if (!isWorldHudVisible(frame)) {
+                                // Login, terms, role selection and other static menus are not
+                                // evidence of a frozen game. Arm the watchdog only in-world.
+                                stallDetector.reset();
+                                lastStallStatusAt = 0L;
+                            } else {
+                                ScriptFrameStallDetector.Observation observation =
+                                        stallDetector.observe(frame, android.os.SystemClock.elapsedRealtime());
+                                if (observation.initialized) {
+                                    Log.i("RYLUX-Lua", "game screen watchdog similarity="
+                                            + String.format(java.util.Locale.US, "%.4f", observation.similarity)
+                                            + " stableSeconds=" + (observation.stableForMs / 1_000L));
+                                    if (observation.stableForMs >= 30_000L
+                                            && android.os.SystemClock.elapsedRealtime() - lastStallStatusAt
+                                            >= 30_000L) {
+                                        lastStallStatusAt = android.os.SystemClock.elapsedRealtime();
+                                        publish("游戏主场景画面持续无变化："
+                                                + (observation.stableForMs / 1_000L) + " 秒 / 120 秒");
+                                    }
                                 }
-                            }
-                            if (observation.stalled) {
-                                GameScreenStalledException stalled = new GameScreenStalledException(
-                                        observation.similarity, observation.stableForMs);
-                                watchdogFailure.compareAndSet(null, stalled);
-                                if (runControl.fail(stalled)) {
-                                    Log.w("RYLUX-Lua", stalled.getMessage());
-                                    publish("检测到沙箱游戏画面连续 2 分钟无变化，正在自动恢复登录");
-                                } else if (watchdogFailure.get() == stalled) {
-                                    Log.w("RYLUX-Lua", stalled.getMessage());
-                                    publish("挂机脚本本轮已退出，但沙箱仍卡在同一画面；正在启动自动恢复");
+                                if (observation.stalled) {
+                                    GameScreenStalledException stalled = new GameScreenStalledException(
+                                            observation.similarity, observation.stableForMs);
+                                    watchdogFailure.compareAndSet(null, stalled);
+                                    if (runControl.fail(stalled)) {
+                                        Log.w("RYLUX-Lua", stalled.getMessage());
+                                        publish("检测到游戏主场景连续 2 分钟无变化，正在自动恢复");
+                                    } else if (watchdogFailure.get() == stalled) {
+                                        Log.w("RYLUX-Lua", stalled.getMessage());
+                                        publish("工作流本轮已退出，但游戏仍卡在同一主场景；正在启动自动恢复");
+                                    }
+                                    return;
                                 }
-                                return;
                             }
                         } catch (Exception captureFailure) {
                             stallDetector.reset();
                             if (watching.get() && !runControl.isStopRequested()) {
-                                Log.w("RYLUX-Lua", "sandbox screen watchdog screenshot failed; timer reset",
+                                Log.w("RYLUX-Lua", "game screen watchdog screenshot failed; timer reset",
                                         captureFailure);
                             }
                         } finally {
@@ -583,15 +606,13 @@ public final class ScriptRuntimeService extends Service {
 
     private static final class GameScreenStalledException extends Exception {
         GameScreenStalledException(double similarity, long stableForMs) {
-            super("沙箱游戏画面超过 2 分钟有 99% 以上内容未变化（相似度 "
+            super("游戏主场景超过 2 分钟有 99% 以上内容未变化（相似度 "
                     + String.format(java.util.Locale.US, "%.2f%%", similarity * 100d)
                     + "，持续 " + (stableForMs / 1_000L) + " 秒）");
         }
     }
 
-    private static boolean isSandboxScreenStall(String targetMode, Throwable failure,
-                                                Throwable workerFailure) {
-        if (!ScriptToolsActivity.TARGET_MODE_SANDBOX.equals(targetMode)) return false;
+    private static boolean isGameScreenStall(Throwable failure, Throwable workerFailure) {
         for (Throwable current = workerFailure; current != null; current = current.getCause()) {
             if (current instanceof GameScreenStalledException) return true;
         }
@@ -599,6 +620,34 @@ public final class ScriptRuntimeService extends Service {
             if (current instanceof GameScreenStalledException) return true;
         }
         return false;
+    }
+
+    private boolean requestStopDesktopGameForRecovery(ScriptExecutionControl runControl)
+            throws ScriptExecutionControl.StopRequestedException {
+        try {
+            ScriptGameAdapter input = ScriptGameAdapter.requireConnected(runControl);
+            if (!input.pressHome()) {
+                Log.e("RYLUX-Lua", "无法通过无障碍服务将卡屏的桌面游戏移到后台");
+                return false;
+            }
+            runControl.sleep(500L);
+            if (ScriptGameAdapter.isTargetGameForeground()) {
+                Log.e("RYLUX-Lua", "桌面游戏仍在前台，拒绝请求结束目标进程");
+                return false;
+            }
+            android.app.ActivityManager manager = (android.app.ActivityManager)
+                    getSystemService(ACTIVITY_SERVICE);
+            if (manager == null) return false;
+            manager.killBackgroundProcesses(ScriptGameAdapter.TARGET_GAME_PACKAGE);
+            publish("桌面游戏已切到后台，已请求 Android 结束卡屏进程");
+            runControl.sleep(1_000L);
+            return !ScriptGameAdapter.isTargetGameForeground();
+        } catch (ScriptExecutionControl.StopRequestedException stopped) {
+            throw stopped;
+        } catch (Exception failure) {
+            Log.e("RYLUX-Lua", "请求结束卡屏桌面游戏失败", failure);
+            return false;
+        }
     }
 
     private boolean stopSandboxGameForRecovery(ScriptExecutionControl runControl) {
