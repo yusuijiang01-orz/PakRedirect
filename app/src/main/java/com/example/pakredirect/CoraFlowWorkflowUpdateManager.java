@@ -4,6 +4,7 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.BufferedInputStream;
@@ -134,8 +135,59 @@ public final class CoraFlowWorkflowUpdateManager {
         addBuiltinTemplate(context, images, "captures/templates/RYLUX_挂机_出售确认标题.png");
         addBuiltinTemplate(context, images, "captures/templates/RYLUX_挂机_出售确认按钮.png");
         addBuiltinTemplate(context, images, "captures/templates/RYLUX_背包_物品详情左上角_1920.png");
+        validateWorkflowImages(workflow, images.keySet());
         return new CoraFlowWorkflowRuntime.WorkflowPackage(workflow, bindings, images,
                 panelValues == null ? new JSONObject() : new JSONObject(panelValues.toString()));
+    }
+
+    static void validateWorkflowImages(JSONObject workflow, Set<String> availableImages) {
+        JSONArray nodes = workflow == null ? null : workflow.optJSONArray("nodes");
+        if (nodes == null) throw new IllegalStateException("CoraFlow 工作流缺少节点，无法预检识别素材");
+        Set<String> missingPaths = new java.util.TreeSet<>();
+        java.util.List<String> missingConfig = new java.util.ArrayList<>();
+        Set<String> available = availableImages == null ? java.util.Collections.emptySet() : availableImages;
+        for (int i = 0; i < nodes.length(); i++) {
+            JSONObject node = nodes.optJSONObject(i);
+            if (node == null) continue;
+            String id = node.optString("id", "?");
+            String type = node.optString("type", "");
+            JSONObject data = node.optJSONObject("data");
+            if (type.trim().isEmpty() && data != null) type = data.optString("type", "");
+            String label = data == null ? type : data.optString("name", type);
+            JSONObject config = data == null ? null : data.optJSONObject("config");
+            if (config == null) config = new JSONObject();
+
+            boolean directImageNode = "is_image_exist".equals(type) || "click_if_image_exist".equals(type);
+            if (directImageNode && config.optString("image", "").trim().isEmpty()) {
+                missingConfig.add(id + "（" + label + "）：未配置 image 素材路径");
+            }
+            if ("recognize_number".equals(type)
+                    && !config.optString("item_count_mode", "").trim().isEmpty()
+                    && config.optString("item_image", "").trim().isEmpty()) {
+                missingConfig.add(id + "（" + label + "）：图标计数节点未配置 item_image 素材路径");
+            }
+            if ("sell_inventory_equipment".equals(type)
+                    && (config.optBoolean("sell_white", false) || config.optBoolean("sell_blue", false)
+                    || config.optBoolean("emergency_discard_white", false))) {
+                if (config.optString("medicine_red_image", "").trim().isEmpty()) {
+                    missingConfig.add(id + "（" + label + "）：装备处理节点未配置红药保护图标");
+                }
+                if (config.optString("medicine_blue_image", "").trim().isEmpty()) {
+                    missingConfig.add(id + "（" + label + "）：装备处理节点未配置蓝药保护图标");
+                }
+            }
+
+            for (String field : new String[]{"image", "item_image", "medicine_red_image", "medicine_blue_image"}) {
+                String path = config.optString(field, "").trim();
+                if (!path.isEmpty() && !available.contains(path)) missingPaths.add(path);
+            }
+        }
+        if (!missingConfig.isEmpty() || !missingPaths.isEmpty()) {
+            java.util.List<String> problems = new java.util.ArrayList<>(missingConfig);
+            for (String path : missingPaths) problems.add("工作流包中缺少素材 " + path);
+            throw new IllegalStateException("CoraFlow 工作流素材预检失败；尚未发送游戏触控："
+                    + String.join("；", problems));
+        }
     }
 
     private static void addBuiltinTemplate(Context context, Map<String, Bitmap> images, String workflowPath) throws Exception {
