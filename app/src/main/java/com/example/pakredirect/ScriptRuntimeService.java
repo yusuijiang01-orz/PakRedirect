@@ -404,7 +404,11 @@ public final class ScriptRuntimeService extends Service {
         boolean autoLogin = config.optBoolean("自动登录", true);
         ScriptFrameStallDetector stallDetector = new ScriptFrameStallDetector();
         Thread watcher = new Thread(() -> {
-            long nextScreenSampleAt = 0L;
+            // Let the workflow take its initial screen sample first. Android throttles
+            // accessibility screenshots, so racing the watchdog against the first
+            // recognition node can make both captures fail as "interval too short".
+            long nextScreenSampleAt = android.os.SystemClock.elapsedRealtime()
+                    + STALL_SCREEN_SAMPLE_INTERVAL_MS;
             long lastStallStatusAt = 0L;
             while (watching.get() && !runControl.isStopRequested()) {
                 ScriptGameProcessMonitor.State processState = processMonitor.inspect(this, targetMode);
@@ -514,7 +518,10 @@ public final class ScriptRuntimeService extends Service {
             } catch (Throwable scriptFailure) {
                 if (sandboxTarget && autoLogin && gameObserved.get()
                         && !runControl.isStopRequested()) {
-                    awaitSandboxWatchdogAfterLuaFailure(runControl, watchdogFailure, watcher);
+                    String detail = rootMessage(scriptFailure);
+                    Log.e("RYLUX-Lua", "CoraFlow JSON workflow attempt failed; recovery monitor remains active: "
+                            + detail, scriptFailure);
+                    awaitSandboxWatchdogAfterLuaFailure(runControl, watchdogFailure, watcher, detail);
                 }
                 if (scriptFailure instanceof Exception) throw (Exception) scriptFailure;
                 if (scriptFailure instanceof Error) throw (Error) scriptFailure;
@@ -531,10 +538,10 @@ public final class ScriptRuntimeService extends Service {
         }
     }
 
-    /** Keep the sandbox freeze monitor alive after a Lua error while auto-login remains enabled. */
+    /** Keep the sandbox freeze monitor alive after a workflow error while auto-login remains enabled. */
     private void awaitSandboxWatchdogAfterLuaFailure(ScriptExecutionControl runControl,
                                                      AtomicReference<Throwable> watchdogFailure,
-                                                     Thread watcher) throws Exception {
+                                                     Thread watcher, String failureDetail) throws Exception {
         long workerDrainDeadline = android.os.SystemClock.elapsedRealtime() + 10_000L;
         while (runControl.hasActiveWorkers() && !runControl.isStopRequested()
                 && android.os.SystemClock.elapsedRealtime() < workerDrainDeadline) {
@@ -548,7 +555,8 @@ public final class ScriptRuntimeService extends Service {
         Throwable detected = watchdogFailure.get();
         if (detected != null) throwWatchdogFailure(detected);
         if (runControl.getState() == ScriptExecutionControl.State.FAILED) runControl.start();
-        publish("挂机脚本本轮异常退出；自动登录仍开启，继续监控沙箱画面，卡住 2 分钟后自动重启");
+        publish("工作流本轮失败：" + failureDetail
+                + "；自动登录仍开启，继续监控沙箱画面，卡住 2 分钟后自动重启");
 
         while (!runControl.isStopRequested()) {
             detected = watchdogFailure.get();

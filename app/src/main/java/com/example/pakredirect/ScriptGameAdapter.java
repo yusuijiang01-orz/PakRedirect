@@ -778,6 +778,7 @@ public final class ScriptGameAdapter extends AccessibilityService {
             long retryDelay = 250L;
             if (lastErrorCode == ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT) {
                 internalErrorRetries = 0;
+                retryDelay = ScriptScreenshotRetry.intervalErrorDelayMs();
             } else if (Build.VERSION.SDK_INT >= 34
                     && lastErrorCode == ERROR_TAKE_SCREENSHOT_INVALID_WINDOW) {
                 // A game activity can replace its window during scene changes.
