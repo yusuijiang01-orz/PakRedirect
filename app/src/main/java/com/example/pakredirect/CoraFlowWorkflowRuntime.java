@@ -1227,16 +1227,17 @@ public final class CoraFlowWorkflowRuntime {
             medicineSlots = locateMedicineSlots(start, config);
         } finally { start.recycle(); }
         int loadLimit = Math.max(1, config.optInt("discard_load_limit", 200));
-        int minimumFree = Math.max(1, Math.min(34, config.optInt("discard_min_free_slots", 1)));
-        if (load == null || slots == null) throw new IllegalStateException("满包应急拒绝执行：无法可靠读取负重和空格；没有丢弃物品。");
-        if (load.value < loadLimit && slots.value >= minimumFree) {
-            note("满包应急无需丢弃：负重 " + load.text + "，空格 " + slots.text + ".");
+        if (load == null) throw new IllegalStateException("满包应急拒绝执行：无法可靠读取负重；没有丢弃物品。");
+        if (!shouldContinueEmergencyDiscard(load.value, loadLimit)) {
+            note("满包应急无需丢弃：负重 " + load.text + " 已低于上限 " + loadLimit
+                    + "；立即前往大夫清包，不受剩余空格数影响。");
             return;
         }
+        if (slots == null) throw new IllegalStateException("满包应急拒绝执行：负重仍达上限，但无法可靠读取空格；没有丢弃物品。");
         note("满包应急开始：仅核验前排白色装备；药瓶、回城/传送物品和未知物品保持保护。");
         int end = Math.max(1, Math.min(35, config.optInt("discard_front_slot_end", 35)));
         int maxItems = Math.max(1, Math.min(34, config.optInt("discard_max_items", 34)));
-        int discarded = 0, failedWhite = 0;
+        int discarded = 0, discardedWhite = 0, discardedBlue = 0, failedWhite = 0;
         int[] columns = {1058, 1160, 1265, 1375, 1480};
         int[] rows = {270, 375, 483, 589, 696, 800, 910};
         boolean allowBlue = config.optBoolean("emergency_discard_blue_fallback", false);
@@ -1247,7 +1248,7 @@ public final class CoraFlowWorkflowRuntime {
                     note("发现白装丢弃未通过按钮复核；按先白后蓝规则，不执行蓝装兜底。");
                     break;
                 }
-                if (load != null && load.value < loadLimit && slots != null && slots.value >= minimumFree) break;
+                if (load != null && !shouldContinueEmergencyDiscard(load.value, loadLimit)) break;
                 note("前排白装扫描后仍达到满包应急条件；开始严格核验无回血/回内词条的蓝装兜底。");
             }
             for (int slot = 1; slot <= end && discarded < maxItems; slot++) {
@@ -1282,27 +1283,36 @@ public final class CoraFlowWorkflowRuntime {
                         InventoryMetric afterLoad = readInventoryMetric(after, new Rect(1675, 343, 1800, 384));
                         InventoryMetric afterSlots = readInventoryMetric(after, new Rect(1682, 927, 1775, 963));
                         if (afterSlots == null) afterSlots = readInventoryMetric(after, new Rect(1665, 922, 1805, 975));
+                        if (afterLoad == null) throw new IllegalStateException("丢弃后无法可靠读取负重；停止，不再丢弃。");
                         boolean loadDown = afterLoad != null && afterLoad.value < beforeLoad.value;
                         boolean slotsUp = afterSlots != null && afterSlots.value > beforeSlots.value;
                         if (!loadDown && !slotsUp) throw new IllegalStateException("点丢弃后负重和空格均无可验证变化；停止，不会继续丢弃。");
                         discarded++;
+                        if (inspectBlue) discardedBlue++; else discardedWhite++;
                         load = afterLoad;
                         slots = afterSlots;
                         note("应急丢弃已验证：负重 " + metricValue(beforeLoad) + "→" + metricValue(afterLoad)
                                 + "，空格 " + metricValue(beforeSlots) + "→" + metricValue(afterSlots) + "。");
                     } finally { after.recycle(); }
-                    if (load != null && load.value < loadLimit && slots != null && slots.value >= minimumFree) break;
+                    if (load != null && !shouldContinueEmergencyDiscard(load.value, loadLimit)) break;
                     slot--; // Re-check this cell after the game may have compacted the grid.
                 } finally { item.recycle(); }
             }
-            if (load != null && load.value < loadLimit && slots != null && slots.value >= minimumFree) break;
+            if (load != null && !shouldContinueEmergencyDiscard(load.value, loadLimit)) break;
         }
-        if (load == null || slots == null || load.value >= loadLimit || slots.value < minimumFree) {
+        if (load == null || shouldContinueEmergencyDiscard(load.value, loadLimit)) {
             String blue = allowBlue ? "已按白装优先规则扫描允许丢弃的蓝装兜底。" : "蓝装兜底未启用。";
-            throw new IllegalStateException("满包应急未恢复空间：已验证丢弃 " + discarded + " 件白装，跳过 " + failedWhite
+            throw new IllegalStateException("满包应急未降到负重上限以下：已验证丢弃白装 " + discardedWhite + " 件、蓝装 " + discardedBlue
+                    + " 件，跳过 " + failedWhite
                     + " 格；当前负重 " + metricValue(load) + "，空格 " + metricValue(slots) + "。" + blue);
         }
-        note("满包应急完成：已验证丢弃 " + discarded + " 件白装；负重 " + load.text + "，空格 " + slots.text + "。");
+        note("满包应急完成：负重已低于上限 " + loadLimit + "，立即转大夫清包；已验证丢弃白装 "
+                + discardedWhite + " 件、蓝装 " + discardedBlue + " 件；当前负重 " + load.text
+                + "，空格 " + metricValue(slots) + "。");
+    }
+
+    static boolean shouldContinueEmergencyDiscard(int load, int loadLimit) {
+        return load >= loadLimit;
     }
 
     private static final class ItemProof {
