@@ -118,4 +118,7 @@ dependencies {
     }
 
     testImplementation 'junit:junit:4.13.2'
+    // Android's local-test android.jar stubs throw for org.json calls. Use the
+    // platform-compatible JSON implementation when exercising workflow graphs.
+    testImplementation 'org.json:json:20240303'
 }
