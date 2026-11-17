@@ -6,6 +6,10 @@ import static org.junit.Assert.assertTrue;
 import org.junit.Test;
 
 public final class CoraFlowEmergencyDiscardPolicyTest {
+    @Test public void lowMedicineVisitAtLoadTenDoesNotNeedEmergencyDiscard() {
+        assertFalse(CoraFlowWorkflowRuntime.shouldContinueEmergencyDiscard(10, 200));
+    }
+
     @Test public void stopDiscardingAsSoonAsLoadFallsBelowMaximumEvenWhenBagHasNoFreeSlots() {
         assertFalse(CoraFlowWorkflowRuntime.shouldContinueEmergencyDiscard(199, 200));
     }

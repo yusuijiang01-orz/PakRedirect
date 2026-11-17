@@ -1214,22 +1214,23 @@ public final class CoraFlowWorkflowRuntime {
     private void executeEmergencyDiscard(String name, JSONObject config) throws Exception {
         InventoryMetric load;
         InventoryMetric slots;
+        int loadLimit = Math.max(1, config.optInt("discard_load_limit", 200));
         Bitmap start = capture();
         Set<Integer> medicineSlots;
         try {
             load = readInventoryMetric(start, new Rect(1675, 343, 1800, 384));
+            if (load == null) throw new IllegalStateException("满包应急拒绝执行：无法可靠读取负重；没有丢弃物品。");
+            // A low-medicine visit must not scan/protect/discard equipment unless overweight.
+            if (!shouldContinueEmergencyDiscard(load.value, loadLimit)) {
+                note("满包应急无需丢弃：负重 " + load.text + " 已低于上限 " + loadLimit
+                        + "；跳过药瓶保护扫描和丢弃，继续补给流程。");
+                return;
+            }
             slots = readInventoryMetric(start, new Rect(1682, 927, 1775, 963));
             if (slots == null) slots = readInventoryMetric(start, new Rect(1665, 922, 1805, 975));
+            if (slots == null) throw new IllegalStateException("满包应急拒绝执行：负重仍达上限，但无法可靠读取空格；没有丢弃物品。");
             medicineSlots = locateMedicineSlots(start, config);
         } finally { start.recycle(); }
-        int loadLimit = Math.max(1, config.optInt("discard_load_limit", 200));
-        if (load == null) throw new IllegalStateException("满包应急拒绝执行：无法可靠读取负重；没有丢弃物品。");
-        if (!shouldContinueEmergencyDiscard(load.value, loadLimit)) {
-            note("满包应急无需丢弃：负重 " + load.text + " 已低于上限 " + loadLimit
-                    + "；立即前往大夫清包，不受剩余空格数影响。");
-            return;
-        }
-        if (slots == null) throw new IllegalStateException("满包应急拒绝执行：负重仍达上限，但无法可靠读取空格；没有丢弃物品。");
         note("满包应急开始：仅核验前排白色装备；药瓶、回城/传送物品和未知物品保持保护。");
         int end = Math.max(1, Math.min(35, config.optInt("discard_front_slot_end", 35)));
         int maxItems = Math.max(1, Math.min(34, config.optInt("discard_max_items", 34)));
@@ -1404,7 +1405,8 @@ public final class CoraFlowWorkflowRuntime {
                         row == 6 ? grid.bottom : grid.top + (row + 1) * cellH - 3);
                 if (findTemplate(frame, icon, cell, threshold) != null) found.add(slot);
                 else if (threshold > 0.85f && findTemplate(frame, icon, cell, Math.max(0.85f, threshold - 0.03f)) != null) {
-                    throw new IllegalStateException("第 " + slot + "/35 格可能是药瓶，但图标置信度不足；停止出售，避免误卖。");
+                    found.add(slot);
+                    note("第 " + slot + "/35 格疑似药瓶，仅保护该格不丢弃/出售；继续检查其他格。");
                 }
             }
         }
