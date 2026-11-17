@@ -1,0 +1,18 @@
+plugins { id 'com.android.application' version '8.13.2' }
+android {
+    namespace 'com.example.pakredirect.ocrparity'
+    compileSdk 36
+    defaultConfig { applicationId 'com.example.pakredirect.ocrparity'; minSdk 26; targetSdk 35; versionCode 1; versionName '1' }
+    sourceSets.main {
+        manifest.srcFile 'AndroidManifest.xml'
+        java.srcDirs = ['src', 'build/generated/ocr']
+        assets.srcDirs = ['../../app/src/main/assets']
+        assets.include 'coraflow-ocr/**'
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_11; targetCompatibility JavaVersion.VERSION_11 }
+}
+tasks.register('copyProductionBridge', Copy) {
+    from '../../app/src/main/java/com/example/pakredirect/CoraFlowOcr.java'
+    into 'build/generated/ocr/com/example/pakredirect'
+}
+tasks.named('preBuild').configure { dependsOn 'copyProductionBridge' }

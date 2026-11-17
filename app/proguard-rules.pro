@@ -38,3 +38,7 @@
     @top.niunaijun.blackreflection.annotation.BConstructor.* <methods>;
     @top.niunaijun.blackreflection.annotation.BConstructorNotProcess.* <methods>;
 }
+
+-keepclassmembers class com.example.pakredirect.CoraFlowOcr$Bridge {
+    @android.webkit.JavascriptInterface <methods>;
+}

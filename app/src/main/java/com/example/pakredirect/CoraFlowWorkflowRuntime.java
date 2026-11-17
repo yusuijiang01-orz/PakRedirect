@@ -118,7 +118,7 @@ public final class CoraFlowWorkflowRuntime {
     private final ScriptExecutionControl control;
     private final Consumer<String> listener;
     private final ScriptGameAdapter game;
-    private final ScriptOcr ocr;
+    private final CoraFlowOcr ocr;
     private final BooleanSupplier gameLauncher;
     private final Map<String, Bitmap> scaledTemplates = new HashMap<>();
     private final Map<String, int[]> previousRegions = new HashMap<>();
@@ -139,7 +139,7 @@ public final class CoraFlowWorkflowRuntime {
         this.control = control;
         this.listener = listener;
         this.game = ScriptGameAdapter.requireConnected(control);
-        this.ocr = new ScriptOcr();
+        this.ocr = new CoraFlowOcr(game);
         this.gameLauncher = gameLauncher;
     }
 
@@ -180,6 +180,7 @@ public final class CoraFlowWorkflowRuntime {
         try {
             JSONObject graph = new JSONObject(workflowPackage.workflow.toString());
             applyPanelBindings(graph, workflowPackage.bindings, workflowPackage.panelValues);
+            note("OCR engine: CoraFlow Tesseract.js/core 7.0.0; offline models, Lanczos3 and numeric variants");
             JSONArray nodes = graph.optJSONArray("nodes");
             JSONArray edges = graph.optJSONArray("edges");
             if (nodes == null || edges == null) throw new IllegalStateException("CoraFlow 工作流缺少节点或连线");
@@ -499,9 +500,9 @@ public final class CoraFlowWorkflowRuntime {
                     addNumberSample(id, total.intValue());
                     return matched;
                 }
-                boolean chinese = config.optString("ocr_language", "").toLowerCase(Locale.US).contains("chi");
-                result = readOcr(frame, region(config.optJSONArray("region")), chinese,
-                        config.optInt("ocr_scale", 2));
+                result = readOcr(frame, region(config.optJSONArray("region")),
+                        config.optString("ocr_language", "chi_sim+eng"),
+                        "recognize_number".equals(type) ? "number" : "text", config.optInt("ocr_scale", 2));
             } finally { frame.recycle(); }
             if (result.confidence >= minimum && ("recognize_text".equals(type) || parseNumber(result.text) != null)) {
                 if ("recognize_text".equals(type) && config.optBoolean("click_on_match", false)
@@ -742,44 +743,25 @@ public final class CoraFlowWorkflowRuntime {
     }
 
     private OcrRead readOcr(Bitmap source, Rect baseRegion, boolean chinese, int scale) throws Exception {
+        return readOcr(source, baseRegion, chinese ? "chi_sim+eng" : "eng", chinese ? "text" : "number", scale);
+    }
+
+    private OcrRead readOcr(Bitmap source, Rect baseRegion, String language, String kind, int scale) throws Exception {
         Rect rect = pixelRegion(baseRegion, source.getWidth(), source.getHeight());
-        if (rect.width() <= 0 || rect.height() <= 0) return new OcrRead("", 0);
+        if (rect.width() <= 0 || rect.height() <= 0) throw new IllegalStateException("OCR 识别区域超出截图");
         Bitmap crop = Bitmap.createBitmap(source, rect.left, rect.top, rect.width(), rect.height());
-        Bitmap input = crop;
         try {
-            int factor = Math.max(1, Math.min(4, scale));
-            if (factor > 1) {
-                input = Bitmap.createScaledBitmap(crop, Math.max(1, crop.getWidth() * factor),
-                        Math.max(1, crop.getHeight() * factor), true);
+            JSONObject result = ocr.recognize(crop, language, kind, Math.max(1,Math.min(4,scale)));
+            List<CoraFlowTextClickMatcher.Line> lines = new ArrayList<>();
+            JSONArray words = result.optJSONArray("words");
+            if (words != null) for(int i=0;i<words.length();i++) {
+                JSONObject word=words.getJSONObject(i);
+                lines.add(new CoraFlowTextClickMatcher.Line(word.optString("text"),word.optDouble("confidence"),
+                        (rect.left+word.optDouble("x"))*coordinateWidth/source.getWidth(),
+                        (rect.top+word.optDouble("y"))*coordinateHeight/source.getHeight()));
             }
-            ScriptOcr.Result result = ocr.recognize(input, chinese, ScriptOcr.LUA_TIMEOUT_MS,
-                    Math.max(input.getWidth(), input.getHeight()));
-            float confidence = 0;
-            int scores = 0;
-            List<CoraFlowTextClickMatcher.Line> recognizedLines = new ArrayList<>();
-            try {
-                JSONArray lines = new JSONArray(result.json);
-                for (int i = 0; i < lines.length(); i++) {
-                    JSONObject line = lines.optJSONObject(i);
-                    if (line == null) continue;
-                    if (line.has("score")) { confidence += (float) line.optDouble("score", 0); scores++; }
-                    if (!line.has("x") || !line.has("y")) continue;
-                    double sourceX = rect.left + line.optDouble("x", 0) / (double) factor;
-                    double sourceY = rect.top + line.optDouble("y", 0) / (double) factor;
-                    double workflowX = sourceX * coordinateWidth / source.getWidth();
-                    double workflowY = sourceY * coordinateHeight / source.getHeight();
-                    double lineConfidence = Math.max(0, Math.min(1, line.optDouble("score", 0))) * 100d;
-                    recognizedLines.add(new CoraFlowTextClickMatcher.Line(
-                            line.optString("text", line.optString("words", "")),
-                            lineConfidence, workflowX, workflowY));
-                }
-            } catch (JSONException ignored) { }
-            return new OcrRead(result.text, scores == 0 ? 0 : confidence / scores * 100f,
-                    recognizedLines);
-        } finally {
-            if (input != crop && !input.isRecycled()) input.recycle();
-            if (!crop.isRecycled()) crop.recycle();
-        }
+            return new OcrRead(result.optString("text"), (float)result.optDouble("confidence"), lines);
+        } finally { if(crop!=source&&!crop.isRecycled())crop.recycle(); }
     }
 
     private boolean hasConfidentClickLine(OcrRead read, JSONObject config) {
