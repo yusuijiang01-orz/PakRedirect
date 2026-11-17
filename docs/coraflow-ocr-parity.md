@@ -16,10 +16,10 @@ are available for text click matching.
 
 Validation on the connected emulator used the production bridge in a separate
 test APK (`tools/ocr-parity-device`) and the real CoraFlow Electron IPC OCR handler
-(`tools/verify-coraflow-ocr-replay.cjs`). All 12 pairs matched in text AND confidence:
+(`tools/verify-coraflow-ocr-replay.cjs`). All 13 pairs matched in text AND confidence:
 synthetic numbers 16, 200/200, 1; Chinese recovery text; Vietnamese sell text;
 actual game weight 199/200, free slots, red stack 31, bag title, Chon button;
-low-contrast number and blank crop. Blank input remained confidence 0. The bag
+low-contrast number, blank crop and filtered yellow equipment-power text. Blank input remained confidence 0. The bag
 title crop was misread by BOTH engines: agreement does not prove correctness.
 
 This verifies those OCR samples, not an error-free whole workflow or 24-hour run.

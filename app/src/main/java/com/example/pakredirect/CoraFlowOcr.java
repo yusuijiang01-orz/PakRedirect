@@ -110,6 +110,17 @@ public final class CoraFlowOcr implements AutoCloseable {
         }catch(TimeoutException error){close();throw new IllegalStateException("Tesseract OCR 超时，已释放识别器",error);}
         finally{pending.remove(id);}
     }
+    /** CoraFlow workflowRunner.readYellowPowerLine: isolate stylized amber equipment text. */
+    public JSONObject recognizeYellow(Bitmap crop) throws Exception {
+        int width=crop.getWidth(),height=crop.getHeight();
+        int[] pixels=new int[width*height];crop.getPixels(pixels,0,width,0,0,width,height);
+        for(int i=0;i<pixels.length;i++){
+            int color=pixels[i],r=(color>>>16)&255,g=(color>>>8)&255,b=color&255;
+            pixels[i]=(r>=150&&g>=115&&b<=140&&r-b>=65&&g-b>=25)?0xff000000:0xffffffff;
+        }
+        Bitmap filtered=Bitmap.createBitmap(pixels,width,height,Bitmap.Config.ARGB_8888);
+        try{return recognize(filtered,"chi_sim+eng","text",4);}finally{filtered.recycle();}
+    }
     @Override public void close(){
         closed=true;ready.countDown();
         for(CompletableFuture<JSONObject> task:pending.values())task.completeExceptionally(new IllegalStateException("OCR 已关闭"));

@@ -764,6 +764,20 @@ public final class CoraFlowWorkflowRuntime {
         } finally { if(crop!=source&&!crop.isRecycled())crop.recycle(); }
     }
 
+    private OcrRead readPowerLine(Bitmap source, Rect baseRegion) throws Exception {
+        OcrRead raw=readOcr(source,baseRegion,true,4);
+        if(raw.text.replaceAll("\\s+", "").matches(".*(?:功[力为為刀]|裝備功|装备功).*"))return raw;
+        Rect rect=pixelRegion(baseRegion,source.getWidth(),source.getHeight());
+        if(rect.width()<=0||rect.height()<=0)return raw;
+        Bitmap crop=Bitmap.createBitmap(source,rect.left,rect.top,rect.width(),rect.height());
+        try {
+            JSONObject filtered=ocr.recognizeYellow(crop);
+            String text=filtered.optString("text").replaceAll("\\s+", "");
+            return text.matches(".*(?:功[力为為刀]|裝備功|装备功).*")
+                    ?new OcrRead(text,(float)filtered.optDouble("confidence")):raw;
+        }finally{if(crop!=source)crop.recycle();}
+    }
+
     private boolean hasConfidentClickLine(OcrRead read, JSONObject config) {
         boolean exact = "equals".equals(config.optString("text_match_mode", "contains"));
         CoraFlowTextClickMatcher.Result match = CoraFlowTextClickMatcher.find(read.lines,
@@ -1078,7 +1092,7 @@ public final class CoraFlowWorkflowRuntime {
                     YellowTextCandidate powerLine = null;
                     OcrRead powerText = new OcrRead("", 0);
                     for (YellowTextCandidate candidate : yellowTextCandidates(item, new Rect(960, 120, 1605, 1010))) {
-                        OcrRead recognizedLine = readOcr(item, candidate.region, true, 4);
+                        OcrRead recognizedLine = readPowerLine(item, candidate.region);
                         String normalized = recognizedLine.text.toLowerCase(Locale.ROOT).replaceAll("\\s+", "");
                         if (normalized.matches(".*(?:功[力为為刀]|裝備功|装备功).*")) {
                             powerLine = candidate;
@@ -1313,7 +1327,7 @@ public final class CoraFlowWorkflowRuntime {
         int yellowPixels = 0;
         String power = "";
         for (YellowTextCandidate candidate : yellowTextCandidates(item, new Rect(960, 120, 1605, 1010))) {
-            OcrRead line = readOcr(item, candidate.region, true, 4);
+            OcrRead line = readPowerLine(item, candidate.region);
             String normalized = line.text.toLowerCase(Locale.ROOT).replaceAll("\\s+", "");
             if (normalized.matches(".*(?:功[力为為刀]|裝備功|装备功).*")) {
                 gear = candidate.pixels >= 12;

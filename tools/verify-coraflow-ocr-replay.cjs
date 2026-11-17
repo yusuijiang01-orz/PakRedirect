@@ -27,7 +27,12 @@ app.whenReady().then(async()=>{
     vm.runInNewContext(source.slice(start,end),context);
     const cases=JSON.parse(fs.readFileSync(root+'/cases.json','utf8')),results=[];
     for(const c of cases){
-      const img=nativeImage.createFromPath(root+'/'+c.file),size=img.getSize();
+      let img=nativeImage.createFromPath(root+'/'+c.file);const size=img.getSize();
+      if(c.yellow){
+        const data=img.toBitmap();
+        for(let i=0;i<data.length;i+=4){const b=data[i],g=data[i+1],r=data[i+2],v=r>=150&&g>=115&&b<=140&&r-b>=65&&g-b>=25?0:255;data[i]=data[i+1]=data[i+2]=v;data[i+3]=255;}
+        img=nativeImage.createFromBitmap(data,{...size,scaleFactor:1});
+      }
       const result=await handler({sender:{isDestroyed:()=>false,send:()=>{}}},{requestId:c.id,imageDataUrl:img.toDataURL(),language:c.language,kind:c.kind,scale:c.scale,region:{left:0,top:0,right:size.width,bottom:size.height}});
       results.push({id:c.id,...result});console.log(c.id,JSON.stringify(result));
     }

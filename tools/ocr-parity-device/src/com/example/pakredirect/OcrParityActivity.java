@@ -21,7 +21,7 @@ public class OcrParityActivity extends Activity {
                 for(int i=0;i<cases.length();i++) {
                     JSONObject c=cases.getJSONObject(i);
                     Bitmap image=BitmapFactory.decodeFile(new File(root,c.getString("file")).getPath());
-                    try {JSONObject r=ocr.recognize(image,c.getString("language"),c.getString("kind"),c.getInt("scale"));r.put("id",c.getString("id"));results.put(r);Log.i("OCR-PARITY",r.toString());}
+                    try {JSONObject r=c.optBoolean("yellow")?ocr.recognizeYellow(image):ocr.recognize(image,c.getString("language"),c.getString("kind"),c.getInt("scale"));r.put("id",c.getString("id"));results.put(r);Log.i("OCR-PARITY",r.toString());}
                     finally {image.recycle();}
                 }
             }catch(Throwable e){try{results.put(new JSONObject().put("error",e.toString()));}catch(Exception ignored){}Log.e("OCR-PARITY","Failed",e);}
