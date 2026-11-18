@@ -1535,6 +1535,12 @@ public final class CoraFlowWorkflowRuntime {
             if (findTemplate(before, "captures/templates/RYLUX_挂机_背包标题.png", new Rect(1080, 20, 1420, 140), 0.88f) == null) {
                 throw new IllegalStateException("选格前未确认背包标题；没有继续选择物品。");
             }
+            Bitmap emptySlot = workflowPackage.images.get("captures/templates/RYLUX_背包_空格子.png");
+            if (emptySlot == null) throw new IllegalStateException("缺少背包空格识别素材；未点击格子。");
+            if (matchesCenteredTemplate(before, emptySlot, x, y, 8, 0.94f)) {
+                note("第 " + slot + "/35 格已识别为空，跳过点击。");
+                return null;
+            }
             click(x, y);
             control.sleep(350);
             Bitmap after = capture();
@@ -1548,6 +1554,37 @@ public final class CoraFlowWorkflowRuntime {
             }
             return after;
         } finally { if (before != null && !before.isRecycled()) before.recycle(); }
+    }
+
+    private boolean matchesCenteredTemplate(Bitmap frame, Bitmap original, int centerX, int centerY,
+                                            int tolerance, float threshold) {
+        if (frame == null || original == null || original.isRecycled()) return false;
+        int targetWidth = Math.max(1, Math.round(original.getWidth() * frame.getWidth() / (float) coordinateWidth));
+        int targetHeight = Math.max(1, Math.round(original.getHeight() * frame.getHeight() / (float) coordinateHeight));
+        if (targetWidth > frame.getWidth() || targetHeight > frame.getHeight()) return false;
+        String cacheKey = System.identityHashCode(original) + ":" + targetWidth + "x" + targetHeight;
+        Bitmap template = scaledTemplates.get(cacheKey);
+        if (template == null || template.isRecycled()) {
+            template = targetWidth == original.getWidth() && targetHeight == original.getHeight()
+                    ? original : Bitmap.createScaledBitmap(original, targetWidth, targetHeight, true);
+            scaledTemplates.put(cacheKey, template);
+        }
+        int[] screen = pixels(frame), target = pixels(template);
+        int sampleStep = 2;
+        int baseX = Math.round(centerX * frame.getWidth() / (float) coordinateWidth) - targetWidth / 2;
+        int baseY = Math.round(centerY * frame.getHeight() / (float) coordinateHeight) - targetHeight / 2;
+        int shiftX = Math.max(1, Math.round(tolerance * frame.getWidth() / (float) coordinateWidth));
+        int shiftY = Math.max(1, Math.round(tolerance * frame.getHeight() / (float) coordinateHeight));
+        int stepX = Math.max(1, shiftX / 4), stepY = Math.max(1, shiftY / 4);
+        int left = Math.max(0, baseX - shiftX), right = Math.min(frame.getWidth() - targetWidth, baseX + shiftX);
+        int top = Math.max(0, baseY - shiftY), bottom = Math.min(frame.getHeight() - targetHeight, baseY + shiftY);
+        for (int y = top; y <= bottom; y += stepY) {
+            checkpoint();
+            for (int x = left; x <= right; x += stepX) {
+                if (scoreAt(screen, frame.getWidth(), target, targetWidth, targetHeight, x, y, sampleStep, false) >= threshold) return true;
+            }
+        }
+        return false;
     }
 
     private Set<Integer> locateMedicineSlots(Bitmap frame, JSONObject config) throws Exception {

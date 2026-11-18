@@ -140,6 +140,7 @@ public final class CoraFlowWorkflowUpdateManager {
         addBuiltinTemplate(context, images, "captures/templates/RYLUX_挂机_出售确认标题.png");
         addBuiltinTemplate(context, images, "captures/templates/RYLUX_挂机_出售确认按钮.png");
         addBuiltinTemplate(context, images, "captures/templates/RYLUX_背包_物品详情左上角_1920.png");
+        addBuiltinTemplate(context, images, "captures/templates/RYLUX_背包_空格子.png");
         validateWorkflowImages(workflow, images.keySet());
         return new CoraFlowWorkflowRuntime.WorkflowPackage(workflow, bindings, images,
                 panelValues == null ? new JSONObject() : new JSONObject(panelValues.toString()), releaseVersion);
