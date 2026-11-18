@@ -6,11 +6,11 @@ on:
       version_name:
         description: 'Version name for this test build'
         required: true
-        default: '2.5.44-ocr-recovery'
+        default: '2.5.45-potion-ocr-recovery'
       version_code:
         description: 'Monotonically increasing Android versionCode'
         required: true
-        default: '168'
+        default: '169'
       publish_release:
         description: 'Publish GitHub and Gitee releases after building (leave off for a test build)'
         required: true
@@ -20,6 +20,7 @@ on:
     branches:
       - codex/sign-610-localized-candidate
       - codex/coraflow-json-runtime-20261112
+      - codex/inventory-empty-slot-fast-skip
     paths:
       - .github/workflows/build-apk.yml
       - app/build.gradle
@@ -39,8 +40,8 @@ jobs:
       contents: write
 
     env:
-      RYLUX_VERSION_NAME: ${{ inputs.version_name || '2.5.44-ocr-recovery' }}
-      RYLUX_VERSION_CODE: ${{ inputs.version_code || '168' }}
+      RYLUX_VERSION_NAME: ${{ inputs.version_name || '2.5.45-potion-ocr-recovery' }}
+      RYLUX_VERSION_CODE: ${{ inputs.version_code || '169' }}
       RYLUX_KEYSTORE_B64: ${{ secrets.RYLUX_KEYSTORE_B64 }}
       RYLUX_KEYSTORE_PASSWORD: ${{ secrets.RYLUX_KEYSTORE_PASSWORD }}
       RYLUX_KEY_ALIAS: ${{ secrets.RYLUX_KEY_ALIAS }}

@@ -575,7 +575,10 @@ public final class CoraFlowWorkflowRuntime {
         Throwable cause = failure;
         while (cause.getCause() != null && cause.getCause() != cause) cause = cause.getCause();
         String message = cause.getMessage();
-        return message != null && (message.contains("OCR 置信度") || message.contains("OCR 没有返回结果"));
+        return message != null && (message.contains("OCR 置信度")
+                || message.contains("OCR 没有返回结果")
+                || message.contains("药瓶图标候选")
+                || message.contains("药瓶数量 OCR 不可靠"));
     }
 
     private Boolean recognizeNode(String type, String id, String name, JSONObject config) throws Exception {
@@ -591,7 +594,16 @@ public final class CoraFlowWorkflowRuntime {
             Bitmap frame = capture();
             try {
                 if ("recognize_number".equals(type) && !config.optString("item_image", "").trim().isEmpty()) {
-                    Number total = countInventoryIcon(frame, config);
+                    Number total;
+                    try {
+                        total = countInventoryIcon(frame, config);
+                    } catch (Exception uncertainInventory) {
+                        if (attempt < retries && isOcrUncertainty(uncertainInventory)) {
+                            note("背包药瓶图标/数量本帧无法可靠确认；重新截图识别，不按 0 处理，也不执行购买或出售。 ");
+                            continue;
+                        }
+                        throw uncertainInventory;
+                    }
                     double target = config.optDouble("number_value", config.optDouble("threshold", 0));
                     String op = config.optString("number_operator", config.optString("operator", ">="));
                     boolean matched = compare(total.doubleValue(), op, target);
@@ -803,10 +815,17 @@ public final class CoraFlowWorkflowRuntime {
             // low-confidence potion candidate and stop the workflow.
             Match match = findTemplate(frame, icon, cell, threshold, true);
             if (match == null) {
-                if (findTemplate(frame, icon, cell, Math.max(0.7f, threshold - 0.03f), true) != null) {
-                    throw new IllegalStateException("第 " + slot + "/35 格发现药瓶图标候选，但未达到严格阈值；不按 0 处理。");
+                Match candidate = findTemplate(frame, icon, cell, Math.max(0.7f, threshold - 0.03f), true);
+                if (candidate != null) {
+                    // A near-threshold colored bottle match is not evidence of
+                    // an empty slot. Promote it to a quantity-verification
+                    // candidate; the stack count OCR below must independently
+                    // confirm a positive quantity before it contributes.
+                    match = candidate;
+                    note("第 " + slot + "/35 格药瓶图标接近阈值（" + percent(candidate.score * 100f)
+                            + "）；继续核对该格数量，不按空格处理。");
                 }
-                continue;
+                if (match == null) continue;
             }
             hits++;
             // Match CoraFlow's inventoryCountRegion: stack counts are rendered
