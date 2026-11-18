@@ -676,6 +676,11 @@ public final class CoraFlowWorkflowRuntime {
     }
 
     private Number countInventoryIcon(Bitmap frame, JSONObject config) throws Exception {
+        String detailPath = "captures/templates/RYLUX_背包_物品详情左上角_1920.png";
+        if (workflowPackage.images.containsKey(detailPath)
+                && findTemplate(frame, detailPath, new Rect(400, 70, 1550, 300), 0.90f) != null) {
+            throw new IllegalStateException("物品详情遮挡背包；药品数量未确认，不按零处理。");
+        }
         String path = config.optString("item_image", "").trim();
         Bitmap icon = workflowPackage.images.get(path);
         if (icon == null) throw new IllegalStateException("工作流缺少物品图标素材：" + path);
