@@ -131,6 +131,8 @@ public final class CoraFlowWorkflowRuntime {
     private final Map<String, int[]> previousRegions = new HashMap<>();
     private final Map<String, Integer> visits = new HashMap<>();
     private final Map<String, Integer> recoveryAttempts = new HashMap<>();
+    private final Map<String, Integer> ocrRecoveryAttempts = new HashMap<>();
+    private final Set<String> exhaustedOcrRecoveries = new HashSet<>();
     private final Map<String, ArrayDeque<NumberSample>> numberHistory = new HashMap<>();
     private final ArrayDeque<LoopFrame> loops = new ArrayDeque<>();
     private JSONArray currentNodes;
@@ -245,18 +247,29 @@ public final class CoraFlowWorkflowRuntime {
                 }
 
                 overrideNext = null;
-                Boolean condition = execute(type, currentId, name, config, edges, nodeMap);
+                Boolean condition;
+                try {
+                    condition = execute(type, currentId, name, config, edges, nodeMap);
+                } catch (Exception failure) {
+                    if (!recoverUncertainOcr(type, currentId, name, config, failure, nodeMap.keySet())) throw failure;
+                    currentId = overrideNext;
+                    continue;
+                }
+                if (isOcrNode(type)) {
+                    ocrRecoveryAttempts.remove(currentId);
+                    exhaustedOcrRecoveries.remove(currentId);
+                }
                 if (Boolean.TRUE.equals(condition) && !recoveryAttempts.isEmpty()) {
                     recoveryAttempts.clear();
                     note("已重新识别到有效界面/条件，重置暂态恢复次数。");
                 }
-                if (isDual(type)) {
+                if (overrideNext != null) {
+                    currentId = overrideNext;
+                } else if (isDual(type)) {
                     if (condition == null) throw new IllegalStateException("“" + name + "”没有返回条件结果");
                     String next = nextEdge(edges, currentId, condition);
                     if (next == null) throw new IllegalStateException("“" + name + "”缺少 " + (condition ? "true" : "false") + " 分支连线");
                     currentId = next;
-                } else if (overrideNext != null) {
-                    currentId = overrideNext;
                 } else if ("end_loop".equals(type) && loops.isEmpty()) {
                     currentId = null;
                 } else {
@@ -515,6 +528,55 @@ public final class CoraFlowWorkflowRuntime {
     }
 
     private String overrideNext;
+
+    private boolean recoverUncertainOcr(String type, String id, String name, JSONObject config,
+                                        Exception failure, Set<String> nodeIds) throws Exception {
+        if (!isOcrNode(type) || !isOcrUncertainty(failure)) return false;
+        String message = failure.getMessage() == null ? failure.getClass().getSimpleName() : failure.getMessage();
+        String target = config.optString("recovery_target", "").trim();
+        if (target.isEmpty()) return false;
+        CoraFlowRecoveryPolicy.Decision recovery = CoraFlowRecoveryPolicy.plan(
+                id, message, target, config.optInt("recovery_max_attempts", 3),
+                config.optLong("recovery_delay_ms", 1_500L), nodeIds, ocrRecoveryAttempts);
+        if (recovery.shouldRecover()) {
+            note("“" + name + "”OCR仍不确定；" + recovery.attempt + "/" + recovery.maximum
+                    + " 次恢复，等待 " + (recovery.delayMs / 1000.0) + " 秒后重试该判断。未执行后续节点。");
+            control.sleep(recovery.delayMs);
+            overrideNext = recovery.target;
+            return true;
+        }
+        String exhaustedTarget = config.optString("recovery_exhausted_target", "").trim();
+        if (exhaustedTarget.isEmpty()) {
+            throw new IllegalStateException(message + "；OCR恢复次数已用尽，已停止。", failure);
+        }
+        if (!nodeIds.contains(exhaustedTarget)) {
+            throw new IllegalStateException(message + "；恢复次数耗尽后的入口不存在：" + exhaustedTarget, failure);
+        }
+        if (!exhaustedOcrRecoveries.add(id)) {
+            throw new IllegalStateException(message + "；已返回界面识别入口复查一次，仍无法读取；停止，避免无限重试。", failure);
+        }
+        if (config.optBoolean("recovery_exhausted_reset_context", false)) {
+            visits.clear();
+            previousRegions.clear();
+            numberHistory.clear();
+        }
+        note("“" + name + "”连续 " + recovery.maximum + " 次恢复后仍无法读取；回到界面识别入口复查一次。"
+                + "若复查后仍失败，将停止，不会无限循环。");
+        control.sleep(Math.max(0L, Math.min(30_000L, config.optLong("recovery_delay_ms", 1_500L))));
+        overrideNext = exhaustedTarget;
+        return true;
+    }
+
+    private static boolean isOcrNode(String type) {
+        return "recognize_number".equals(type) || "recognize_text".equals(type);
+    }
+
+    private static boolean isOcrUncertainty(Exception failure) {
+        Throwable cause = failure;
+        while (cause.getCause() != null && cause.getCause() != cause) cause = cause.getCause();
+        String message = cause.getMessage();
+        return message != null && (message.contains("OCR 置信度") || message.contains("OCR 没有返回结果"));
+    }
 
     private Boolean recognizeNode(String type, String id, String name, JSONObject config) throws Exception {
         int retries = Math.max(0, Math.min(3, config.optInt("ocr_retry_count", 0)));
