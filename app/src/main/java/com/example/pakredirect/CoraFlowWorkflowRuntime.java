@@ -1299,6 +1299,7 @@ public final class CoraFlowWorkflowRuntime {
                 + "、品质不明 " + unknownQuality + "），出售候选 " + candidates + " 件，验证出售 " + sold
                 + " 件，保护回复蓝装 " + protectedBlue + " 件，跳过 " + skipped + " 格。";
         note((sold > 0 ? "装备扫描完成：" : "装备扫描未出售任何物品：") + summary);
+        clearInventoryDetailAfterScan();
         if (config.optBoolean("require_verified_sale", false) && sold == 0) {
             Bitmap frame = capture();
             InventoryMetric slots, load;
@@ -1450,6 +1451,23 @@ public final class CoraFlowWorkflowRuntime {
         return new ItemProof(gear, white, blue, "功力行像素 " + yellowPixels + "，OCR“" + power + "”；标题白 " + whitePixels + " / 蓝 " + bluePixels);
     }
 
+    private void clearInventoryDetailAfterScan() throws Exception {
+        String detailPath = "captures/templates/RYLUX_背包_物品详情左上角_1920.png";
+        requireImage(detailPath);
+        Bitmap frame = capture();
+        try {
+            Match detail = findTemplate(frame, detailPath, new Rect(400, 70, 1550, 300), 0.90f);
+            if (detail == null) { note("扫描结束：未发现物品详情浮层。"); return; }
+        } finally { frame.recycle(); }
+        click(1200, 80); control.sleep(300);
+        frame = capture();
+        try {
+            if (findTemplate(frame, detailPath, new Rect(400, 70, 1550, 300), 0.90f) != null)
+                throw new IllegalStateException("装备扫描后物品详情仍遮挡背包；停止药品统计。");
+            note("扫描结束：已关闭物品详情浮层并复核。");
+        } finally { frame.recycle(); }
+    }
+
     private Bitmap selectInventorySlot(String name, int x, int y, int slot) throws Exception {
         Bitmap before = capture();
         try {
@@ -1506,8 +1524,8 @@ public final class CoraFlowWorkflowRuntime {
                 Rect cell = new Rect(grid.left + column * cellW + 3, grid.top + row * cellH + 3,
                         column == 4 ? grid.right : grid.left + (column + 1) * cellW - 3,
                         row == 6 ? grid.bottom : grid.top + (row + 1) * cellH - 3);
-                if (findTemplate(frame, icon, cell, threshold) != null) found.add(slot);
-                else if (threshold > 0.85f && findTemplate(frame, icon, cell, Math.max(0.85f, threshold - 0.03f)) != null) {
+                if (findTemplate(frame, icon, cell, threshold, true) != null) found.add(slot);
+                else if (threshold > 0.85f && findTemplate(frame, icon, cell, Math.max(0.85f, threshold - 0.03f), true) != null) {
                     found.add(slot);
                     note("第 " + slot + "/35 格疑似药瓶，仅保护该格不丢弃/出售；继续检查其他格。");
                 }
