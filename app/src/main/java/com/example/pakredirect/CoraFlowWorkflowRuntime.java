@@ -1262,12 +1262,17 @@ public final class CoraFlowWorkflowRuntime {
             sellExcessMedicine(config);
         }
 
-        Bitmap initial = capture();
+        Bitmap initial = captureInventoryGridWithoutDetail();
         Set<Integer> medicineSlots;
-        try { medicineSlots = locateMedicineSlots(initial, config); }
+        Set<Integer> emptySlots;
+        try {
+            medicineSlots = locateMedicineSlots(initial, config);
+            emptySlots = locateEmptyInventorySlots(initial);
+        }
         finally { initial.recycle(); }
         if (medicineSlots.isEmpty()) note("药瓶图标没有命中；每件物品仍须通过功力行和品质双重确认后才可出售。");
         else note("药瓶格已定位并加入出售保护：" + medicineSlots + "。");
+        note("背包空格预检完成：" + emptySlots.size() + "/35 格；空格将跳过逐格截图和触控。");
 
         int scanned = 0, sold = 0, candidates = 0, skipped = 0, recognized = 0;
         int white = 0, blue = 0, unknownQuality = 0, protectedBlue = 0, nonGear = 0;
@@ -1281,6 +1286,7 @@ public final class CoraFlowWorkflowRuntime {
                 scanned++;
                 if (scanned == 1 || scanned % 5 == 0) note("背包装备扫描进度：" + scanned + "/35 格。");
                 if (medicineSlots.contains(slot)) { skipped++; continue; }
+                if (emptySlots.contains(slot)) { skipped++; nonGear++; continue; }
 
                 Bitmap item = selectInventorySlot(name, columns[column], rows[row], slot);
                 if (item == null) { skipped++; nonGear++; continue; }
@@ -1394,6 +1400,9 @@ public final class CoraFlowWorkflowRuntime {
                         sold++;
                         note("出售已验证：" + (isWhite ? "白" : "蓝") + "色装备；负重 " + metricValue(beforeLoad)
                                 + "→" + metricValue(afterLoad) + "，空格 " + metricValue(beforeSlots) + "→" + metricValue(afterSlots) + "。");
+                        // A sale can compact the grid. Refresh the empty-cell map from
+                        // this already captured post-sale frame before skipping more cells.
+                        emptySlots = locateEmptyInventorySlots(after);
                     } finally { after.recycle(); }
                     column--; // Revisit this cell in case the game compacts the inventory grid.
                 } finally { item.recycle(); }
@@ -1616,6 +1625,86 @@ public final class CoraFlowWorkflowRuntime {
             }
             return after;
         } finally { if (before != null && !before.isRecycled()) before.recycle(); }
+    }
+
+    private Bitmap captureInventoryGridWithoutDetail() throws Exception {
+        Bitmap frame = capture();
+        try {
+            String detailPath = "captures/templates/RYLUX_背包_物品详情左上角_1920.png";
+            Match detail = findTemplate(frame, detailPath, new Rect(400, 70, 1550, 300), 0.97f);
+            if (detail != null) {
+                click(1200, 80);
+                control.sleep(250);
+                frame.recycle();
+                frame = capture();
+                detail = findTemplate(frame, detailPath, new Rect(400, 70, 1550, 300), 0.97f);
+                if (detail != null) {
+                    if (!game.inputKey("escape")) throw new IllegalStateException("无法关闭遮挡背包的物品详情。");
+                    control.sleep(250);
+                    frame.recycle();
+                    frame = capture();
+                    detail = findTemplate(frame, detailPath, new Rect(400, 70, 1550, 300), 0.97f);
+                }
+                if (detail != null) throw new IllegalStateException("物品详情仍遮挡背包；未进行空格预检。");
+            }
+            if (findTemplate(frame, "captures/templates/RYLUX_挂机_背包标题.png", new Rect(1080, 20, 1420, 140), 0.88f) == null) {
+                throw new IllegalStateException("空格预检前未确认背包标题；没有跳过任何格子。");
+            }
+            Bitmap result = frame;
+            frame = null;
+            return result;
+        } finally {
+            if (frame != null && !frame.isRecycled()) frame.recycle();
+        }
+    }
+
+    private Set<Integer> locateEmptyInventorySlots(Bitmap frame) throws Exception {
+        Set<Integer> empty = new HashSet<>();
+        if (frame == null || frame.isRecycled()) return empty;
+        String detailPath = "captures/templates/RYLUX_背包_物品详情左上角_1920.png";
+        if (findTemplate(frame, detailPath, new Rect(400, 70, 1550, 300), 0.90f) != null
+                || findTemplate(frame, "captures/templates/RYLUX_挂机_背包标题.png", new Rect(1080, 20, 1420, 140), 0.88f) == null) {
+            return empty; // An obscured/uncertain frame must never cause a cell to be skipped.
+        }
+        Bitmap original = workflowPackage.images.get("captures/templates/RYLUX_背包_空格子.png");
+        if (original == null || original.isRecycled()) return empty;
+        int targetWidth = Math.max(1, Math.round(original.getWidth() * frame.getWidth() / (float) coordinateWidth));
+        int targetHeight = Math.max(1, Math.round(original.getHeight() * frame.getHeight() / (float) coordinateHeight));
+        if (targetWidth > frame.getWidth() || targetHeight > frame.getHeight()) return empty;
+        String cacheKey = System.identityHashCode(original) + ":" + targetWidth + "x" + targetHeight;
+        Bitmap template = scaledTemplates.get(cacheKey);
+        if (template == null || template.isRecycled()) {
+            template = targetWidth == original.getWidth() && targetHeight == original.getHeight()
+                    ? original : Bitmap.createScaledBitmap(original, targetWidth, targetHeight, true);
+            scaledTemplates.put(cacheKey, template);
+        }
+        int[] screen = pixels(frame), target = pixels(template);
+        int sampleStep = 2;
+        int shiftX = Math.max(1, Math.round(8 * frame.getWidth() / (float) coordinateWidth));
+        int shiftY = Math.max(1, Math.round(8 * frame.getHeight() / (float) coordinateHeight));
+        int stepX = Math.max(1, shiftX / 4), stepY = Math.max(1, shiftY / 4);
+        int[] columns = {1058, 1160, 1265, 1375, 1480};
+        int[] rows = {270, 375, 483, 589, 696, 800, 910};
+        for (int slot = 1; slot <= 35; slot++) {
+            checkpoint();
+            int centerX = columns[(slot - 1) % 5], centerY = rows[(slot - 1) / 5];
+            int baseX = Math.round(centerX * frame.getWidth() / (float) coordinateWidth) - targetWidth / 2;
+            int baseY = Math.round(centerY * frame.getHeight() / (float) coordinateHeight) - targetHeight / 2;
+            int left = Math.max(0, baseX - shiftX), right = Math.min(frame.getWidth() - targetWidth, baseX + shiftX);
+            int top = Math.max(0, baseY - shiftY), bottom = Math.min(frame.getHeight() - targetHeight, baseY + shiftY);
+            boolean matched = false;
+            for (int y = top; y <= bottom && !matched; y += stepY) {
+                checkpoint();
+                for (int x = left; x <= right; x += stepX) {
+                    if (scoreAt(screen, frame.getWidth(), target, targetWidth, targetHeight, x, y, sampleStep, false) >= 0.94f) {
+                        matched = true;
+                        break;
+                    }
+                }
+            }
+            if (matched) empty.add(slot);
+        }
+        return empty;
     }
 
     private boolean matchesCenteredTemplate(Bitmap frame, Bitmap original, int centerX, int centerY,
