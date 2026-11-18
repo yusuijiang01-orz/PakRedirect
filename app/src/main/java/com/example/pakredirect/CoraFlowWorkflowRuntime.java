@@ -1300,7 +1300,17 @@ public final class CoraFlowWorkflowRuntime {
                 + " 件，保护回复蓝装 " + protectedBlue + " 件，跳过 " + skipped + " 格。";
         note((sold > 0 ? "装备扫描完成：" : "装备扫描未出售任何物品：") + summary);
         if (config.optBoolean("require_verified_sale", false) && sold == 0) {
-            throw new IllegalStateException("清包触发后没有任何装备通过出售验证；" + summary);
+            Bitmap frame = capture();
+            InventoryMetric slots, load;
+            try {
+                slots = readInventoryMetric(frame, new Rect(1682, 927, 1775, 963));
+                load = readInventoryMetric(frame, new Rect(1675, 343, 1800, 384));
+            } finally { frame.recycle(); }
+            if (candidates == 0 && slots != null && slots.value > 4 && load != null && load.value < 172) {
+                note("没有检测到可出售装备，且空格和负重充足；继续药品补给。空格 " + metricText(slots) + "，负重 " + metricText(load) + "。");
+            } else {
+                throw new IllegalStateException("清包触发后没有任何装备通过出售验证；" + summary);
+            }
         }
     }
 
