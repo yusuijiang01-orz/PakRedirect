@@ -1025,9 +1025,6 @@ public final class CoraFlowWorkflowRuntime {
 
     private void executeSellNode(String name, JSONObject config) {
         try {
-            if (config.optBoolean("sell_medicine_surplus", false)) {
-                throw new IllegalStateException("安全停止：装备出售节点不允许出售药品；药品只由独立补药节点处理。");
-            }
             if (config.optBoolean("emergency_discard_white", false)) {
                 executeEmergencyDiscard(name, config);
             } else {
@@ -1037,6 +1034,99 @@ public final class CoraFlowWorkflowRuntime {
             throw failure;
         } catch (Exception failure) {
             throw new IllegalStateException("“" + name + "”执行失败：" + rootMessage(failure), failure);
+        }
+    }
+
+    private static final class MedicineStack {
+        final int slot, count;
+        MedicineStack(int slot, int count) { this.slot = slot; this.count = count; }
+    }
+
+    private java.util.List<MedicineStack> readMedicineStacks(Bitmap frame, JSONObject config, String path) throws Exception {
+        Bitmap icon = workflowPackage.images.get(path);
+        if (icon == null) throw new IllegalStateException("缺少药瓶图标素材：" + path);
+        Rect grid = region(config.optJSONArray("medicine_grid_region"));
+        if (grid.width() < 200 || grid.height() < 300) throw new IllegalStateException("药品背包范围无效");
+        float threshold = (float) Math.max(0.7, Math.min(0.99, config.optDouble("medicine_icon_threshold", 0.92)));
+        int w = grid.width() / 5, h = grid.height() / 7;
+        java.util.List<MedicineStack> result = new java.util.ArrayList<>();
+        for (int slot = 1; slot <= 35; slot++) {
+            checkpoint();
+            int row = (slot - 1) / 5, col = (slot - 1) % 5;
+            Rect cell = new Rect(grid.left + col*w + 3, grid.top + row*h + 3,
+                    col == 4 ? grid.right : grid.left + (col+1)*w - 3,
+                    row == 6 ? grid.bottom : grid.top + (row+1)*h - 3);
+            Match hit = findTemplate(frame, icon, cell, threshold, true);
+            if (hit == null) {
+                if (findTemplate(frame, icon, cell, Math.max(0.7f, threshold - 0.03f), true) != null)
+                    throw new IllegalStateException("第 " + slot + " 格药瓶识别不确定；停止药品出售。");
+                continue;
+            }
+            Rect countRegion = new Rect(cell.left + Math.round(cell.width()*0.03f), cell.top + Math.round(cell.height()*0.58f),
+                    cell.left + Math.round(cell.width()*0.60f), cell.top + Math.round(cell.height()*0.95f));
+            InventoryMetric quantity = readInventoryMetric(frame, countRegion);
+            if (quantity == null || quantity.value <= 0 || quantity.confidence < 80)
+                throw new IllegalStateException("第 " + slot + " 格药瓶数量无法可靠识别；停止药品出售。");
+            result.add(new MedicineStack(slot, quantity.value));
+        }
+        return result;
+    }
+
+    private void sellExcessMedicine(JSONObject config) throws Exception {
+        String buttonPath = config.optString("medicine_sell_button_image", "captures/templates/RYLUX_药品出售Ban_1920.png");
+        String titlePath = "captures/templates/RYLUX_挂机_出售确认标题.png";
+        String confirmPath = "captures/templates/RYLUX_挂机_出售确认按钮.png";
+        requireImage(buttonPath); requireImage(titlePath); requireImage(confirmPath);
+        int max = Math.max(1, Math.min(15, config.optInt("medicine_max", 15)));
+        int[] columns = {1058,1160,1265,1375,1480};
+        int[] rows = {270,375,483,589,696,800,910};
+        for (String path : new String[]{config.optString("medicine_red_image", ""), config.optString("medicine_blue_image", "")}) {
+            boolean replace = false;
+            for (int attempt=0; attempt<35; attempt++) {
+                checkpoint();
+                click(480,800); control.sleep(200);
+                Bitmap frame = capture(); java.util.List<MedicineStack> stacks;
+                try { stacks = readMedicineStacks(frame,config,path); } finally { frame.recycle(); }
+                int total=0; MedicineStack selected=null;
+                for (MedicineStack stack: stacks) { total+=stack.count; if (selected==null || stack.count>selected.count) selected=stack; }
+                if ((!replace && total<=max) || total==0) break;
+                replace=true;
+                if (selected==null) throw new IllegalStateException("超量药品未可靠定位；停止出售。");
+                note("药品超量：当前 " + total + "，准备整组出售第 " + selected.slot + " 格 " + selected.count + " 瓶。");
+                click(columns[(selected.slot-1)%5],rows[(selected.slot-1)/5]); control.sleep(350);
+                frame=capture();
+                try {
+                    Match button=findTemplate(frame,buttonPath,new Rect(900,180,1900,950),0.95f);
+                    if (button==null) throw new IllegalStateException("药品出售按钮未识别；没有出售。");
+                    tapPixels(button.x,button.y,frame.getWidth(),frame.getHeight());
+                } finally { frame.recycle(); }
+                control.sleep(400);
+                boolean confirmed=false;
+                for (int poll=0; poll<4 && !confirmed; poll++) {
+                    frame=capture();
+                    try {
+                        Match title=findTemplate(frame,titlePath,new Rect(860,280,1050,355),0.9f);
+                        Match button=findTemplate(frame,confirmPath,new Rect(700,710,940,805),0.9f);
+                        if (title!=null && button!=null) {
+                            InventoryMetric quantity=readInventoryMetric(frame,new Rect(970,510,1080,568));
+                            if (quantity==null || quantity.confidence<80 || quantity.value!=selected.count)
+                                throw new IllegalStateException("药品出售弹窗数量未确认整组；没有确认出售。");
+                            tapPixels(button.x,button.y,frame.getWidth(),frame.getHeight()); confirmed=true;
+                        }
+                    } finally { frame.recycle(); }
+                    if (!confirmed) control.sleep(400);
+                }
+                if (!confirmed) throw new IllegalStateException("药品出售弹窗未确认；没有确认出售。");
+                boolean verified=false;
+                for (int poll=0; poll<4 && !verified; poll++) {
+                    control.sleep(700); click(480,800); frame=capture();
+                    try { int remaining=0; for (MedicineStack stack:readMedicineStacks(frame,config,path)) remaining+=stack.count;
+                        if (remaining==total-selected.count) { verified=true; note("药品出售已验证："+total+"→"+remaining); }
+                    } finally { frame.recycle(); }
+                }
+                if (!verified) throw new IllegalStateException("药品出售后库存变化未确认；停止避免重复出售。");
+                if (attempt==34) throw new IllegalStateException("药品出售超过安全次数；停止。");
+            }
         }
     }
 
@@ -1064,6 +1154,9 @@ public final class CoraFlowWorkflowRuntime {
         } finally { shopStart.recycle(); }
         click(1075, 170);
         control.sleep(250);
+        if (config.optBoolean("sell_medicine_surplus", false)) {
+            sellExcessMedicine(config);
+        }
 
         Bitmap initial = capture();
         Set<Integer> medicineSlots;
