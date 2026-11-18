@@ -6,11 +6,11 @@ on:
       version_name:
         description: 'Version name for this test build'
         required: true
-        default: '2.5.45-potion-ocr-recovery'
+        default: '2.5.46-workflow-version-fix'
       version_code:
         description: 'Monotonically increasing Android versionCode'
         required: true
-        default: '169'
+        default: '170'
       publish_release:
         description: 'Publish GitHub and Gitee releases after building (leave off for a test build)'
         required: true
@@ -40,8 +40,8 @@ jobs:
       contents: write
 
     env:
-      RYLUX_VERSION_NAME: ${{ inputs.version_name || '2.5.45-potion-ocr-recovery' }}
-      RYLUX_VERSION_CODE: ${{ inputs.version_code || '169' }}
+      RYLUX_VERSION_NAME: ${{ inputs.version_name || '2.5.46-workflow-version-fix' }}
+      RYLUX_VERSION_CODE: ${{ inputs.version_code || '170' }}
       RYLUX_KEYSTORE_B64: ${{ secrets.RYLUX_KEYSTORE_B64 }}
       RYLUX_KEYSTORE_PASSWORD: ${{ secrets.RYLUX_KEYSTORE_PASSWORD }}
       RYLUX_KEY_ALIAS: ${{ secrets.RYLUX_KEY_ALIAS }}

@@ -36,6 +36,21 @@ public final class CoraFlowWorkflowUpdateManager {
     private static final long MAX_ENCRYPTED_BYTES = 24L * 1024L * 1024L;
     private static final long MAX_EXPANDED_BYTES = 12L * 1024L * 1024L;
     private static final int MAX_ENTRIES = 128;
+    private static final String VERSION_PREFS = "rylux-coraflow-version";
+
+    private static final class RemoteManifest {
+        final String text;
+        final String source;
+        final JSONObject payload;
+        final long revision;
+
+        RemoteManifest(String text, String source, JSONObject payload, long revision) {
+            this.text = text;
+            this.source = source;
+            this.payload = payload;
+            this.revision = revision;
+        }
+    }
 
     private CoraFlowWorkflowUpdateManager() { }
 
@@ -49,30 +64,47 @@ public final class CoraFlowWorkflowUpdateManager {
         String token = new AuthStorage(app).loadToken();
         JSONObject payload = null;
         byte[] encrypted = null;
+        RemoteManifest newestRemote = null;
+        long highestRevision = app.getSharedPreferences(VERSION_PREFS, Context.MODE_PRIVATE)
+                .getLong("highest_revision", 0L);
 
         notify(status, "正在检查加密工作流更新");
         try {
-            String manifestText = new String(readRemote(MANIFEST, MAX_MANIFEST_BYTES), StandardCharsets.UTF_8);
-            payload = ProtectedContentManager.verifyWorkflowManifest(app, token, manifestText);
+            newestRemote = readNewestManifest(app, token, status);
+            payload = newestRemote.payload;
             String bundleName = payload.optString("bundle", "").trim();
             if (!BUNDLE.equals(bundleName)) throw new IllegalStateException("CoraFlow 清单指定了未知工作流文件");
             encrypted = downloadVerified(bundleName, payload.optLong("size", -1L),
                     payload.optString("sha256", ""));
             writeAtomic(cachedBundle, encrypted);
-            writeAtomic(cachedManifest, manifestText.getBytes(StandardCharsets.UTF_8));
+            writeAtomic(cachedManifest, newestRemote.text.getBytes(StandardCharsets.UTF_8));
         } catch (Exception remoteFailure) {
             if (!cachedManifest.isFile() || !cachedBundle.isFile()) {
                 throw new IllegalStateException("CoraFlow 加密工作流下载失败，且没有已验证的离线缓存", remoteFailure);
             }
-            notify(status, "网络不可用，尝试使用已缓存的加密工作流");
             String manifestText = readText(cachedManifest, MAX_MANIFEST_BYTES);
-            payload = ProtectedContentManager.verifyWorkflowManifest(app, token, manifestText);
+            JSONObject cachedPayload = ProtectedContentManager.verifyWorkflowManifest(app, token, manifestText);
+            long cachedRevision = workflowRevision(cachedPayload);
+            long requiredRevision = Math.max(highestRevision,
+                    newestRemote == null ? 0L : newestRemote.revision);
+            if (cachedRevision < requiredRevision) {
+                String requiredVersion = newestRemote == null
+                        ? app.getSharedPreferences(VERSION_PREFS, Context.MODE_PRIVATE)
+                                .getString("highest_version", "较新工作流")
+                        : newestRemote.payload.optString("version", "较新工作流");
+                throw new IllegalStateException("在线已发现工作流 " + requiredVersion
+                        + "（修订 " + requiredRevision + "），但对应加密包暂不可用；缓存只有修订 "
+                        + cachedRevision + "，已拒绝静默运行旧版。请重试更新。", remoteFailure);
+            }
+            String sha = cachedPayload.optString("sha256", "").trim().toLowerCase(Locale.US);
+            payload = cachedPayload;
             long size = payload.optLong("size", -1L);
-            String sha = payload.optString("sha256", "").trim().toLowerCase(Locale.US);
             if (size <= 0 || size > MAX_ENCRYPTED_BYTES || cachedBundle.length() != size
                     || !sha256(cachedBundle).equals(sha)) {
                 throw new IllegalStateException("CoraFlow 离线工作流缓存校验失败", remoteFailure);
             }
+            notify(status, "网络暂不可用；仅使用已验证缓存 "
+                    + payload.optString("version", "未标注") + "（修订 " + cachedRevision + "）");
             encrypted = readBytes(cachedBundle, MAX_ENCRYPTED_BYTES);
         }
 
@@ -83,6 +115,11 @@ public final class CoraFlowWorkflowUpdateManager {
             notify(status, "正在载入工作流节点与素材");
             CoraFlowWorkflowRuntime.WorkflowPackage loaded = unpack(app, plain, panelValues,
                     payload.optString("version", "未标注"));
+            long loadedRevision = workflowRevision(payload);
+            app.getSharedPreferences(VERSION_PREFS, Context.MODE_PRIVATE).edit()
+                    .putLong("highest_revision", Math.max(highestRevision, loadedRevision))
+                    .putString("highest_version", payload.optString("version", "未标注"))
+                    .apply();
             notify(status, "已载入脚本版本：" + loaded.releaseVersion);
             return loaded;
         } finally {
@@ -224,26 +261,40 @@ public final class CoraFlowWorkflowUpdateManager {
                 || lower.endsWith(".jpeg") || lower.endsWith(".webp") || lower.endsWith(".bmp"));
     }
 
-    private static byte[] readRemote(String name, long maximum) throws Exception {
+    private static RemoteManifest readNewestManifest(Context context, String token,
+                                                       Consumer<String> status) throws Exception {
+        RemoteManifest newest = null;
         Exception last = null;
-        for (String candidate : CnDownloadRouter.workflowRepoFileUrls(name)) {
+        String mirrorConflict = null;
+        int valid = 0;
+        for (String candidate : CnDownloadRouter.workflowRepoFileUrls(MANIFEST)) {
             HttpURLConnection connection = null;
             try {
                 connection = open(candidate);
                 if (connection.getResponseCode() != HttpURLConnection.HTTP_OK) {
-                    throw new IllegalStateException("工作流服务器返回 HTTP " + connection.getResponseCode());
+                    throw new IllegalStateException("工作流清单服务器返回 HTTP " + connection.getResponseCode());
                 }
                 long declared = connection.getContentLengthLong();
-                if (declared > maximum) throw new IllegalStateException("工作流下载超过大小限制");
+                if (declared > MAX_MANIFEST_BYTES) throw new IllegalStateException("工作流清单超过大小限制");
                 try (InputStream input = new BufferedInputStream(connection.getInputStream());
                      ByteArrayOutputStream output = new ByteArrayOutputStream()) {
                     byte[] buffer = new byte[16 * 1024];
                     int count;
                     while ((count = input.read(buffer)) != -1) {
-                        if ((long) output.size() + count > maximum) throw new IllegalStateException("工作流下载超过大小限制");
+                        if ((long) output.size() + count > MAX_MANIFEST_BYTES) throw new IllegalStateException("工作流清单超过大小限制");
                         output.write(buffer, 0, count);
                     }
-                    return output.toByteArray();
+                    String text = new String(output.toByteArray(), StandardCharsets.UTF_8);
+                    JSONObject payload = ProtectedContentManager.verifyWorkflowManifest(context, token, text);
+                    long revision = workflowRevision(payload);
+                    valid++;
+                    if (newest == null || revision > newest.revision) {
+                        newest = new RemoteManifest(text, candidate, payload, revision);
+                    } else if (revision == newest.revision
+                            && !payload.optString("sha256", "").equalsIgnoreCase(
+                                    newest.payload.optString("sha256", ""))) {
+                        mirrorConflict = "同一工作流修订号对应不同加密包；拒绝加载不一致镜像";
+                    }
                 }
             } catch (Exception failure) {
                 last = failure;
@@ -251,7 +302,18 @@ public final class CoraFlowWorkflowUpdateManager {
                 if (connection != null) connection.disconnect();
             }
         }
-        throw last == null ? new IllegalStateException("工作流清单下载失败") : last;
+        if (mirrorConflict != null) throw new IllegalStateException(mirrorConflict, last);
+        if (newest == null) throw last == null ? new IllegalStateException("工作流清单下载失败") : last;
+        notify(status, "已核对 " + valid + " 个签名工作流镜像，采用 "
+                + newest.payload.optString("version", "未标注") + "（修订 " + newest.revision + "）");
+        return newest;
+    }
+
+    private static long workflowRevision(JSONObject payload) {
+        JSONObject encryption = payload == null ? null : payload.optJSONObject("encryption");
+        long revision = encryption == null ? 0L : encryption.optLong("revision", 0L);
+        if (revision <= 0L) throw new IllegalStateException("CoraFlow 工作流清单缺少有效修订号");
+        return revision;
     }
 
     private static byte[] downloadVerified(String name, long expectedSize, String expectedSha) throws Exception {
