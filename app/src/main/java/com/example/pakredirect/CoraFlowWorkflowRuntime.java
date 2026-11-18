@@ -35,13 +35,20 @@ public final class CoraFlowWorkflowRuntime {
         final JSONObject bindings;
         final Map<String, Bitmap> images;
         final JSONObject panelValues;
+        final String releaseVersion;
 
         WorkflowPackage(JSONObject workflow, JSONObject bindings, Map<String, Bitmap> images,
                         JSONObject panelValues) {
+            this(workflow, bindings, images, panelValues, "");
+        }
+
+        WorkflowPackage(JSONObject workflow, JSONObject bindings, Map<String, Bitmap> images,
+                        JSONObject panelValues, String releaseVersion) {
             this.workflow = workflow;
             this.bindings = bindings;
             this.images = images;
             this.panelValues = panelValues;
+            this.releaseVersion = releaseVersion == null ? "" : releaseVersion.trim();
         }
 
         @Override public void close() {
@@ -123,6 +130,7 @@ public final class CoraFlowWorkflowRuntime {
     private final Map<String, Bitmap> scaledTemplates = new HashMap<>();
     private final Map<String, int[]> previousRegions = new HashMap<>();
     private final Map<String, Integer> visits = new HashMap<>();
+    private final Map<String, Integer> recoveryAttempts = new HashMap<>();
     private final Map<String, ArrayDeque<NumberSample>> numberHistory = new HashMap<>();
     private final ArrayDeque<LoopFrame> loops = new ArrayDeque<>();
     private JSONArray currentNodes;
@@ -201,6 +209,10 @@ public final class CoraFlowWorkflowRuntime {
                 coordinateWidth = positiveInt(sizeConfig.optInt("width", 1920), 1920);
                 coordinateHeight = positiveInt(sizeConfig.optInt("height", 1080), 1080);
             }
+            String version = workflowPackage.releaseVersion.isEmpty()
+                    ? "未标注" : workflowPackage.releaseVersion;
+            note("已加载脚本版本：" + version + "；工作流“" + graph.optString("name", "CoraFlow 工作流")
+                    + "”，" + nodes.length() + " 个节点 / " + edges.length() + " 条连线。");
             if (startsWithStartupGate(workflowPackage)) {
                 note("工作流先检查并启动目标游戏；确认游戏前台后才截图，避免启动前因无画面而失败。");
             } else {
@@ -208,9 +220,7 @@ public final class CoraFlowWorkflowRuntime {
                 try {
                     screenWidth = initial.getWidth();
                     screenHeight = initial.getHeight();
-                    note("RYLUX JSON 执行器已载入 “" + graph.optString("name", "CoraFlow 工作流")
-                            + "” · " + nodes.length() + " 节点 / " + edges.length() + " 连线 · 画面 "
-                            + initial.getWidth() + "×" + initial.getHeight());
+                    note("游戏画面已就绪：" + initial.getWidth() + "×" + initial.getHeight() + "。");
                 } finally { initial.recycle(); }
             }
             note("工作流坐标基准：" + coordinateWidth + "×" + coordinateHeight);
@@ -236,6 +246,10 @@ public final class CoraFlowWorkflowRuntime {
 
                 overrideNext = null;
                 Boolean condition = execute(type, currentId, name, config, edges, nodeMap);
+                if (Boolean.TRUE.equals(condition) && !recoveryAttempts.isEmpty()) {
+                    recoveryAttempts.clear();
+                    note("已重新识别到有效界面/条件，重置暂态恢复次数。");
+                }
                 if (isDual(type)) {
                     if (condition == null) throw new IllegalStateException("“" + name + "”没有返回条件结果");
                     String next = nextEdge(edges, currentId, condition);
@@ -267,8 +281,31 @@ public final class CoraFlowWorkflowRuntime {
             case "print":
                 note(config.optString("message", ""));
                 return null;
-            case "abort":
-                throw new IllegalStateException(config.optString("message", "“" + name + "”中止了工作流"));
+            case "abort": {
+                String message = config.optString("message", "“" + name + "”中止了工作流");
+                CoraFlowRecoveryPolicy.Decision recovery = CoraFlowRecoveryPolicy.plan(
+                        id, message, config.optString("recovery_target", ""),
+                        config.optInt("recovery_max_attempts", 3),
+                        config.optLong("recovery_delay_ms", 3_000L),
+                        nodes.keySet(), recoveryAttempts);
+                if (recovery.target == null) throw new IllegalStateException(message);
+                if (!recovery.shouldRecover()) {
+                    throw new IllegalStateException(message + "；已从状态识别入口恢复 " + recovery.maximum
+                            + " 次仍未确认，已暂停，避免盲目继续。");
+                }
+                if (config.optBoolean("recovery_reset_context", false)) {
+                    // Keep outer loop frames alive; clear only stale observations/count limits.
+                    visits.clear();
+                    previousRegions.clear();
+                    numberHistory.clear();
+                }
+                note("状态未确认；等待 " + (recovery.delayMs / 1000.0) + " 秒后回到状态识别入口重试（"
+                        + recovery.attempt + "/" + recovery.maximum
+                        + "）。不会沿用旧页面坐标继续点击。");
+                control.sleep(recovery.delayMs);
+                overrideNext = recovery.target;
+                return null;
+            }
             case "delay":
                 waitNode(config);
                 return null;

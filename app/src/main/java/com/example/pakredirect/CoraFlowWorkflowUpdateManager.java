@@ -81,14 +81,19 @@ public final class CoraFlowWorkflowUpdateManager {
         byte[] plain = ProtectedContentManager.decryptWorkflowBundle(app, token, cachedBundle, payload);
         try {
             notify(status, "正在载入工作流节点与素材");
-            return unpack(app, plain, panelValues);
+            CoraFlowWorkflowRuntime.WorkflowPackage loaded = unpack(app, plain, panelValues,
+                    payload.optString("version", "未标注"));
+            notify(status, "已载入脚本版本：" + loaded.releaseVersion);
+            return loaded;
         } finally {
             java.util.Arrays.fill(plain, (byte) 0);
             java.util.Arrays.fill(encrypted, (byte) 0);
         }
     }
 
-    private static CoraFlowWorkflowRuntime.WorkflowPackage unpack(Context context, byte[] plain, JSONObject panelValues) throws Exception {
+    private static CoraFlowWorkflowRuntime.WorkflowPackage unpack(Context context, byte[] plain,
+                                                                  JSONObject panelValues,
+                                                                  String releaseVersion) throws Exception {
         JSONObject workflow = null;
         JSONObject bindings = null;
         Map<String, Bitmap> images = new HashMap<>();
@@ -137,7 +142,7 @@ public final class CoraFlowWorkflowUpdateManager {
         addBuiltinTemplate(context, images, "captures/templates/RYLUX_背包_物品详情左上角_1920.png");
         validateWorkflowImages(workflow, images.keySet());
         return new CoraFlowWorkflowRuntime.WorkflowPackage(workflow, bindings, images,
-                panelValues == null ? new JSONObject() : new JSONObject(panelValues.toString()));
+                panelValues == null ? new JSONObject() : new JSONObject(panelValues.toString()), releaseVersion);
     }
 
     static void validateWorkflowImages(JSONObject workflow, Set<String> availableImages) {
