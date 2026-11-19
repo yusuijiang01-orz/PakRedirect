@@ -33,6 +33,8 @@ public final class VisionFrameCache implements AutoCloseable {
         return rgb;
     }
 
+    public synchronized void invalidate() { close(); }
+
     @Override public synchronized void close() {
         bitmap = null;
         if (rgb != null) { rgb.release(); rgb = null; }
