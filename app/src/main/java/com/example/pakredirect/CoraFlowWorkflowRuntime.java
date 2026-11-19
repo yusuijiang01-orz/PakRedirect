@@ -112,6 +112,15 @@ public final class CoraFlowWorkflowRuntime {
         Match(float x, float y, float score) { this.x = x; this.y = y; this.score = score; }
     }
 
+    private final class StableSaleDialog implements AutoCloseable {
+        final Bitmap frame;
+        final Match button;
+        StableSaleDialog(Bitmap frame, Match button) { this.frame = frame; this.button = button; }
+        @Override public void close() {
+            if (frame != null && !frame.isRecycled()) frame.recycle();
+        }
+    }
+
     private static final class OcrRead {
         final String text;
         final float confidence;
@@ -1430,6 +1439,65 @@ public final class CoraFlowWorkflowRuntime {
         return result;
     }
 
+    /**
+     * A sale dialog is actionable only after title and confirm button both
+     * match in two independent screenshots. Returns the second screenshot so
+     * the click is issued against the exact frame that passed verification.
+     */
+    private StableSaleDialog awaitStableSaleDialog(String titlePath, String confirmPath,
+                                                   Rect titleRegion, Rect buttonRegion,
+                                                   float threshold, int attempts) throws Exception {
+        int boundedAttempts = Math.max(1, Math.min(5, attempts));
+        for (int attempt = 1; attempt <= boundedAttempts; attempt++) {
+            checkpoint();
+            Bitmap first = capture();
+            Match firstTitle, firstButton;
+            try {
+                firstTitle = findTemplate(first, titlePath, titleRegion, threshold);
+                firstButton = findTemplate(first, confirmPath, buttonRegion, threshold);
+            } finally { if (first != null && !first.isRecycled()) first.recycle(); }
+            if (firstTitle == null || firstButton == null) {
+                note("出售确认弹窗首帧未同时识别标题和按钮（" + attempt + "/" + boundedAttempts + "），等待动画稳定。");
+                control.sleep(250L);
+                continue;
+            }
+
+            control.sleep(140L);
+            Bitmap second = capture();
+            try {
+                Match secondTitle = findTemplate(second, titlePath, titleRegion, threshold);
+                Match secondButton = findTemplate(second, confirmPath, buttonRegion, threshold);
+                boolean titleStable = secondTitle != null
+                        && VisionTemporalConsensus.decide(true, firstTitle.score, true,
+                                secondTitle.score, threshold)
+                           == VisionTemporalConsensus.State.CONFIRMED;
+                boolean buttonStable = secondButton != null
+                        && VisionTemporalConsensus.decide(true, firstButton.score, true,
+                                secondButton.score, threshold)
+                           == VisionTemporalConsensus.State.CONFIRMED;
+                if (!titleStable || !buttonStable) {
+                    note("出售确认弹窗双帧不一致或置信度不足（" + attempt + "/" + boundedAttempts
+                            + "）；未点击确认。");
+                    control.sleep(250L);
+                    continue;
+                }
+                visionStateMachine.observe(VisionGameStateMachine.State.SALE_CONFIRM,
+                        Math.min(secondTitle.score, secondButton.score), true);
+                if (!visionStateMachine.allowsSaleConfirmation()) {
+                    throw new IllegalStateException("游戏状态机未确认出售弹窗；未执行确认操作。");
+                }
+                Bitmap verifiedFrame = second;
+                second = null;
+                note("出售确认弹窗标题与按钮均通过双帧验证（"
+                        + percent(Math.min(secondTitle.score, secondButton.score) * 100) + "）。");
+                return new StableSaleDialog(verifiedFrame, secondButton);
+            } finally {
+                if (second != null && !second.isRecycled()) second.recycle();
+            }
+        }
+        throw new IllegalStateException("出售确认弹窗未通过双帧验证；已停止，未确认交易。");
+    }
+
     private void sellExcessMedicine(JSONObject config) throws Exception {
         String buttonPath = config.optString("medicine_sell_button_image", "captures/templates/RYLUX_药品出售Ban_1920.png");
         String titlePath = "captures/templates/RYLUX_挂机_出售确认标题.png";
@@ -1460,23 +1528,13 @@ public final class CoraFlowWorkflowRuntime {
                 } finally { frame.recycle(); }
                 control.sleep(400);
                 boolean confirmed=false;
-                for (int poll=0; poll<4 && !confirmed; poll++) {
-                    frame=capture();
-                    try {
-                        Match title=findTemplate(frame,titlePath,new Rect(860,280,1050,355),0.9f);
-                        Match button=findTemplate(frame,confirmPath,new Rect(700,710,940,805),0.9f);
-                        if (title!=null && button!=null) {
-                            visionStateMachine.observe(VisionGameStateMachine.State.SALE_CONFIRM,
-                                    Math.min(title.score,button.score),true);
-                            if(!visionStateMachine.allowsSaleConfirmation())
-                                throw new IllegalStateException("状态机未确认药品出售弹窗；未执行确认操作。");
-                            InventoryMetric quantity=readInventoryMetricStable(frame,new Rect(970,510,1080,568));
-                            if (quantity==null || quantity.confidence<80 || quantity.value!=selected.count)
-                                throw new IllegalStateException("药品出售弹窗数量未确认整组；没有确认出售。");
-                            tapPixels(button.x,button.y,frame.getWidth(),frame.getHeight()); confirmed=true;
-                        }
-                    } finally { frame.recycle(); }
-                    if (!confirmed) control.sleep(400);
+                try (StableSaleDialog dialog = awaitStableSaleDialog(titlePath, confirmPath,
+                        new Rect(860,280,1050,355), new Rect(700,710,940,805), 0.90f, 4)) {
+                    InventoryMetric quantity=readInventoryMetricStable(dialog.frame,new Rect(970,510,1080,568));
+                    if (quantity==null || quantity.confidence<80 || quantity.value!=selected.count)
+                        throw new IllegalStateException("药品出售弹窗数量未通过双帧验证；没有确认出售。");
+                    tapPixels(dialog.button.x,dialog.button.y,dialog.frame.getWidth(),dialog.frame.getHeight());
+                    confirmed=true;
                 }
                 if (!confirmed) throw new IllegalStateException("药品出售弹窗未确认；没有确认出售。");
                 boolean verified=false;
@@ -1618,20 +1676,11 @@ public final class CoraFlowWorkflowRuntime {
                             + percent(sellButton.score * 100) + "；出售前负重 " + metricText(beforeLoad) + "，空格 " + metricText(beforeSlots) + "。");
                     tapPixels(sellButton.x, sellButton.y, item.getWidth(), item.getHeight());
                     control.sleep(350);
-                    Bitmap confirm = capture();
-                    try {
-                        Match titleMatch = findTemplate(confirm, saleTitlePath, new Rect(860, 280, 1050, 355), 0.84f);
-                        Match confirmButton = findTemplate(confirm, saleConfirmPath, new Rect(700, 710, 940, 805), 0.84f);
-                        if (titleMatch == null || confirmButton == null) {
-                            throw new IllegalStateException("出售确认弹窗标题和按钮未同时匹配；已停止，未确认出售。");
-                        }
-                        visionStateMachine.observe(VisionGameStateMachine.State.SALE_CONFIRM,
-                                Math.min(titleMatch.score, confirmButton.score), true);
-                        if (!visionStateMachine.allowsSaleConfirmation()) {
-                            throw new IllegalStateException("游戏状态机未确认出售弹窗；未执行确认操作。");
-                        }
-                        tapPixels(confirmButton.x, confirmButton.y, confirm.getWidth(), confirm.getHeight());
-                    } finally { confirm.recycle(); }
+                    try (StableSaleDialog dialog = awaitStableSaleDialog(saleTitlePath, saleConfirmPath,
+                            new Rect(860, 280, 1050, 355), new Rect(700, 710, 940, 805), 0.84f, 4)) {
+                        tapPixels(dialog.button.x, dialog.button.y,
+                                dialog.frame.getWidth(), dialog.frame.getHeight());
+                    }
                     control.sleep(1000);
                     Bitmap after = capture();
                     try {
