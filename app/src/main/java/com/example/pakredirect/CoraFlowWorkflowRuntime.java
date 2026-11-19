@@ -32,6 +32,7 @@ import com.example.pakredirect.vision.VisionViewport;
 import com.example.pakredirect.vision.VisionViewportDetector;
 import com.example.pakredirect.vision.VisionCoordinateTransform;
 import com.example.pakredirect.vision.VisionGameStateMachine;
+import com.example.pakredirect.vision.DigitVision;
 
 /** Executes a decrypted CoraFlow graph through RYLUX's native Android input and OCR APIs. */
 public final class CoraFlowWorkflowRuntime {
@@ -1400,7 +1401,7 @@ public final class CoraFlowWorkflowRuntime {
             }
             Rect countRegion = new Rect(cell.left + Math.round(cell.width()*0.03f), cell.top + Math.round(cell.height()*0.58f),
                     cell.left + Math.round(cell.width()*0.60f), cell.top + Math.round(cell.height()*0.95f));
-            InventoryMetric quantity = readInventoryMetric(frame, countRegion);
+            InventoryMetric quantity = readInventoryMetricStable(frame, countRegion);
             if (quantity == null || quantity.value <= 0 || quantity.confidence < 80)
                 throw new IllegalStateException("第 " + slot + " 格药瓶数量无法可靠识别；停止药品出售。");
             result.add(new MedicineStack(slot, quantity.value));
@@ -1448,7 +1449,7 @@ public final class CoraFlowWorkflowRuntime {
                                     Math.min(title.score,button.score),true);
                             if(!visionStateMachine.allowsSaleConfirmation())
                                 throw new IllegalStateException("状态机未确认药品出售弹窗；未执行确认操作。");
-                            InventoryMetric quantity=readInventoryMetric(frame,new Rect(970,510,1080,568));
+                            InventoryMetric quantity=readInventoryMetricStable(frame,new Rect(970,510,1080,568));
                             if (quantity==null || quantity.confidence<80 || quantity.value!=selected.count)
                                 throw new IllegalStateException("药品出售弹窗数量未确认整组；没有确认出售。");
                             tapPixels(button.x,button.y,frame.getWidth(),frame.getHeight()); confirmed=true;
@@ -2045,14 +2046,70 @@ public final class CoraFlowWorkflowRuntime {
         InventoryMetric best = null;
         for (int scale : new int[]{4, 3, 2}) {
             OcrRead result = readOcr(frame, region, false, scale);
-            Integer value = parseNumber(result.text);
-            if (value != null && result.confidence >= 35
+            double normalizedConfidence = result.confidence > 1d ? result.confidence / 100d : result.confidence;
+            DigitVision.Reading reading = DigitVision.parse(result.text, normalizedConfidence,
+                    0, 999999, 0.35d);
+            Integer value = reading.value;
+            if (reading.status == DigitVision.Status.CONFIRMED && value != null
+                    && result.confidence >= 35
                     && (best == null || result.confidence > best.confidence)) {
                 best = new InventoryMetric(value, result.text.trim(), result.confidence);
             }
             if (best != null && best.confidence >= 80) break;
         }
         return best;
+    }
+
+    /**
+     * High-risk potion quantities require two independently captured frames.
+     * A mismatch, ambiguous OCR or missing confidence is UNKNOWN, never zero.
+     */
+    private InventoryMetric readInventoryMetricStable(Bitmap firstFrame, Rect region) throws Exception {
+        InventoryMetric first = readNumericMetricOnce(firstFrame, region);
+        if (first == null || first.confidence < 55) return null;
+        control.sleep(120);
+        Bitmap secondFrame = capture();
+        try {
+            InventoryMetric second = readNumericMetricOnce(secondFrame, region);
+            if (second == null || second.confidence < 55 || first.value != second.value) {
+                note("数字视觉双帧不一致： " + first.text + " / "
+                        + (second == null ? "UNKNOWN" : second.text) + "；禁止据此执行交易。");
+                return null;
+            }
+            return new InventoryMetric(first.value, first.text + " | " + second.text,
+                    Math.min(first.confidence, second.confidence));
+        } finally { if (secondFrame != null && !secondFrame.isRecycled()) secondFrame.recycle(); }
+    }
+
+    private InventoryMetric readNumericMetricOnce(Bitmap frame, Rect region) throws Exception {
+        Rect bounds = pixelRegion(region, frame.getWidth(), frame.getHeight());
+        if (bounds.width() < 2 || bounds.height() < 2) return null;
+        Bitmap crop = Bitmap.createBitmap(frame, bounds.left, bounds.top, bounds.width(), bounds.height());
+        Bitmap enhanced = null;
+        try {
+            enhanced = DigitVision.preprocess(crop, 3);
+            JSONObject result = ocr.recognize(enhanced, "eng", "number", 1);
+            String text = result.optString("text", "");
+            double confidence = result.optDouble("confidence", 0d);
+            if (confidence > 1d) confidence /= 100d;
+            DigitVision.Reading parsed = DigitVision.parse(text, confidence, 0, 999999, 0.55d);
+            if (parsed.status == DigitVision.Status.CONFIRMED && parsed.value != null) {
+                return new InventoryMetric(parsed.value, text, (float)(confidence * 100d));
+            }
+            // Retry original pixels once; some stylized fonts degrade under thresholding.
+            JSONObject raw = ocr.recognize(crop, "eng", "number", 3);
+            String rawText = raw.optString("text", "");
+            double rawConfidence = raw.optDouble("confidence", 0d);
+            if (rawConfidence > 1d) rawConfidence /= 100d;
+            DigitVision.Reading rawParsed = DigitVision.parse(rawText, rawConfidence, 0, 999999, 0.55d);
+            if (rawParsed.status == DigitVision.Status.CONFIRMED && rawParsed.value != null) {
+                return new InventoryMetric(rawParsed.value, rawText, (float)(rawConfidence * 100d));
+            }
+            return null;
+        } finally {
+            if (enhanced != null && !enhanced.isRecycled()) enhanced.recycle();
+            if (!crop.isRecycled()) crop.recycle();
+        }
     }
 
     private String metricText(InventoryMetric value) {
