@@ -57,7 +57,7 @@ public final class VisionCoordinateTransform {
     }
 
     public Rect mapRect(Rect reference) {
-        if (reference == null || reference.isEmpty()) return new Rect();
+        if (reference == null || reference.right <= reference.left || reference.bottom <= reference.top) return new Rect();
         double[][] p = {
                 map(reference.left, reference.top), map(reference.right, reference.top),
                 map(reference.left, reference.bottom), map(reference.right, reference.bottom)
