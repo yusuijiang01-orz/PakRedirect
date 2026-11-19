@@ -54,7 +54,61 @@ public final class CoraFlowWorkflowUpdateManager {
 
     private CoraFlowWorkflowUpdateManager() { }
 
+    // The same verified/decrypted package is held briefly between the workbench
+    // preflight and the foreground runtime service. This avoids downloading
+    // and decrypting a second time after the game has already been launched.
+    private static CoraFlowWorkflowRuntime.WorkflowPackage preparedPackage;
+    private static String preparedPanelValues;
+    private static long preparedAtMillis;
+    private static final long PREPARED_TTL_MILLIS = 10L * 60L * 1000L;
+
+    public static synchronized String prepareForLaunch(Context context, JSONObject panelValues,
+                                                        Consumer<String> status) throws Exception {
+        discardPrepared();
+        CoraFlowWorkflowRuntime.WorkflowPackage loaded = loadFresh(context, panelValues, status);
+        preparedPackage = loaded;
+        preparedPanelValues = panelKey(panelValues);
+        preparedAtMillis = System.currentTimeMillis();
+        return loaded.versionSummary();
+    }
+
+    public static synchronized boolean isPreparedForLaunch(JSONObject panelValues) {
+        if (preparedPackage == null) return false;
+        if (System.currentTimeMillis() - preparedAtMillis > PREPARED_TTL_MILLIS) {
+            discardPrepared();
+            return false;
+        }
+        return preparedPanelValues != null && preparedPanelValues.equals(panelKey(panelValues));
+    }
+
+    public static synchronized void discardPrepared() {
+        if (preparedPackage != null) {
+            preparedPackage.close();
+            preparedPackage = null;
+        }
+        preparedPanelValues = null;
+        preparedAtMillis = 0L;
+    }
+
     public static synchronized CoraFlowWorkflowRuntime.WorkflowPackage load(
+            Context context, JSONObject panelValues, Consumer<String> status) throws Exception {
+        if (isPreparedForLaunch(panelValues)) {
+            CoraFlowWorkflowRuntime.WorkflowPackage ready = preparedPackage;
+            preparedPackage = null;
+            preparedPanelValues = null;
+            preparedAtMillis = 0L;
+            notify(status, "使用启动前已完成验签、解密和版本核验的工作流 " + ready.versionSummary());
+            return ready;
+        }
+        discardPrepared();
+        return loadFresh(context, panelValues, status);
+    }
+
+    private static String panelKey(JSONObject values) {
+        return values == null ? "{}" : values.toString();
+    }
+
+    private static CoraFlowWorkflowRuntime.WorkflowPackage loadFresh(
             Context context, JSONObject panelValues, Consumer<String> status) throws Exception {
         Context app = context.getApplicationContext();
         File root = new File(app.getFilesDir(), ROOT);
@@ -113,14 +167,14 @@ public final class CoraFlowWorkflowUpdateManager {
         byte[] plain = ProtectedContentManager.decryptWorkflowBundle(app, token, cachedBundle, payload);
         try {
             notify(status, "正在载入工作流节点与素材");
-            CoraFlowWorkflowRuntime.WorkflowPackage loaded = unpack(app, plain, panelValues,
-                    payload.optString("version", "未标注"));
             long loadedRevision = workflowRevision(payload);
+            CoraFlowWorkflowRuntime.WorkflowPackage loaded = unpack(app, plain, panelValues,
+                    payload.optString("version", "未标注"), loadedRevision);
             app.getSharedPreferences(VERSION_PREFS, Context.MODE_PRIVATE).edit()
                     .putLong("highest_revision", Math.max(highestRevision, loadedRevision))
                     .putString("highest_version", payload.optString("version", "未标注"))
                     .apply();
-            notify(status, "已载入脚本版本：" + loaded.releaseVersion);
+            notify(status, "已载入并核验工作流版本：" + loaded.versionSummary());
             return loaded;
         } finally {
             java.util.Arrays.fill(plain, (byte) 0);
@@ -130,7 +184,8 @@ public final class CoraFlowWorkflowUpdateManager {
 
     private static CoraFlowWorkflowRuntime.WorkflowPackage unpack(Context context, byte[] plain,
                                                                   JSONObject panelValues,
-                                                                  String releaseVersion) throws Exception {
+                                                                  String releaseVersion,
+                                                                  long revision) throws Exception {
         JSONObject workflow = null;
         JSONObject bindings = null;
         Map<String, Bitmap> images = new HashMap<>();
@@ -169,7 +224,15 @@ public final class CoraFlowWorkflowUpdateManager {
         if (workflow == null || bindings == null) throw new IllegalStateException("CoraFlow 工作流包缺少节点 JSON 或面板绑定表");
         if (workflow.optJSONArray("nodes") == null || workflow.optJSONArray("edges") == null
                 || bindings.optInt("schema", 0) != 1) {
+            recycleImages(images);
             throw new IllegalStateException("CoraFlow 工作流图或面板绑定版本不支持");
+        }
+        final WorkflowVersionValidator.Info versionInfo;
+        try {
+            versionInfo = WorkflowVersionValidator.validate(releaseVersion, workflow);
+        } catch (RuntimeException invalidVersion) {
+            recycleImages(images);
+            throw invalidVersion;
         }
         addBuiltinTemplate(context, images, "captures/templates/RYLUX_挂机_大夫商店标题.png");
         addBuiltinTemplate(context, images, "captures/templates/RYLUX_挂机_背包标题.png");
@@ -178,9 +241,22 @@ public final class CoraFlowWorkflowUpdateManager {
         addBuiltinTemplate(context, images, "captures/templates/RYLUX_挂机_出售确认按钮.png");
         addBuiltinTemplate(context, images, "captures/templates/RYLUX_背包_物品详情左上角_1920.png");
         addBuiltinTemplate(context, images, "captures/templates/RYLUX_背包_空格子.png");
-        validateWorkflowImages(workflow, images.keySet());
+        try {
+            validateWorkflowImages(workflow, images.keySet());
+        } catch (RuntimeException invalidAssets) {
+            recycleImages(images);
+            throw invalidAssets;
+        }
         return new CoraFlowWorkflowRuntime.WorkflowPackage(workflow, bindings, images,
-                panelValues == null ? new JSONObject() : new JSONObject(panelValues.toString()), releaseVersion);
+                panelValues == null ? new JSONObject() : new JSONObject(panelValues.toString()),
+                releaseVersion, versionInfo.embeddedVersion, versionInfo.workflowName, revision);
+    }
+
+    private static void recycleImages(Map<String, Bitmap> images) {
+        for (Bitmap bitmap : images.values()) {
+            if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
+        }
+        images.clear();
     }
 
     static void validateWorkflowImages(JSONObject workflow, Set<String> availableImages) {
