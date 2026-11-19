@@ -6,11 +6,11 @@ on:
       version_name:
         description: 'Version name for this test build'
         required: true
-        default: '2.5.50-inventory-detail-close-rc1'
+        default: '2.6.1'
       version_code:
         description: 'Monotonically increasing Android versionCode'
         required: true
-        default: '174'
+        default: '181'
       publish_release:
         description: 'Publish GitHub and Gitee releases after building (leave off for a test build)'
         required: true
@@ -22,6 +22,7 @@ on:
       - codex/coraflow-json-runtime-20261112
       - codex/inventory-empty-slot-fast-skip
       - codex/rylux-2546-vision-stability
+      - codex/rylux-261-vision-engine
     paths:
       - .github/workflows/build-apk.yml
       - app/build.gradle
@@ -41,8 +42,8 @@ jobs:
       contents: write
 
     env:
-      RYLUX_VERSION_NAME: ${{ inputs.version_name || '2.5.50-inventory-detail-close-rc1' }}
-      RYLUX_VERSION_CODE: ${{ inputs.version_code || '174' }}
+      RYLUX_VERSION_NAME: ${{ inputs.version_name || '2.6.1' }}
+      RYLUX_VERSION_CODE: ${{ inputs.version_code || '181' }}
       RYLUX_KEYSTORE_B64: ${{ secrets.RYLUX_KEYSTORE_B64 }}
       RYLUX_KEYSTORE_PASSWORD: ${{ secrets.RYLUX_KEYSTORE_PASSWORD }}
       RYLUX_KEY_ALIAS: ${{ secrets.RYLUX_KEY_ALIAS }}
