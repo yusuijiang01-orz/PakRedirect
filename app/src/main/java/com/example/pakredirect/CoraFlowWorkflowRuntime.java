@@ -864,19 +864,31 @@ public final class CoraFlowWorkflowRuntime {
     }
 
     private Number countInventoryIcon(Bitmap frame, JSONObject config) throws Exception {
+        return countInventoryIcon(frame, config, 0);
+    }
+
+    private Number countInventoryIcon(Bitmap frame, JSONObject config, int recoveryDepth) throws Exception {
         String detailPath = "captures/templates/RYLUX_背包_物品详情左上角_1920.png";
         if (workflowPackage.images.containsKey(detailPath)
                 && findTemplate(frame, detailPath, new Rect(400, 70, 1550, 300), 0.90f) != null) {
-            // Close a blocking item detail only when the inventory header is confirmed.
-            // The bounded OCR retry will obtain a fresh frame before deciding stock.
             String titlePath = "captures/templates/RYLUX_挂机_背包标题.png";
-            if (workflowPackage.images.containsKey(titlePath)
-                    && findTemplate(frame, titlePath, new Rect(1080, 20, 1420, 140), 0.88f) != null) {
-                note("背包详情遮挡药瓶计数；已确认背包标题，点击旧版脚本确认的关闭位置（" + INVENTORY_DETAIL_CLOSE_X + "," + INVENTORY_DETAIL_CLOSE_Y + "）后重新截图。");
-                click(INVENTORY_DETAIL_CLOSE_X, INVENTORY_DETAIL_CLOSE_Y);
-                control.sleep(400L);
+            if (!workflowPackage.images.containsKey(titlePath)
+                    || findTemplate(frame, titlePath, new Rect(1080, 20, 1420, 140), 0.88f) == null) {
+                throw new IllegalStateException("药瓶计数时检测到物品详情，但背包标题未确认；保持 UNKNOWN，不按零处理。");
             }
-            throw new IllegalStateException("物品详情遮挡背包；药品数量未确认，不按零处理。");
+            if (recoveryDepth >= 2) {
+                throw new IllegalStateException("药瓶计数：物品详情关闭两次后仍遮挡背包；停止补药和交易。");
+            }
+            note("药瓶计数发现物品详情；已确认背包标题，关闭后重新截图（恢复 "
+                    + (recoveryDepth + 1) + "/2）。");
+            click(INVENTORY_DETAIL_CLOSE_X, INVENTORY_DETAIL_CLOSE_Y);
+            control.sleep(400L);
+            Bitmap fresh = capture();
+            try {
+                return countInventoryIcon(fresh, config, recoveryDepth + 1);
+            } finally {
+                if (fresh != null && !fresh.isRecycled()) fresh.recycle();
+            }
         }
         String path = config.optString("item_image", "").trim();
         Bitmap icon = workflowPackage.images.get(path);
@@ -1488,7 +1500,10 @@ public final class CoraFlowWorkflowRuntime {
                     recognized++;
                     note("第 " + slot + "/35 格通过装备功力行确认：“" + powerText.text.trim() + "”。");
 
-                    Match sellButton = findTemplate(item, sellButtonPath, new Rect(1450, 300, 1900, 850), 0.84f);
+                    // The Bán button is centered near x=1400 in the 1920x1080
+                    // reference layout. The former ROI began at x=1450 and
+                    // clipped most of the button on 16:9 game screenshots.
+                    Match sellButton = findTemplate(item, sellButtonPath, new Rect(1180, 420, 1620, 620), 0.84f);
                     if (sellButton == null) {
                         note("第 " + slot + "/35 格未识别到当前详情面板的 Bán 按钮；停止，不会点猜测坐标。");
                         throw new IllegalStateException("识别到装备，但没有在当前详情面板找到 Bán（出售）按钮；没有点击出售。");
@@ -1580,7 +1595,19 @@ public final class CoraFlowWorkflowRuntime {
                         emptySlots = locateEmptyInventorySlots(after);
                     } finally { after.recycle(); }
                     column--; // Revisit this cell in case the game compacts the inventory grid.
-                } finally { item.recycle(); }
+                } finally {
+                    // Never leave an item-detail overlay behind when OCR,
+                    // quality classification or sell-button matching fails.
+                    try {
+                        Bitmap clean = captureCleanInventory("装备扫描第 " + slot + "/35 格结束", 0.90f);
+                        if (clean != null && !clean.isRecycled()) clean.recycle();
+                    } catch (Exception cleanupFailure) {
+                        note("第 " + slot + "/35 格结束时详情清理未能确认："
+                                + rootMessage(cleanupFailure) + "；保持安全停止，不执行下一格交易。");
+                    } finally {
+                        if (item != null && !item.isRecycled()) item.recycle();
+                    }
+                }
             }
         }
         String summary = "扫描 " + scanned + "/35 格，确认装备 " + recognized + " 件（白 " + white + "、蓝 " + blue
