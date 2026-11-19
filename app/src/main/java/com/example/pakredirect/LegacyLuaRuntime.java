@@ -1446,55 +1446,56 @@ final class LegacyLuaRuntime {
     /** Adaptive UI-template API; returns the detected template center in reference coordinates. */
     private Varargs findImage(Varargs args, boolean fast, boolean adaptive) {
         control.checkpoint();
-        Bitmap screen = frame();
-        LegacyCoordinateMapper mapper = mapperFor(screen);
-        String templatePath = args.arg(5).tojstring();
-        boolean capturedFromCurrentDisplay = snapshotFile(templatePath).isFile();
-        Bitmap sourceTemplate = loadTemplate(templatePath);
-        if (sourceTemplate == null) throw new LuaError("找图模板不存在：" + templatePath);
-        Bitmap template = sourceTemplate;
-        try {
-            if (adaptive) return findAdaptiveImage(args, fast, screen, mapper, sourceTemplate);
-            if (mapper.shouldScaleTemplate(capturedFromCurrentDisplay)) {
-                int scaledWidth = Math.max(1, mapper.toScreenDeltaX(sourceTemplate.getWidth()));
-                int scaledHeight = Math.max(1, mapper.toScreenDeltaY(sourceTemplate.getHeight()));
-                template = Bitmap.createScaledBitmap(sourceTemplate, scaledWidth, scaledHeight, true);
+        Bitmap screen=frame();
+        LegacyCoordinateMapper mapper=mapperFor(screen);
+        VisionCoordinateTransform transform=transformFor(screen);
+        String templatePath=args.arg(5).tojstring();
+        boolean capturedFromCurrentDisplay=snapshotFile(templatePath).isFile();
+        Bitmap sourceTemplate=loadTemplate(templatePath);
+        if(sourceTemplate==null)throw new LuaError("找图模板不存在："+templatePath);
+        Bitmap oriented=sourceTemplate;
+        Bitmap template=sourceTemplate;
+        try{
+            if(!capturedFromCurrentDisplay&&transform.rotationDegrees!=0){
+                Matrix matrix=new Matrix();matrix.postRotate(transform.rotationDegrees);
+                oriented=Bitmap.createBitmap(sourceTemplate,0,0,sourceTemplate.getWidth(),
+                        sourceTemplate.getHeight(),matrix,true);
             }
-            Rect mappedRegion = transformFor(screen).mapRect(new Rect(
-                    (int)args.arg(1).todouble(),(int)args.arg(2).todouble(),
-                    (int)args.arg(3).todouble(),(int)args.arg(4).todouble()));
-            int left = Math.max(0,mappedRegion.left);
-            int top = Math.max(0,mappedRegion.top);
-            int right = Math.min(screen.getWidth(),mappedRegion.right);
-            int bottom = Math.min(screen.getHeight(),mappedRegion.bottom);
-            int mask = args.narg() >= 6 ? parseColor(args.arg(6).tojstring()) : -1;
-            double threshold = args.narg() >= 8 ? args.arg(8).optdouble(0.95) : 0.95;
-            Bitmap matchedTemplate = template;
-            LegacyImageMatcher.Pixels screenPixels = new LegacyImageMatcher.Pixels() {
-                @Override public int width() { return screen.getWidth(); }
-                @Override public int height() { return screen.getHeight(); }
-                @Override public int getPixel(int x, int y) { return screen.getPixel(x, y); }
-            };
-            LegacyImageMatcher.Pixels templatePixels = new LegacyImageMatcher.Pixels() {
-                @Override public int width() { return matchedTemplate.getWidth(); }
-                @Override public int height() { return matchedTemplate.getHeight(); }
-                @Override public int getPixel(int x, int y) { return matchedTemplate.getPixel(x, y); }
-            };
-            LegacyImageMatcher.Match match = findOpenCvVerified(screen, matchedTemplate,
-                    left, top, right, bottom, mask, threshold);
-            if (match != null) {
-                openCvFindHits++;
-            } else {
+            if(adaptive)return findAdaptiveImage(args,fast,screen,mapper,oriented);
+            VisionViewport viewport=transform.viewport;
+            int rotation=transform.rotationDegrees;
+            boolean quarterTurn=rotation==90||rotation==270;
+            double referenceX=quarterTurn?transform.referenceHeight:transform.referenceWidth;
+            double referenceY=quarterTurn?transform.referenceWidth:transform.referenceHeight;
+            int scaledWidth=Math.max(1,(int)Math.round(oriented.getWidth()
+                    *(viewport.right-viewport.left)/referenceX));
+            int scaledHeight=Math.max(1,(int)Math.round(oriented.getHeight()
+                    *(viewport.bottom-viewport.top)/referenceY));
+            if(!capturedFromCurrentDisplay&&(scaledWidth!=oriented.getWidth()
+                    ||scaledHeight!=oriented.getHeight())){
+                template=Bitmap.createScaledBitmap(oriented,scaledWidth,scaledHeight,true);
+            }else template=oriented;
+            Rect mappedRegion=transform.mapRect(new Rect(args.arg(1).toint(),args.arg(2).toint(),
+                    args.arg(3).toint(),args.arg(4).toint()));
+            int left=Math.max(0,mappedRegion.left),top=Math.max(0,mappedRegion.top);
+            int right=Math.min(screen.getWidth(),mappedRegion.right);
+            int bottom=Math.min(screen.getHeight(),mappedRegion.bottom);
+            int mask=args.narg()>=6?parseColor(args.arg(6).tojstring()):-1;
+            double threshold=args.narg()>=8?args.arg(8).optdouble(0.95):0.95;
+            LegacyImageMatcher.Match match=findOpenCvVerified(screen,template,left,top,right,bottom,mask,threshold);
+            if(match!=null)openCvFindHits++;
+            else{
                 legacyFindFallbacks++;
-                match = LegacyImageMatcher.find(screenPixels, templatePixels,
-                        left, top, right, bottom, mask, threshold, control::checkpoint);
+                match=LegacyImageMatcher.find(bitmapPixels(screen),bitmapPixels(template),
+                        left,top,right,bottom,mask,threshold,control::checkpoint);
             }
-            double[] reference = match == null ? null : transformFor(screen).inverse(match.x, match.y);
-            return match == null ? imageNotFound(fast)
-                    : imageMatch(fast, (int)Math.round(reference[0]), (int)Math.round(reference[1]));
-        } finally {
-            if (template != sourceTemplate && !template.isRecycled()) template.recycle();
-            if (!sourceTemplate.isRecycled()) sourceTemplate.recycle();
+            if(match==null)return imageNotFound(fast);
+            double[] reference=transform.inverse(match.x,match.y);
+            return imageMatch(fast,(int)Math.round(reference[0]),(int)Math.round(reference[1]));
+        }finally{
+            if(template!=oriented&&!template.isRecycled())template.recycle();
+            if(oriented!=sourceTemplate&&!oriented.isRecycled())oriented.recycle();
+            if(!sourceTemplate.isRecycled())sourceTemplate.recycle();
         }
     }
 
