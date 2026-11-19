@@ -31,6 +31,11 @@ public final class CoraFlowWorkflowRuntime {
     private static final long CAPTURE_TIMEOUT_MS = 8_000L;
     private static final Pattern NUMBER = Pattern.compile("-?\\d+(?:[.,]\\d+)?");
 
+    // Match the close action used by the recovered Hangup Lua workflow.
+    // (1200,80) is in the header area and does not dismiss the selected-item panel.
+    static final int INVENTORY_DETAIL_CLOSE_X = 1184;
+    static final int INVENTORY_DETAIL_CLOSE_Y = 638;
+
     public static final class WorkflowPackage implements AutoCloseable {
         final JSONObject workflow;
         final JSONObject bindings;
@@ -522,7 +527,7 @@ public final class CoraFlowWorkflowRuntime {
         while (!ScriptGameAdapter.isTargetGameForeground()
                 && SystemClock.elapsedRealtime() < deadline) {
             checkpoint();
-            control.sleep(250L);
+            control.sleep(400L);
         }
         if (!ScriptGameAdapter.isTargetGameForeground()) {
             throw new IllegalStateException("“" + name + "”启动后 " + (waitMs / 1000)
@@ -853,9 +858,9 @@ public final class CoraFlowWorkflowRuntime {
             String titlePath = "captures/templates/RYLUX_挂机_背包标题.png";
             if (workflowPackage.images.containsKey(titlePath)
                     && findTemplate(frame, titlePath, new Rect(1080, 20, 1420, 140), 0.88f) != null) {
-                note("背包详情遮挡药瓶计数；已确认背包标题，尝试关闭详情后重新截图。");
-                click(1200, 80);
-                control.sleep(250L);
+                note("背包详情遮挡药瓶计数；已确认背包标题，点击旧版脚本确认的关闭位置（" + INVENTORY_DETAIL_CLOSE_X + "," + INVENTORY_DETAIL_CLOSE_Y + "）后重新截图。");
+                click(INVENTORY_DETAIL_CLOSE_X, INVENTORY_DETAIL_CLOSE_Y);
+                control.sleep(400L);
             }
             throw new IllegalStateException("物品详情遮挡背包；药品数量未确认，不按零处理。");
         }
@@ -1343,7 +1348,7 @@ public final class CoraFlowWorkflowRuntime {
             note("确认处于大夫商店（标题命中 " + percent(shop.score * 100) + "）；开始装备扫描。");
         } finally { shopStart.recycle(); }
         click(1075, 170);
-        control.sleep(250);
+        control.sleep(400);
         if (config.optBoolean("sell_medicine_surplus", false)) {
             sellExcessMedicine(config);
         }
@@ -1658,7 +1663,7 @@ public final class CoraFlowWorkflowRuntime {
             Match detail = findTemplate(frame, detailPath, new Rect(400, 70, 1550, 300), 0.90f);
             if (detail == null) { note("扫描结束：未发现物品详情浮层。"); return; }
         } finally { frame.recycle(); }
-        click(1200, 80); control.sleep(300);
+        click(INVENTORY_DETAIL_CLOSE_X, INVENTORY_DETAIL_CLOSE_Y); control.sleep(300);
         frame = capture();
         try {
             if (findTemplate(frame, detailPath, new Rect(400, 70, 1550, 300), 0.90f) != null)
@@ -1673,15 +1678,16 @@ public final class CoraFlowWorkflowRuntime {
             Match detail = findTemplate(before, "captures/templates/RYLUX_背包_物品详情左上角_1920.png",
                     new Rect(400, 70, 1550, 300), 0.97f);
             if (detail != null) {
-                click(1200, 80);
-                control.sleep(250);
+                note("检测到物品详情浮层；点击旧版脚本确认的关闭位置（" + INVENTORY_DETAIL_CLOSE_X + "," + INVENTORY_DETAIL_CLOSE_Y + "）。");
+                click(INVENTORY_DETAIL_CLOSE_X, INVENTORY_DETAIL_CLOSE_Y);
+                control.sleep(400);
                 before.recycle();
                 before = capture();
                 detail = findTemplate(before, "captures/templates/RYLUX_背包_物品详情左上角_1920.png",
                         new Rect(400, 70, 1550, 300), 0.97f);
                 if (detail != null) {
                     if (!game.inputKey("escape")) throw new IllegalStateException("无法关闭遮挡背包的物品详情。");
-                    control.sleep(250);
+                    control.sleep(400);
                     before.recycle();
                     before = capture();
                     detail = findTemplate(before, "captures/templates/RYLUX_背包_物品详情左上角_1920.png",
@@ -1719,14 +1725,14 @@ public final class CoraFlowWorkflowRuntime {
             String detailPath = "captures/templates/RYLUX_背包_物品详情左上角_1920.png";
             Match detail = findTemplate(frame, detailPath, new Rect(400, 70, 1550, 300), 0.97f);
             if (detail != null) {
-                click(1200, 80);
-                control.sleep(250);
+                click(INVENTORY_DETAIL_CLOSE_X, INVENTORY_DETAIL_CLOSE_Y);
+                control.sleep(400);
                 frame.recycle();
                 frame = capture();
                 detail = findTemplate(frame, detailPath, new Rect(400, 70, 1550, 300), 0.97f);
                 if (detail != null) {
                     if (!game.inputKey("escape")) throw new IllegalStateException("无法关闭遮挡背包的物品详情。");
-                    control.sleep(250);
+                    control.sleep(400);
                     frame.recycle();
                     frame = capture();
                     detail = findTemplate(frame, detailPath, new Rect(400, 70, 1550, 300), 0.97f);
