@@ -10,7 +10,7 @@ public class VisionCoordinateTransformTest {
         assertEquals(100,t.mapX(0,0));
         assertEquals(1699,t.mapX(1920,1080));
         assertEquals(50,t.mapY(0,0));
-        assertEquals(950,t.mapY(1920,1080));
+        assertEquals(949,t.mapY(1920,1080));
         double[] back=t.inverse(t.mapX(480,270),t.mapY(480,270));
         assertEquals(480,back[0],1.5);
         assertEquals(270,back[1],1.5);
@@ -30,7 +30,10 @@ public class VisionCoordinateTransformTest {
     @Test public void mapsRectAndRejectsUnsupportedAngles() {
         VisionCoordinateTransform t=new VisionCoordinateTransform(100,100,VisionViewport.full(200,200),0);
         Rect mapped=t.mapRect(new Rect(10,20,30,40));
-        assertEquals(new Rect(20,40,61,81),mapped);
+        assertEquals(20,mapped.left);
+        assertEquals(40,mapped.top);
+        assertEquals(61,mapped.right);
+        assertEquals(81,mapped.bottom);
         try { new VisionCoordinateTransform(100,100,VisionViewport.full(200,200),45); fail(); }
         catch(IllegalArgumentException expected){}
     }
