@@ -33,6 +33,7 @@ import com.example.pakredirect.vision.VisionViewportDetector;
 import com.example.pakredirect.vision.VisionCoordinateTransform;
 import com.example.pakredirect.vision.VisionGameStateMachine;
 import com.example.pakredirect.vision.DigitVision;
+import com.example.pakredirect.vision.VisionTemporalConsensus;
 
 /** Executes a decrypted CoraFlow graph through RYLUX's native Android input and OCR APIs. */
 public final class CoraFlowWorkflowRuntime {
