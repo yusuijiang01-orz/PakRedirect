@@ -1,4 +1,5 @@
 name: Build RYLUX APK (release optional)
+# RYLUX Vision Engine 2.6.1 signed validation build; never auto-publish.
 
 on:
   workflow_dispatch:
