@@ -40,7 +40,9 @@ public final class VisionGameStateMachine {
     public synchronized State state(){return state;}
     public synchronized State previous(){return previous;}
     public synchronized boolean allowsInventoryMutation(){
-        return state==State.INVENTORY||state==State.ITEM_DETAIL||state==State.SALE_CONFIRM;
+        // A selected-item detail overlay and a sale dialog are not a clean
+        // inventory grid. Only the verified INVENTORY state authorizes slot mutation.
+        return state==State.INVENTORY;
     }
     public synchronized boolean allowsSaleConfirmation(){return state==State.SALE_CONFIRM;}
 }
