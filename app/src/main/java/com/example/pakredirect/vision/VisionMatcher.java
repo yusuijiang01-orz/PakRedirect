@@ -38,6 +38,12 @@ public final class VisionMatcher implements AutoCloseable {
 
     public List<Candidate> candidates(Bitmap frame, Bitmap original, Rect search,
                                       int baseWidth, int baseHeight, boolean coloredOnly) {
+        return candidates(frame, original, search, baseWidth, baseHeight, coloredOnly, -1);
+    }
+
+    /** maskColor is an RGB color-key from the legacy Lua findPic API, or -1 for no key. */
+    public List<Candidate> candidates(Bitmap frame, Bitmap original, Rect search,
+                                      int baseWidth, int baseHeight, boolean coloredOnly, int maskColor) {
         ArrayList<Candidate> found = new ArrayList<>();
         if (!VisionBridge.ready() || frame == null || frame.isRecycled()
                 || original == null || original.isRecycled() || search == null) return found;
@@ -60,7 +66,7 @@ public final class VisionMatcher implements AutoCloseable {
                 Utils.bitmapToMat(scaled, rgbaTemplate);
                 Imgproc.cvtColor(rgbaTemplate, rgbTemplate, Imgproc.COLOR_RGBA2RGB);
                 searchRgb = rgb.submat(new org.opencv.core.Rect(roi.left, roi.top, roi.width(), roi.height()));
-                mask = buildMask(scaled, coloredOnly);
+                mask = buildMask(scaled, coloredOnly, maskColor);
                 // Masked CCORR is supported by OpenCV. Plain SQDIFF works with
                 // low-variance UI templates where CCOEFF can be degenerate.
                 int method = mask == null ? Imgproc.TM_SQDIFF_NORMED : Imgproc.TM_CCORR_NORMED;
@@ -95,7 +101,7 @@ public final class VisionMatcher implements AutoCloseable {
         return found;
     }
 
-    private static Mat buildMask(Bitmap bitmap, boolean coloredOnly) {
+    private static Mat buildMask(Bitmap bitmap, boolean coloredOnly, int maskColor) {
         int width = bitmap.getWidth(), height = bitmap.getHeight();
         int[] pixels = new int[width * height];
         bitmap.getPixels(pixels, 0, width, 0, 0, width, height);
@@ -105,6 +111,7 @@ public final class VisionMatcher implements AutoCloseable {
             int c = pixels[i];
             boolean visible = ((c >>> 24) & 255) >= 32;
             if (visible) opaque++;
+            if (visible && maskColor >= 0 && (c & 0x00ffffff) == (maskColor & 0x00ffffff)) visible = false;
             if (visible && coloredOnly) {
                 int r = (c >> 16) & 255, g = (c >> 8) & 255, b = c & 255;
                 int high = Math.max(r, Math.max(g,b)), low = Math.min(r, Math.min(g,b));
