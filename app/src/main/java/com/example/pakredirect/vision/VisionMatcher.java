@@ -97,6 +97,38 @@ public final class VisionMatcher implements AutoCloseable {
         return values.isEmpty()?null:values.get(0);
     }
 
+    /** Full-resolution RGB verification for inventory classifications. */
+    public double verify(Bitmap frame,Bitmap template,Candidate candidate,boolean coloredOnly,int maskColor){
+        if(frame==null||template==null||candidate==null||frame.isRecycled()||template.isRecycled())return 0d;
+        Bitmap scaled=template;boolean owns=false;
+        if(candidate.width!=template.getWidth()||candidate.height!=template.getHeight()){
+            scaled=Bitmap.createScaledBitmap(template,candidate.width,candidate.height,true);owns=true;
+        }
+        try{
+            int x0=candidate.left,y0=candidate.top,w=candidate.width,h=candidate.height;
+            if(x0<0||y0<0||x0+w>frame.getWidth()||y0+h>frame.getHeight())return 0d;
+            int[] expected=new int[w*h],actual=new int[w*h];
+            scaled.getPixels(expected,0,w,0,0,w,h);
+            frame.getPixels(actual,0,frame.getWidth(),x0,y0,w,h);
+            long error=0;int count=0;
+            for(int i=0;i<expected.length;i++){
+                int e=expected[i];
+                if(((e>>>24)&255)<32||(maskColor>=0&&(e&0x00ffffff)==(maskColor&0x00ffffff)))continue;
+                if(coloredOnly){
+                    int er=(e>>16)&255,eg=(e>>8)&255,eb=e&255;
+                    int hi=Math.max(er,Math.max(eg,eb)),lo=Math.min(er,Math.min(eg,eb));
+                    if(hi<60||hi-lo<24)continue;
+                }
+                int a=actual[i];
+                error+=(Math.abs(((e>>16)&255)-((a>>16)&255))
+                        +Math.abs(((e>>8)&255)-((a>>8)&255))
+                        +Math.abs((e&255)-(a&255)))/3;
+                count++;
+            }
+            return count==0?0d:1d-error/(count*255d);
+        }finally{if(owns&&!scaled.isRecycled())scaled.recycle();}
+    }
+
     private TemplateData templateData(Bitmap original,int width,int height,boolean coloredOnly,int maskColor){
         String key=System.identityHashCode(original)+":"+width+"x"+height+":"+coloredOnly+":"+maskColor;
         TemplateData cached=templateCache.get(key);
