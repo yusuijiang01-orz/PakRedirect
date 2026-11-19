@@ -103,6 +103,8 @@ android {
 dependencies {
     implementation project(':Bcore')
     implementation 'org.luaj:luaj-jse:3.0.1'
+    // Official OpenCV Android AAR includes ARM native libraries; no unverified JNI binaries are committed.
+    implementation 'org.opencv:opencv:4.14.0'
     // Bundled OCR models work without a Play Services model download at first use.
     implementation 'com.google.mlkit:text-recognition:16.0.1'
     implementation 'com.google.mlkit:text-recognition-chinese:16.0.1'
