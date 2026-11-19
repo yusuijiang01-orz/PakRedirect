@@ -95,6 +95,7 @@ public final class ScriptToolsActivity extends Activity {
     private ScrollView runtimeLogScroll;
     private Dialog runtimeLogDialog;
     private boolean logScreenActive;
+    private volatile boolean workflowPreflightRunning;
     private final Handler logHandler = new Handler(Looper.getMainLooper());
     private final Runnable refreshRuntimeLog = new Runnable() {
         @Override public void run() {
@@ -1013,8 +1014,42 @@ public final class ScriptToolsActivity extends Activity {
             showPreflight();
             return;
         }
+        if (workflowPreflightRunning) return;
+        workflowPreflightRunning = true;
+        final String confirmedConfig = runtimeConfigSnapshot();
+        Toast.makeText(this, "正在下载、验签并解密工作流，核对真实脚本版本…",
+                Toast.LENGTH_LONG).show();
+        new Thread(() -> {
+            try {
+                String versionSummary = CoraFlowWorkflowUpdateManager.prepareForLaunch(
+                        this, new JSONObject(confirmedConfig), null);
+                runOnUiThread(() -> {
+                    workflowPreflightRunning = false;
+                    if (isFinishing()) {
+                        CoraFlowWorkflowUpdateManager.discardPrepared();
+                        return;
+                    }
+                    showStartConfirmation(confirmedConfig, versionSummary);
+                });
+            } catch (Exception failure) {
+                CoraFlowWorkflowUpdateManager.discardPrepared();
+                runOnUiThread(() -> {
+                    workflowPreflightRunning = false;
+                    if (isFinishing()) return;
+                    showRyluxDialog("脚本版本核验失败",
+                            (failure.getMessage() == null ? failure.getClass().getSimpleName()
+                                    : failure.getMessage())
+                                    + "\n\n游戏尚未启动，未执行任何脚本操作。请修复或重新发布匹配版本的加密工作流后再试。",
+                            null, "知道了", null);
+                });
+            }
+        }, "RYLUX-Workflow-Preflight").start();
+    }
+
+    private void showStartConfirmation(String confirmedConfig, String versionSummary) {
         String summary = "方案：" + profileName + "\n目标：封神榜手游\n运行来源："
                 + targetModeCaption() + "\n运行模式：无障碍截图与触控"
+                + "\n已解密并核验脚本版本：" + versionSummary
                 + "\n路线：" + mapName(values.optInt("挂机点地图", 0))
                 + "（" + values.optString("挂机点x", "100") + ", " + values.optString("挂机点y", "200") + "）"
                 + "\n自动登录与崩溃恢复：" + onOff("自动登录")
@@ -1022,11 +1057,12 @@ public final class ScriptToolsActivity extends Activity {
                 + "\n装备出售：" + onOff("出售装备") + "；装备保护："
                 + (values.optBoolean("保护装备不出售", true) ? "开启" : "关闭")
                 + "\n启动目标：" + targetModeCaption()
-                + "\n\n点击开始后会打开所选游戏并运行脚本，随后显示可暂停/停止的 RYLUX 悬浮控制面板。";
-        showRyluxDialog("确认本次运行", summary, "返回检查", "开始", this::startRuntime);
+                + "\n\n点击开始后才会打开所选游戏并运行已核验的脚本。";
+        showRyluxDialog("确认本次运行", summary, "返回检查", "开始",
+                () -> startRuntime(confirmedConfig));
     }
 
-    private void startRuntime() {
+    private void startRuntime(String confirmedConfig) {
         if (!MembershipAccess.hasCachedAccess(this)) {
             closeWorkbenchForExpiredMembership();
             return;
@@ -1035,10 +1071,17 @@ public final class ScriptToolsActivity extends Activity {
         MembershipAccess.refresh(this, result -> runOnUiThread(() -> {
             if (isFinishing()) return;
             if (result == null || !result.allowed) {
+                CoraFlowWorkflowUpdateManager.discardPrepared();
                 showMembershipBlocked(result);
                 return;
             }
-            String confirmedConfig = runtimeConfigSnapshot();
+            if (!CoraFlowWorkflowUpdateManager.isPreparedForLaunch(safeConfig(confirmedConfig))) {
+                CoraFlowWorkflowUpdateManager.discardPrepared();
+                showRyluxDialog("脚本预检已失效",
+                        "配置内容已变化或预检缓存已过期。游戏尚未启动，请重新点击“配置方案并启动”完成脚本解密和版本核验。",
+                        null, "知道了", null);
+                return;
+            }
             Toast.makeText(this, "正在准备并启动" + targetModeCaption() + "…", Toast.LENGTH_SHORT).show();
             new Thread(() -> prepareLocalizationThenStartRuntime(confirmedConfig),
                     "RYLUX-Script-Launch").start();
@@ -1047,6 +1090,9 @@ public final class ScriptToolsActivity extends Activity {
 
     private void prepareLocalizationThenStartRuntime(String confirmedConfig) {
         try {
+            if (!CoraFlowWorkflowUpdateManager.isPreparedForLaunch(new JSONObject(confirmedConfig))) {
+                throw new IllegalStateException("启动前工作流版本核验已过期；请重新点击“配置方案并启动”。");
+            }
             String confirmedMode = targetModeFromConfig(confirmedConfig);
             boolean sandbox = !TARGET_MODE_DESKTOP.equals(confirmedMode);
             boolean localizationEnabled = LocalizationSettings.isEnabled(this);
@@ -1093,6 +1139,7 @@ public final class ScriptToolsActivity extends Activity {
     }
 
     private void failRuntimeLaunch(String message) {
+        CoraFlowWorkflowUpdateManager.discardPrepared();
         runOnUiThread(() -> {
             stopPendingRuntime();
             showRyluxDialog("目标游戏启动失败", message == null ? "RYLUX 无法启动所选游戏。" : message,
