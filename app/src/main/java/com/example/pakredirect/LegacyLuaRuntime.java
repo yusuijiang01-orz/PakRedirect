@@ -946,6 +946,12 @@ final class LegacyLuaRuntime {
         return transform;
     }
 
+    private int[] mapDelta(Bitmap screen,double dx,double dy) {
+        VisionCoordinateTransform transform=transformFor(screen);
+        double[] origin=transform.map(0,0),end=transform.map(dx,dy);
+        return new int[]{(int)Math.round(end[0]-origin[0]),(int)Math.round(end[1]-origin[1])};
+    }
+
     private LegacyImageMatcher.Match findOpenCvVerified(Bitmap screen, Bitmap template,
                                                          int left, int top, int right, int bottom,
                                                          int mask, double threshold) {
@@ -1323,10 +1329,11 @@ final class LegacyLuaRuntime {
         control.checkpoint();
         Bitmap frame = frame();
         LegacyCoordinateMapper mapper = mapperFor(frame);
-        int left = Math.max(0, mapper.left(args.arg(1).todouble()));
-        int top = Math.max(0, mapper.top(args.arg(2).todouble()));
-        int right = Math.min(frame.getWidth() - 1, mapper.right(args.arg(3).todouble()));
-        int bottom = Math.min(frame.getHeight() - 1, mapper.bottom(args.arg(4).todouble()));
+        Rect mappedRegion=transformFor(frame).mapRect(new Rect(args.arg(1).toint(),args.arg(2).toint(),
+                args.arg(3).toint(),args.arg(4).toint()));
+        int left=Math.max(0,mappedRegion.left),top=Math.max(0,mappedRegion.top);
+        int right=Math.min(frame.getWidth()-1,mappedRegion.right);
+        int bottom=Math.min(frame.getHeight()-1,mappedRegion.bottom);
         String primary = args.arg(5).tojstring().split("\\|", 2)[0];
         String[] primaryParts = primary.split("-", 2);
         int color = parseColor(primaryParts[0]);
@@ -1337,9 +1344,9 @@ final class LegacyLuaRuntime {
             String[] parts = points.split("\\|");
             for (int i = 0; i + 2 < parts.length; i += 3) {
                 String[] colorParts = parts[i + 2].split("-", 2);
-                offsets.add(new int[]{mapper.toScreenDeltaX(parseInt(parts[i])),
-                        mapper.toScreenDeltaY(parseInt(parts[i + 1])), parseColor(colorParts[0]),
-                        colorParts.length > 1 ? parseColor(colorParts[1]) : 0});
+                int[] delta=mapDelta(frame,parseInt(parts[i]),parseInt(parts[i+1]));
+                offsets.add(new int[]{delta[0],delta[1],parseColor(colorParts[0]),
+                        colorParts.length>1?parseColor(colorParts[1]):0});
             }
         }
         String[] colors = !multi ? args.arg(5).tojstring().split("\\|") : new String[0];
@@ -1353,8 +1360,10 @@ final class LegacyLuaRuntime {
                         String[] expectedParts = colors[i].split("-", 2);
                         int expected = parseColor(expectedParts[0]);
                         int colorTolerance = expectedParts.length > 1 ? parseColor(expectedParts[1]) : 0;
-                        int px = x + mapper.toScreenDeltaX(i);
-                        if (px < 0 || px >= frame.getWidth() || !colorMatches(frame.getPixel(px, y), expected, colorTolerance)) {
+                        int[] delta=mapDelta(frame,i,0);
+                        int px=x+delta[0],py=y+delta[1];
+                        if (px < 0 || py < 0 || px >= frame.getWidth() || py >= frame.getHeight()
+                                || !colorMatches(frame.getPixel(px, py), expected, colorTolerance)) {
                             match = false; break;
                         }
                     }
@@ -1366,8 +1375,9 @@ final class LegacyLuaRuntime {
                             || !colorMatches(frame.getPixel(px, py), p[2], p[3])) { match = false; break; }
                 }
                 if (match) {
-                    LuaValue xVal = LuaValue.valueOf(mapper.toReferenceX(x));
-                    LuaValue yVal = LuaValue.valueOf(mapper.toReferenceY(y));
+                    double[] reference=transformFor(frame).inverse(x,y);
+                    LuaValue xVal = LuaValue.valueOf(reference[0]);
+                    LuaValue yVal = LuaValue.valueOf(reference[1]);
                     return multi ? LuaValue.varargsOf(new LuaValue[]{xVal, yVal})
                             : LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(1), xVal, yVal});
                 }
@@ -1381,10 +1391,11 @@ final class LegacyLuaRuntime {
         control.checkpoint();
         Bitmap frame = frame();
         LegacyCoordinateMapper mapper = mapperFor(frame);
-        int left = Math.max(0, mapper.left(args.arg(1).todouble()));
-        int top = Math.max(0, mapper.top(args.arg(2).todouble()));
-        int right = Math.min(frame.getWidth() - 1, mapper.right(args.arg(3).todouble()));
-        int bottom = Math.min(frame.getHeight() - 1, mapper.bottom(args.arg(4).todouble()));
+        Rect mappedRegion=transformFor(frame).mapRect(new Rect(args.arg(1).toint(),args.arg(2).toint(),
+                args.arg(3).toint(),args.arg(4).toint()));
+        int left=Math.max(0,mappedRegion.left),top=Math.max(0,mappedRegion.top);
+        int right=Math.min(frame.getWidth()-1,mappedRegion.right);
+        int bottom=Math.min(frame.getHeight()-1,mappedRegion.bottom);
         String[] primaryParts = args.arg(5).tojstring().split("\\|", 2)[0].split("-", 2);
         int color = parseColor(primaryParts[0]);
         int tolerance = primaryParts.length > 1 ? parseColor(primaryParts[1]) : 0;
@@ -1394,9 +1405,9 @@ final class LegacyLuaRuntime {
             String[] parts = points.split("\\|");
             for (int i = 0; i + 2 < parts.length; i += 3) {
                 String[] colorParts = parts[i + 2].split("-", 2);
-                offsets.add(new int[]{mapper.toScreenDeltaX(parseInt(parts[i])),
-                        mapper.toScreenDeltaY(parseInt(parts[i + 1])), parseColor(colorParts[0]),
-                        colorParts.length > 1 ? parseColor(colorParts[1]) : 0});
+                int[] delta=mapDelta(frame,parseInt(parts[i]),parseInt(parts[i+1]));
+                offsets.add(new int[]{delta[0],delta[1],parseColor(colorParts[0]),
+                        colorParts.length>1?parseColor(colorParts[1]):0});
             }
         }
         LuaTable matches = new LuaTable();
@@ -1416,8 +1427,9 @@ final class LegacyLuaRuntime {
                 }
                 if (match) {
                     LuaTable point = new LuaTable();
-                    point.set("x", LuaValue.valueOf(mapper.toReferenceX(x)));
-                    point.set("y", LuaValue.valueOf(mapper.toReferenceY(y)));
+                    double[] reference=transformFor(frame).inverse(x,y);
+                    point.set("x", LuaValue.valueOf(reference[0]));
+                    point.set("y", LuaValue.valueOf(reference[1]));
                     matches.set(++count, point);
                     if (count >= MAX_COLOR_MATCHES) return matches;
                 }
