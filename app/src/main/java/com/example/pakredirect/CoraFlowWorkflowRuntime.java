@@ -1337,8 +1337,8 @@ public final class CoraFlowWorkflowRuntime {
         screenHeight = frame.getHeight();
         try {
             VisionViewport viewport = VisionViewportDetector.detect(frame);
-            int rotation = config.optInt("screen_rotation_degrees",
-                    config.optInt("屏幕旋转角度", 0));
+            int rotation = workflowPackage.workflow.optInt("screen_rotation_degrees",
+                    workflowPackage.workflow.optInt("屏幕旋转角度", 0));
             coordinateTransform = new VisionCoordinateTransform(coordinateWidth, coordinateHeight, viewport, rotation);
             if (viewport.calibrated || rotation != 0) {
                 note("Vision 坐标校准：视口 " + viewport.left + "," + viewport.top + "-"
