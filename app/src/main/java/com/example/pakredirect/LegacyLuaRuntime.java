@@ -13,6 +13,7 @@ import android.util.Log;
 import android.widget.Toast;
 
 import org.json.JSONObject;
+import org.json.JSONArray;
 import org.luaj.vm2.Globals;
 import org.luaj.vm2.LuaError;
 import org.luaj.vm2.LuaFunction;
@@ -922,6 +923,266 @@ final class LegacyLuaRuntime {
             }
             throw new LuaError(errorLabel + "：" + error.getMessage());
         } finally { crop.recycle(); }
+    }
+
+    private VisionCoordinateTransform transformFor(Bitmap screen) {
+        VisionCoordinateTransform transform = visionTransform;
+        if (transform != null && currentViewport != null
+                && currentViewport.imageWidth == screen.getWidth()
+                && currentViewport.imageHeight == screen.getHeight()) return transform;
+        LegacyCoordinateMapper mapper = mapperFor(screen);
+        VisionViewport viewport = VisionViewportDetector.detect(screen);
+        int rotation = config.optInt("screen_rotation_degrees", config.optInt("屏幕旋转角度", 0));
+        transform = new VisionCoordinateTransform(mapper.referenceWidth(), mapper.referenceHeight(), viewport, rotation);
+        currentViewport = viewport;
+        visionTransform = transform;
+        return transform;
+    }
+
+    private LegacyImageMatcher.Match findOpenCvVerified(Bitmap screen, Bitmap template,
+                                                         int left, int top, int right, int bottom,
+                                                         int mask, double threshold) {
+        if (!VisionBridge.ready() || screen == null || template == null
+                || right <= left || bottom <= top) return null;
+        Rect search = new Rect(Math.max(0,left),Math.max(0,top),
+                Math.min(screen.getWidth(),right),Math.min(screen.getHeight(),bottom));
+        if(search.width()<template.getWidth()||search.height()<template.getHeight())return null;
+        java.util.List<VisionMatcher.Candidate> candidates =
+                visionMatcher.candidates(screen,template,search,template.getWidth(),
+                        template.getHeight(),false,mask);
+        LegacyImageMatcher.Pixels screenPixels = bitmapPixels(screen);
+        LegacyImageMatcher.Match best = null;
+        for (VisionMatcher.Candidate candidate : candidates) {
+            control.checkpoint();
+            Bitmap scaled = template;
+            boolean owns = false;
+            try {
+                if(candidate.width!=template.getWidth()||candidate.height!=template.getHeight()){
+                    scaled=Bitmap.createScaledBitmap(template,candidate.width,candidate.height,true);
+                    owns=true;
+                }
+                LegacyImageMatcher.Pixels targetPixels=bitmapPixels(scaled);
+                int l=Math.max(search.left,candidate.left-3);
+                int t=Math.max(search.top,candidate.top-3);
+                int r=Math.min(search.right,candidate.left+candidate.width+4);
+                int b=Math.min(search.bottom,candidate.top+candidate.height+4);
+                LegacyImageMatcher.Match verified=LegacyImageMatcher.find(screenPixels,targetPixels,
+                        l,t,r,b,mask,threshold,control::checkpoint);
+                if(verified!=null&&(best==null||verified.score>best.score))best=verified;
+            }finally{if(owns&&!scaled.isRecycled())scaled.recycle();}
+        }
+        return best;
+    }
+
+    private void installVisionApi() {
+        LuaTable api = new LuaTable();
+        api.set("status", new ZeroFunction() {
+            @Override public LuaValue invoke() {
+                LuaTable value=new LuaTable();
+                value.set("opencv",LuaValue.valueOf(VisionBridge.ready()));
+                value.set("opencvStatus",LuaValue.valueOf(VisionBridge.status()));
+                value.set("opencvVersion",LuaValue.valueOf(org.opencv.core.Core.VERSION));
+                value.set("opencvMatches",LuaValue.valueOf(openCvFindHits));
+                value.set("legacyFallbacks",LuaValue.valueOf(legacyFindFallbacks));
+                return value;
+            }
+        });
+        api.set("viewport", new ZeroFunction() {
+            @Override public LuaValue invoke() {
+                Bitmap screen=frame();
+                VisionCoordinateTransform transform=transformFor(screen);
+                VisionViewport viewport=transform.viewport;
+                LuaTable value=new LuaTable();
+                value.set("left",LuaValue.valueOf(viewport.left));
+                value.set("top",LuaValue.valueOf(viewport.top));
+                value.set("right",LuaValue.valueOf(viewport.right));
+                value.set("bottom",LuaValue.valueOf(viewport.bottom));
+                value.set("width",LuaValue.valueOf(viewport.right-viewport.left));
+                value.set("height",LuaValue.valueOf(viewport.bottom-viewport.top));
+                value.set("calibrated",LuaValue.valueOf(viewport.calibrated));
+                value.set("rotation",LuaValue.valueOf(transform.rotationDegrees));
+                value.set("screenWidth",LuaValue.valueOf(screen.getWidth()));
+                value.set("screenHeight",LuaValue.valueOf(screen.getHeight()));
+                return value;
+            }
+        });
+        api.set("mapPoint", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                Bitmap screen=frame();
+                double[] point=transformFor(screen).map(args.arg(1).todouble(),args.arg(2).todouble());
+                return LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(point[0]),LuaValue.valueOf(point[1])});
+            }
+        });
+        api.set("findPic", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return findImage(args,false); }
+        });
+        api.set("readDigits", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return readDigits(args); }
+        });
+        api.set("scanInventory35", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return scanInventory35(args); }
+        });
+        LuaTable state = new LuaTable();
+        state.set("current", new ZeroFunction() {
+            @Override public LuaValue invoke() { return LuaValue.valueOf(visionStateMachine.state().name()); }
+        });
+        state.set("observe", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                VisionGameStateMachine.State candidate;
+                try { candidate=VisionGameStateMachine.State.valueOf(args.arg(1).checkjstring().toUpperCase(Locale.ROOT)); }
+                catch(Exception invalid){return LuaValue.FALSE;}
+                VisionGameStateMachine.Decision decision=visionStateMachine.observe(candidate,
+                        args.arg(2).optdouble(0d),args.arg(3).optboolean(false));
+                return LuaValue.valueOf(decision==VisionGameStateMachine.Decision.ACCEPTED);
+            }
+        });
+        state.set("beginRecovery", new ZeroFunction() {
+            @Override public LuaValue invoke(){return LuaValue.valueOf(visionStateMachine.beginRecovery());}
+        });
+        state.set("recoverySucceeded", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue name){
+                try{visionStateMachine.recoverySucceeded(VisionGameStateMachine.State.valueOf(name.checkjstring().toUpperCase(Locale.ROOT)));return LuaValue.TRUE;}
+                catch(Exception invalid){return LuaValue.FALSE;}
+            }
+        });
+        state.set("recoveryFailed", new ZeroFunction() {
+            @Override public LuaValue invoke(){visionStateMachine.recoveryFailed();return LuaValue.TRUE;}
+        });
+        api.set("state",state);
+        globals.set("ryluxVision",api);
+    }
+
+    private Varargs readDigits(Varargs args) {
+        int left=(int)args.arg(1).todouble(),top=(int)args.arg(2).todouble();
+        int right=(int)args.arg(3).todouble(),bottom=(int)args.arg(4).todouble();
+        int minimum=args.arg(5).optint(0),maximum=args.arg(6).optint(999999);
+        DigitVision.Reading first,second;
+        try {
+            first=readDigitsOnce(left,top,right,bottom,minimum,maximum);
+            control.sleep(120);
+            second=readDigitsOnce(left,top,right,bottom,minimum,maximum);
+        } catch(Exception error) {
+            rethrowIfStopped();
+            return digitReadingTable(new DigitVision.Reading(DigitVision.Status.UNKNOWN,null,0d,
+                    "OCR unavailable: "+error.getClass().getSimpleName()));
+        }
+        return digitReadingTable(DigitVision.agree(first,second,0.65d));
+    }
+
+    private DigitVision.Reading readDigitsOnce(int left,int top,int right,int bottom,int minimum,int maximum) throws Exception {
+        refreshFrame();
+        Bitmap screen=frame();
+        Rect region=transformFor(screen).mapRect(new Rect(left,top,right,bottom));
+        region.intersect(0,0,screen.getWidth(),screen.getHeight());
+        if(region.width()<2||region.height()<2)return DigitVision.parse("",0,minimum,maximum,0.65);
+        Bitmap crop=Bitmap.createBitmap(screen,region.left,region.top,region.width(),region.height());
+        Bitmap prepared=null;
+        try {
+            if(ocr==null)ocr=new ScriptOcr();
+            ScriptOcr.Result normal=ocr.recognize(crop,false,ScriptOcr.LUA_TIMEOUT_MS,960);
+            DigitVision.Reading reading=parseDigitOcr(normal,minimum,maximum);
+            if(reading.status==DigitVision.Status.CONFIRMED)return reading;
+            prepared=DigitVision.preprocess(crop,3);
+            ScriptOcr.Result enhanced=ocr.recognize(prepared,false,ScriptOcr.LUA_TIMEOUT_MS,1440);
+            return parseDigitOcr(enhanced,minimum,maximum);
+        } finally {
+            if(prepared!=null&&!prepared.isRecycled())prepared.recycle();
+            if(!crop.isRecycled())crop.recycle();
+        }
+    }
+
+    private DigitVision.Reading parseDigitOcr(ScriptOcr.Result result,int minimum,int maximum) throws Exception {
+        JSONArray lines=new JSONArray(result.json);
+        StringBuilder text=new StringBuilder();
+        double confidence=0d;
+        for(int i=0;i<lines.length();i++){
+            JSONObject line=lines.getJSONObject(i);
+            if(text.length()>0)text.append(' ');
+            text.append(line.optString("text",line.optString("words","")));
+            confidence=Math.max(confidence,line.optDouble("score",0d));
+        }
+        return DigitVision.parse(text.toString(),confidence,minimum,maximum,0.65d);
+    }
+
+    private LuaTable digitReadingTable(DigitVision.Reading reading) {
+        LuaTable value=new LuaTable();
+        value.set("status",LuaValue.valueOf(reading.status.name()));
+        value.set("value",reading.value==null?LuaValue.NIL:LuaValue.valueOf(reading.value));
+        value.set("confidence",LuaValue.valueOf(reading.confidence));
+        value.set("raw",LuaValue.valueOf(reading.raw));
+        value.set("confirmed",LuaValue.valueOf(reading.status==DigitVision.Status.CONFIRMED));
+        return value;
+    }
+
+    private Varargs scanInventory35(Varargs args) {
+        int left=(int)args.arg(1).todouble(),top=(int)args.arg(2).todouble();
+        int right=(int)args.arg(3).todouble(),bottom=(int)args.arg(4).todouble();
+        Bitmap empty=null,red=null,blue=null,other=null;
+        try {
+            empty=loadTemplate(args.arg(5).checkjstring());
+            red=loadTemplate(args.arg(6).checkjstring());
+            blue=loadTemplate(args.arg(7).checkjstring());
+            String otherPath=args.arg(8).optjstring("");
+            if(!otherPath.isEmpty())other=loadTemplate(otherPath);
+            if(empty==null||red==null||blue==null)throw new LuaError("Inventory Vision 缺少空格/红药/蓝药模板");
+            double threshold=Math.max(0.55,Math.min(0.99,args.arg(9).optdouble(0.84)));
+            double margin=Math.max(0.01,Math.min(0.4,args.arg(10).optdouble(0.07)));
+            int insetX=Math.max(0,Math.min(20,args.arg(11).optint(3)));
+            int insetY=Math.max(0,Math.min(20,args.arg(12).optint(3)));
+            refreshFrame();
+            Bitmap firstFrame=frame();
+            Rect grid=transformFor(firstFrame).mapRect(new Rect(left,top,right,bottom));
+            InventoryVision.Grid first=inventoryVision.classify35(firstFrame,grid,empty,red,blue,other,
+                    threshold,margin,insetX,insetY);
+            control.sleep(120);
+            refreshFrame();
+            Bitmap secondFrame=frame();
+            InventoryVision.Grid second=inventoryVision.classify35(secondFrame,grid,empty,red,blue,other,
+                    threshold,margin,insetX,insetY);
+            LuaTable result=new LuaTable(),cells=new LuaTable();
+            int unknown=0;
+            for(int i=0;i<35;i++){
+                InventoryVision.Cell a=first.cells.get(i),b=second.cells.get(i);
+                boolean stable=a.state==b.state&&a.state!=InventoryVision.CellState.UNKNOWN
+                        &&a.confidence>=threshold&&b.confidence>=threshold
+                        &&a.margin>=margin&&b.margin>=margin;
+                String stateName=stable?a.state.name():InventoryVision.CellState.UNKNOWN.name();
+                if(!stable)unknown++;
+                LuaTable cell=new LuaTable();
+                cell.set("slot",LuaValue.valueOf(i+1));
+                cell.set("row",LuaValue.valueOf(a.row+1));
+                cell.set("column",LuaValue.valueOf(a.column+1));
+                cell.set("state",LuaValue.valueOf(stateName));
+                cell.set("confidence",LuaValue.valueOf(Math.min(a.confidence,b.confidence)));
+                cell.set("margin",LuaValue.valueOf(Math.min(a.margin,b.margin)));
+                cells.set(i+1,cell);
+            }
+            result.set("cells",cells);
+            result.set("unknown",LuaValue.valueOf(unknown));
+            result.set("complete",LuaValue.valueOf(unknown==0));
+            result.set("redPotion",LuaValue.valueOf(countStable(first,second,InventoryVision.CellState.RED_POTION,threshold,margin)));
+            result.set("bluePotion",LuaValue.valueOf(countStable(first,second,InventoryVision.CellState.BLUE_POTION,threshold,margin)));
+            result.set("empty",LuaValue.valueOf(countStable(first,second,InventoryVision.CellState.EMPTY,threshold,margin)));
+            return result;
+        } catch(ScriptExecutionControl.StopRequestedException stopped){throw stopped;}
+        catch(Exception error){rethrowIfStopped();throw new LuaError("Inventory Vision："+error.getMessage());}
+        finally{
+            if(empty!=null&&!empty.isRecycled())empty.recycle();
+            if(red!=null&&!red.isRecycled())red.recycle();
+            if(blue!=null&&!blue.isRecycled())blue.recycle();
+            if(other!=null&&!other.isRecycled())other.recycle();
+        }
+    }
+
+    private static int countStable(InventoryVision.Grid first,InventoryVision.Grid second,
+                                   InventoryVision.CellState state,double threshold,double margin){
+        int count=0;
+        for(int i=0;i<35;i++){
+            InventoryVision.Cell a=first.cells.get(i),b=second.cells.get(i);
+            if(a.state==state&&b.state==state&&a.confidence>=threshold&&b.confidence>=threshold
+                    &&a.margin>=margin&&b.margin>=margin)count++;
+        }
+        return count;
     }
 
     private void installUiApi() {
