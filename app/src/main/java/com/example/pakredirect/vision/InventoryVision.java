@@ -62,6 +62,22 @@ public final class InventoryVision {
         return new Grid(results);
     }
 
+    public static Grid fuse(Grid first,Grid second,double threshold,double margin){
+        if(first==null||second==null||first.cells.size()!=35||second.cells.size()!=35)
+            throw new IllegalArgumentException("two complete 35-slot observations are required");
+        List<Cell> fused=new ArrayList<>(35);
+        for(int i=0;i<35;i++){
+            Cell a=first.cells.get(i),b=second.cells.get(i);
+            boolean stable=a.state==b.state&&a.state!=CellState.UNKNOWN
+                    &&a.confidence>=threshold&&b.confidence>=threshold
+                    &&a.margin>=margin&&b.margin>=margin;
+            fused.add(new Cell(a.slot,a.row,a.column,stable?a.state:CellState.UNKNOWN,
+                    stable?Math.min(a.confidence,b.confidence):0d,
+                    stable?Math.min(a.margin,b.margin):0d));
+        }
+        return new Grid(fused);
+    }
+
     private double score(Bitmap frame,Bitmap template,Rect cell){
         if(template==null||template.isRecycled())return -1d;
         List<VisionMatcher.Candidate> candidates=matcher.candidates(frame,template,cell,
