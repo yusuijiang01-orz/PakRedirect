@@ -44,6 +44,7 @@ import com.example.pakredirect.vision.InventoryVision;
 import com.example.pakredirect.vision.VisionBridge;
 import com.example.pakredirect.vision.VisionCoordinateTransform;
 import com.example.pakredirect.vision.VisionFrameCache;
+import com.example.pakredirect.vision.VisionFusion;
 import com.example.pakredirect.vision.VisionGameStateMachine;
 import com.example.pakredirect.vision.VisionMatcher;
 import com.example.pakredirect.vision.VisionTemporalConsensus;
@@ -1147,10 +1148,11 @@ final class LegacyLuaRuntime {
             int unknown=0;
             for(int i=0;i<35;i++){
                 InventoryVision.Cell a=first.cells.get(i),b=second.cells.get(i);
-                boolean stable=a.state==b.state&&a.state!=InventoryVision.CellState.UNKNOWN
-                        &&a.confidence>=threshold&&b.confidence>=threshold
+                VisionFusion.Result fused=VisionFusion.agreeFrames(a.state.name(),a.confidence,
+                        b.state.name(),b.confidence,threshold,threshold);
+                boolean stable=fused.confirmed&&a.state!=InventoryVision.CellState.UNKNOWN
                         &&a.margin>=margin&&b.margin>=margin;
-                String stateName=stable?a.state.name():InventoryVision.CellState.UNKNOWN.name();
+                String stateName=stable?fused.label:InventoryVision.CellState.UNKNOWN.name();
                 if(!stable)unknown++;
                 LuaTable cell=new LuaTable();
                 cell.set("slot",LuaValue.valueOf(i+1));
