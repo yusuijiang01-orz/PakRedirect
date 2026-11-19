@@ -220,8 +220,8 @@ final class LegacyLuaRuntime {
                 control.checkpoint();
                 Bitmap frame = frame();
                 LegacyCoordinateMapper mapper = mapperFor(frame);
-                int x = mapper.toScreenX(args.arg(1).todouble());
-                int y = mapper.toScreenY(args.arg(2).todouble());
+                double[] point=transformFor(frame).map(args.arg(1).todouble(),args.arg(2).todouble());
+                int x=(int)Math.round(point[0]),y=(int)Math.round(point[1]);
                 if (x < 0 || y < 0 || x >= frame.getWidth() || y >= frame.getHeight()) return LuaValue.valueOf(0);
                 int color = frame.getPixel(x, y);
                 return LuaValue.valueOf(color & 0x00ffffff);
@@ -233,8 +233,8 @@ final class LegacyLuaRuntime {
                 try {
                     Bitmap screen = frame();
                     LegacyCoordinateMapper mapper = mapperFor(screen);
-                    int x = mapper.toScreenX(args.arg(1).todouble());
-                    int y = mapper.toScreenY(args.arg(2).todouble());
+                    double[] point=transformFor(screen).map(args.arg(1).todouble(),args.arg(2).todouble());
+                    int x=(int)Math.round(point[0]),y=(int)Math.round(point[1]);
                     requireDisplayPoint(x, y, screen);
                     awaitGameForeground();
                     boolean ok = ScriptGameAdapter.requireConnected(control).tap(x, y,
@@ -250,8 +250,8 @@ final class LegacyLuaRuntime {
                 try {
                     Bitmap screen = frame();
                     LegacyCoordinateMapper mapper = mapperFor(screen);
-                    int x = mapper.toScreenX(args.arg(1).todouble());
-                    int y = mapper.toScreenY(args.arg(2).todouble());
+                    double[] point=transformFor(screen).map(args.arg(1).todouble(),args.arg(2).todouble());
+                    int x=(int)Math.round(point[0]),y=(int)Math.round(point[1]);
                     requireDisplayPoint(x, y, screen);
                     awaitGameForeground();
                     boolean ok = ScriptGameAdapter.requireConnected(control).doubleTap(x, y, 5000);
@@ -266,10 +266,10 @@ final class LegacyLuaRuntime {
                 try {
                     Bitmap screen = frame();
                     LegacyCoordinateMapper mapper = mapperFor(screen);
-                    int x1 = mapper.toScreenX(args.arg(1).todouble());
-                    int y1 = mapper.toScreenY(args.arg(2).todouble());
-                    int x2 = mapper.toScreenX(args.arg(3).todouble());
-                    int y2 = mapper.toScreenY(args.arg(4).todouble());
+                    double[] start=transformFor(screen).map(args.arg(1).todouble(),args.arg(2).todouble());
+                    double[] end=transformFor(screen).map(args.arg(3).todouble(),args.arg(4).todouble());
+                    int x1=(int)Math.round(start[0]),y1=(int)Math.round(start[1]);
+                    int x2=(int)Math.round(end[0]),y2=(int)Math.round(end[1]);
                     requireDisplayPoint(x1, y1, screen);
                     requireDisplayPoint(x2, y2, screen);
                     awaitGameForeground();
@@ -312,8 +312,10 @@ final class LegacyLuaRuntime {
                 try {
                     Bitmap screen = frame();
                     LegacyCoordinateMapper mapper = mapperFor(screen);
-                    int x1 = mapper.toScreenX(touchStartX), y1 = mapper.toScreenY(touchStartY);
-                    int x2 = mapper.toScreenX(touchEndX), y2 = mapper.toScreenY(touchEndY);
+                    double[] start=transformFor(screen).map(touchStartX,touchStartY);
+                    double[] end=transformFor(screen).map(touchEndX,touchEndY);
+                    int x1=(int)Math.round(start[0]),y1=(int)Math.round(start[1]);
+                    int x2=(int)Math.round(end[0]),y2=(int)Math.round(end[1]);
                     requireDisplayPoint(x1, y1, screen);
                     requireDisplayPoint(x2, y2, screen);
                     awaitGameForeground();
