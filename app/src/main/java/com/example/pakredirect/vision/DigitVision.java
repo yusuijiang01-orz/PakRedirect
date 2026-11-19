@@ -13,7 +13,7 @@ public final class DigitVision {
         public final Integer value;
         public final double confidence;
         public final String raw;
-        Reading(Status status,Integer value,double confidence,String raw){
+        public Reading(Status status,Integer value,double confidence,String raw){
             this.status=status;this.value=value;this.confidence=confidence;this.raw=raw==null?"":raw;
         }
     }
