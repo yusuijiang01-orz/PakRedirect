@@ -74,7 +74,7 @@
 - 预检成功的同一份解密 WorkflowPackage 暂存在进程内最多 10 分钟；启动服务时复用该对象，不会在游戏启动后再下载/解密另一份工作流。配置 JSON 不一致或缓存过期则拒绝启动。
 - 新增 WorkflowVersionValidator：比较签名 manifest 发布版本与解密 JSON 的显式 ryluxVersion/releaseVersion/workflowVersion，或当前 CoraFlow 导出格式的顶层 name 版本。两者不一致、缺失或低于 v3.82 时，游戏不会启动。
 - JSON 顶层 version 是编辑器/格式版本，id 可能是历史 ID，节点 data.name 只是日志标签；都不能代替发布版本。运行日志会移除节点名称开头的旧 v3.46 前缀，另行显示通过核验的真实发布版本。
-- 已核对 PakRedirect/main 的 workflow/manifest.json：payload 声明 coraflow-3.82-medicine-sale。CoraFlow 分支 codex/complete-script-project-20261119 的 SCRIPT_PROJECT_GUIDE.md 当前仍写 v3.79；其 v3.79 JSON 的顶层名称也是 v3.79、ID 为 v3.40，且部分节点名保留 v3.46 前缀。**这代表源分支与生产清单之间存在需要核实的版本差异**，不能仅凭 manifest 标签断言密文内实际图也是 v3.82。
+- 已核对 PakRedirect/main 的 workflow/manifest.json：payload 声明 coraflowy-3.82-medicine-sale。CoraFlow 分支 codex/complete-script-project-20261119 的 SCRIPT_PROJECT_GUIDE.md 当前仍写 v3.79；其 v3.79 JSON 的顶层名称也是 v3.79、ID 为 v3.40，且部分节点名保留 v3.46 前缀。**这代表源分支与生产清单之间存在需要核实的版本差异**，不能仅凭 manifest 标签断言密文内实际图也是 v3.82。
 - 如果解密后实际 graph name 为 v3.79，而签名 manifest 声明 v3.82，新版本会在启动前明确报“签名清单/解密内容版本不一致”并阻止打开游戏。这是预期的保护，不应绕过；应先从真正的 v3.82 源工作流重新导出、加密并发布。
 - WorkflowVersionValidatorTest 覆盖匹配版本、清单/内容不匹配、忽略 v3.46 节点标签和低版本阻断。
 
