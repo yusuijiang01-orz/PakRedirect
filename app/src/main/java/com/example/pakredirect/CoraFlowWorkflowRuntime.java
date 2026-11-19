@@ -1739,62 +1739,83 @@ public final class CoraFlowWorkflowRuntime {
         return new ItemProof(gear, white, blue, "功力行像素 " + yellowPixels + "，OCR“" + power + "”；标题白 " + whitePixels + " / 蓝 " + bluePixels);
     }
 
-    private void clearInventoryDetailAfterScan() throws Exception {
-        String detailPath = "captures/templates/RYLUX_背包_物品详情左上角_1920.png";
+    /**
+     * State-driven, bounded inventory recovery shared by all three consumers.
+     * We never scan an obscured grid; after dismissing an item detail two
+     * independently captured frames must agree on a visible inventory header
+     * and absent overlay before resuming.
+     */
+    private Bitmap captureCleanInventory(String purpose, float detailThreshold) throws Exception {
+        final String detailPath = "captures/templates/RYLUX_背包_物品详情左上角_1920.png";
+        final String titlePath = "captures/templates/RYLUX_挂机_背包标题.png";
+        final Rect detailArea = new Rect(400, 70, 1550, 300);
+        final Rect headerArea = new Rect(1080, 20, 1420, 140);
         requireImage(detailPath);
-        Bitmap frame = capture();
-        try {
-            Match detail = findTemplate(frame, detailPath, new Rect(400, 70, 1550, 300), 0.90f);
-            if (detail == null) { note("扫描结束：未发现物品详情浮层。"); return; }
-        } finally { frame.recycle(); }
-        note("检测到物品详情浮层；点击旧版脚本确认的关闭位置（"
-                + INVENTORY_DETAIL_CLOSE_X + "," + INVENTORY_DETAIL_CLOSE_Y + "）。");
-        click(INVENTORY_DETAIL_CLOSE_X, INVENTORY_DETAIL_CLOSE_Y);
-        control.sleep(400);
-        frame = capture();
-        try {
-            Match remaining = findTemplate(frame, detailPath, new Rect(400, 70, 1550, 300), 0.90f);
-            if (remaining != null) {
-                note("游戏内关闭按钮未生效；尝试系统返回键关闭详情浮层。");
-                if (!game.inputKey("escape"))
-                    throw new IllegalStateException("无法关闭遮挡背包的物品详情。");
-                control.sleep(400);
-                frame.recycle();
-                frame = capture();
-                remaining = findTemplate(frame, detailPath, new Rect(400, 70, 1550, 300), 0.90f);
-            }
-            if (remaining != null)
-                throw new IllegalStateException("装备扫描后物品详情仍遮挡背包；停止药品统计。");
-            note("扫描结束：已关闭物品详情浮层并复核。");
-        } finally { frame.recycle(); }
+        requireImage(titlePath);
+        boolean triedClose = false;
+        for (int attempt = 0; attempt < 4; attempt++) {
+            checkpoint();
+            Bitmap first = capture();
+            try {
+                Match title = findTemplate(first, titlePath, headerArea, 0.88f);
+                if (title == null) throw new IllegalStateException(
+                        purpose + "：背包标题未确认，不能继续触碰背包或执行交易。");
+                Match detail = findTemplate(first, detailPath, detailArea, detailThreshold);
+                if (detail == null) {
+                    if (!triedClose) {
+                        Bitmap usable = first;
+                        first = null;
+                        return usable;
+                    }
+                    control.sleep(160);
+                    Bitmap second = capture();
+                    try {
+                        Match titleAgain = findTemplate(second, titlePath, headerArea, 0.88f);
+                        Match detailAgain = findTemplate(second, detailPath, detailArea, detailThreshold);
+                        if (titleAgain != null && detailAgain == null
+                                && com.example.pakredirect.vision.VisionTemporalConsensus.decide(
+                                        false, title.score, false, titleAgain.score, 0.88)
+                                   == com.example.pakredirect.vision.VisionTemporalConsensus.State.ABSENT) {
+                            note(purpose + "：两帧确认物品详情已关闭，背包标题仍然有效。");
+                            Bitmap usable = second;
+                            second = null;
+                            return usable;
+                        }
+                        note(purpose + "：连续画面状态不一致，继续有限恢复（"
+                                + (attempt + 1) + "/4）。");
+                    } finally { if (second != null && !second.isRecycled()) second.recycle(); }
+                } else {
+                    if (attempt == 3) {
+                        throw new IllegalStateException(purpose + "：物品详情关闭 3 次后仍遮挡背包；"
+                                + "保持 UNKNOWN，禁止继续选择物品或出售。");
+                    }
+                    triedClose = true;
+                    note(purpose + "：检测到物品详情（" + percent(detail.score * 100)
+                            + "），尝试点击已知关闭位置（"
+                            + INVENTORY_DETAIL_CLOSE_X + "," + INVENTORY_DETAIL_CLOSE_Y
+                            + "）；恢复轮次 " + (attempt + 1) + "/3。");
+                }
+            } finally { if (first != null && !first.isRecycled()) first.recycle(); }
+            if (attempt == 3) break;
+            // Reuse the in-game close button; do not send a global Android
+            // Back that might close the whole shop or lose the scan context.
+            click(INVENTORY_DETAIL_CLOSE_X, INVENTORY_DETAIL_CLOSE_Y);
+            control.sleep(350 + attempt * 150L);
+            triedClose = true;
+        }
+        throw new IllegalStateException(purpose + "：连续截图未能确认背包干净状态；"
+                + "暂停当前交易，未将未知格当作空格。");
+    }
+
+    private void clearInventoryDetailAfterScan() throws Exception {
+        Bitmap frame = captureCleanInventory("装备扫描结束", 0.90f);
+        try { note("扫描结束：背包已确认不受物品详情遮挡。"); }
+        finally { frame.recycle(); }
     }
 
     private Bitmap selectInventorySlot(String name, int x, int y, int slot) throws Exception {
-        Bitmap before = capture();
+        Bitmap before = captureCleanInventory("装备扫描第 " + slot + "/35 格", 0.97f);
         try {
-            Match detail = findTemplate(before, "captures/templates/RYLUX_背包_物品详情左上角_1920.png",
-                    new Rect(400, 70, 1550, 300), 0.97f);
-            if (detail != null) {
-                note("检测到物品详情浮层；点击旧版脚本确认的关闭位置（" + INVENTORY_DETAIL_CLOSE_X + "," + INVENTORY_DETAIL_CLOSE_Y + "）。");
-                click(INVENTORY_DETAIL_CLOSE_X, INVENTORY_DETAIL_CLOSE_Y);
-                control.sleep(400);
-                before.recycle();
-                before = capture();
-                detail = findTemplate(before, "captures/templates/RYLUX_背包_物品详情左上角_1920.png",
-                        new Rect(400, 70, 1550, 300), 0.97f);
-                if (detail != null) {
-                    if (!game.inputKey("escape")) throw new IllegalStateException("无法关闭遮挡背包的物品详情。");
-                    control.sleep(400);
-                    before.recycle();
-                    before = capture();
-                    detail = findTemplate(before, "captures/templates/RYLUX_背包_物品详情左上角_1920.png",
-                            new Rect(400, 70, 1550, 300), 0.97f);
-                }
-                if (detail != null) throw new IllegalStateException("物品详情仍遮挡背包格子；已停止扫描。");
-            }
-            if (findTemplate(before, "captures/templates/RYLUX_挂机_背包标题.png", new Rect(1080, 20, 1420, 140), 0.88f) == null) {
-                throw new IllegalStateException("选格前未确认背包标题；没有继续选择物品。");
-            }
             Bitmap emptySlot = workflowPackage.images.get("captures/templates/RYLUX_背包_空格子.png");
             if (emptySlot == null) throw new IllegalStateException("缺少背包空格识别素材；未点击格子。");
             if (matchesCenteredTemplate(before, emptySlot, x, y, 8, 0.94f)) {
@@ -1806,7 +1827,6 @@ public final class CoraFlowWorkflowRuntime {
             Bitmap after = capture();
             boolean changed = regionChanged(before, after, new Rect(960, 120, 1605, 1010), 0.02)
                     || regionChanged(before, after, new Rect(x - 48, y - 48, x + 48, y + 48), 0.005);
-            before.recycle();
             if (!changed) {
                 after.recycle();
                 note("第 " + slot + "/35 格详情未发生可见变化，跳过，未读取或操作。");
@@ -1817,36 +1837,7 @@ public final class CoraFlowWorkflowRuntime {
     }
 
     private Bitmap captureInventoryGridWithoutDetail() throws Exception {
-        Bitmap frame = capture();
-        try {
-            String detailPath = "captures/templates/RYLUX_背包_物品详情左上角_1920.png";
-            Match detail = findTemplate(frame, detailPath, new Rect(400, 70, 1550, 300), 0.97f);
-            if (detail != null) {
-                note("空格预检发现物品详情浮层；点击旧版脚本确认的关闭位置（"
-                        + INVENTORY_DETAIL_CLOSE_X + "," + INVENTORY_DETAIL_CLOSE_Y + "）。");
-                click(INVENTORY_DETAIL_CLOSE_X, INVENTORY_DETAIL_CLOSE_Y);
-                control.sleep(400);
-                frame.recycle();
-                frame = capture();
-                detail = findTemplate(frame, detailPath, new Rect(400, 70, 1550, 300), 0.97f);
-                if (detail != null) {
-                    if (!game.inputKey("escape")) throw new IllegalStateException("无法关闭遮挡背包的物品详情。");
-                    control.sleep(400);
-                    frame.recycle();
-                    frame = capture();
-                    detail = findTemplate(frame, detailPath, new Rect(400, 70, 1550, 300), 0.97f);
-                }
-                if (detail != null) throw new IllegalStateException("物品详情仍遮挡背包；未进行空格预检。");
-            }
-            if (findTemplate(frame, "captures/templates/RYLUX_挂机_背包标题.png", new Rect(1080, 20, 1420, 140), 0.88f) == null) {
-                throw new IllegalStateException("空格预检前未确认背包标题；没有跳过任何格子。");
-            }
-            Bitmap result = frame;
-            frame = null;
-            return result;
-        } finally {
-            if (frame != null && !frame.isRecycled()) frame.recycle();
-        }
+        return captureCleanInventory("背包空格预检", 0.97f);
     }
 
     private Set<Integer> locateEmptyInventorySlots(Bitmap frame) throws Exception {
