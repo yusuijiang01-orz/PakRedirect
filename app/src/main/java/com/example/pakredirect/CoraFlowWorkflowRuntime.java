@@ -1,6 +1,7 @@
 package com.example.pakredirect;
 
 import android.graphics.Bitmap;
+import android.graphics.Matrix;
 import android.graphics.Color;
 import android.graphics.Rect;
 import android.os.SystemClock;
@@ -1056,9 +1057,25 @@ public final class CoraFlowWorkflowRuntime {
     private Match findTemplate(Bitmap frame, Bitmap original, Rect region, float threshold,
                                boolean coloredInventoryPixelsOnly) {
         if (original == null || original.isRecycled()) return null;
+        int rotation = coordinateTransform == null ? 0 : coordinateTransform.rotationDegrees;
+        if (rotation == 0) return findTemplateCore(frame, original, region, threshold, coloredInventoryPixelsOnly);
+        Matrix matrix = new Matrix();
+        matrix.postRotate(rotation);
+        Bitmap rotated = Bitmap.createBitmap(original, 0, 0, original.getWidth(), original.getHeight(), matrix, true);
+        try { return findTemplateCore(frame, rotated, region, threshold, coloredInventoryPixelsOnly); }
+        finally { if (rotated != original && !rotated.isRecycled()) rotated.recycle(); }
+    }
+
+    private Match findTemplateCore(Bitmap frame, Bitmap original, Rect region, float threshold,
+                                   boolean coloredInventoryPixelsOnly) {
+        if (original == null || original.isRecycled()) return null;
         Rect bounds = pixelRegion(region, frame.getWidth(), frame.getHeight());
-        int targetWidth = Math.max(1, Math.round(original.getWidth() * frame.getWidth() / (float) coordinateWidth));
-        int targetHeight = Math.max(1, Math.round(original.getHeight() * frame.getHeight() / (float) coordinateHeight));
+        VisionViewport viewport = coordinateTransform == null
+                ? VisionViewport.full(frame.getWidth(), frame.getHeight()) : coordinateTransform.viewport;
+        int targetWidth = Math.max(1, Math.round(original.getWidth()
+                * (viewport.right - viewport.left) / (float) coordinateWidth));
+        int targetHeight = Math.max(1, Math.round(original.getHeight()
+                * (viewport.bottom - viewport.top) / (float) coordinateHeight));
         if (targetWidth > frame.getWidth() || targetHeight > frame.getHeight()
                 || bounds.width() < targetWidth || bounds.height() < targetHeight) return null;
 
@@ -1427,6 +1444,10 @@ public final class CoraFlowWorkflowRuntime {
                         Match title=findTemplate(frame,titlePath,new Rect(860,280,1050,355),0.9f);
                         Match button=findTemplate(frame,confirmPath,new Rect(700,710,940,805),0.9f);
                         if (title!=null && button!=null) {
+                            visionStateMachine.observe(VisionGameStateMachine.State.SALE_CONFIRM,
+                                    Math.min(title.score,button.score),true);
+                            if(!visionStateMachine.allowsSaleConfirmation())
+                                throw new IllegalStateException("状态机未确认药品出售弹窗；未执行确认操作。");
                             InventoryMetric quantity=readInventoryMetric(frame,new Rect(970,510,1080,568));
                             if (quantity==null || quantity.confidence<80 || quantity.value!=selected.count)
                                 throw new IllegalStateException("药品出售弹窗数量未确认整组；没有确认出售。");
@@ -1581,6 +1602,11 @@ public final class CoraFlowWorkflowRuntime {
                         Match confirmButton = findTemplate(confirm, saleConfirmPath, new Rect(700, 710, 940, 805), 0.84f);
                         if (titleMatch == null || confirmButton == null) {
                             throw new IllegalStateException("出售确认弹窗标题和按钮未同时匹配；已停止，未确认出售。");
+                        }
+                        visionStateMachine.observe(VisionGameStateMachine.State.SALE_CONFIRM,
+                                Math.min(titleMatch.score, confirmButton.score), true);
+                        if (!visionStateMachine.allowsSaleConfirmation()) {
+                            throw new IllegalStateException("游戏状态机未确认出售弹窗；未执行确认操作。");
                         }
                         tapPixels(confirmButton.x, confirmButton.y, confirm.getWidth(), confirm.getHeight());
                     } finally { confirm.recycle(); }
@@ -1813,11 +1839,14 @@ public final class CoraFlowWorkflowRuntime {
             Bitmap first = capture();
             try {
                 Match title = findTemplate(first, titlePath, headerArea, 0.88f);
-                if (title == null) throw new IllegalStateException(
-                        purpose + "：背包标题未确认，不能继续触碰背包或执行交易。");
+                if (title == null) {
+                    visionStateMachine.recoveryFailed();
+                    throw new IllegalStateException(purpose + "：背包标题未确认，不能继续触碰背包或执行交易。");
+                }
                 Match detail = findTemplate(first, detailPath, detailArea, detailThreshold);
                 if (detail == null) {
                     if (!triedClose) {
+                        visionStateMachine.observe(VisionGameStateMachine.State.INVENTORY,title.score,true);
                         Bitmap usable = first;
                         first = null;
                         return usable;
@@ -1829,8 +1858,9 @@ public final class CoraFlowWorkflowRuntime {
                         Match detailAgain = findTemplate(second, detailPath, detailArea, detailThreshold);
                         if (titleAgain != null && detailAgain == null
                                 && com.example.pakredirect.vision.VisionTemporalConsensus.decide(
-                                        false, title.score, false, titleAgain.score, 0.88)
-                                   == com.example.pakredirect.vision.VisionTemporalConsensus.State.ABSENT) {
+                                        true, title.score, true, titleAgain.score, 0.88)
+                                   == com.example.pakredirect.vision.VisionTemporalConsensus.State.CONFIRMED) {
+                            visionStateMachine.recoverySucceeded(VisionGameStateMachine.State.INVENTORY);
                             note(purpose + "：两帧确认物品详情已关闭，背包标题仍然有效。");
                             Bitmap usable = second;
                             second = null;
@@ -1843,6 +1873,11 @@ public final class CoraFlowWorkflowRuntime {
                     if (attempt == 3) {
                         throw new IllegalStateException(purpose + "：物品详情关闭 3 次后仍遮挡背包；"
                                 + "保持 UNKNOWN，禁止继续选择物品或出售。");
+                    }
+                    visionStateMachine.observe(VisionGameStateMachine.State.ITEM_DETAIL,detail.score,true);
+                    if (!visionStateMachine.beginRecovery()) {
+                        visionStateMachine.recoveryFailed();
+                        throw new IllegalStateException(purpose + "：详情恢复次数已达上限；未执行下一笔交易。");
                     }
                     triedClose = true;
                     note(purpose + "：检测到物品详情（" + percent(detail.score * 100)
@@ -1858,6 +1893,7 @@ public final class CoraFlowWorkflowRuntime {
             control.sleep(350 + attempt * 150L);
             triedClose = true;
         }
+        visionStateMachine.recoveryFailed();
         throw new IllegalStateException(purpose + "：连续截图未能确认背包干净状态；"
                 + "暂停当前交易，未将未知格当作空格。");
     }
