@@ -1,6 +1,6 @@
 name: Build RYLUX APK (release optional)
 # RYLUX Vision Engine 2.6.1 signed validation build; never auto-publish.
-# 2.6.1 device hotfix: bounded inventory overlay retry and corrected Bán ROI.
+# 2.6.1 HF2: prelaunch decrypt/version gate and Vision API transaction guards.
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ on:
       version_code:
         description: 'Monotonically increasing Android versionCode'
         required: true
-        default: '181'
+        default: '183'
       publish_release:
         description: 'Publish GitHub and Gitee releases after building (leave off for a test build)'
         required: true
@@ -45,7 +45,7 @@ jobs:
 
     env:
       RYLUX_VERSION_NAME: ${{ inputs.version_name || '2.6.1' }}
-      RYLUX_VERSION_CODE: ${{ inputs.version_code || '181' }}
+      RYLUX_VERSION_CODE: ${{ inputs.version_code || '183' }}
       RYLUX_KEYSTORE_B64: ${{ secrets.RYLUX_KEYSTORE_B64 }}
       RYLUX_KEYSTORE_PASSWORD: ${{ secrets.RYLUX_KEYSTORE_PASSWORD }}
       RYLUX_KEY_ALIAS: ${{ secrets.RYLUX_KEY_ALIAS }}
