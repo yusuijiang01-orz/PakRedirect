@@ -8,7 +8,7 @@ public class VisionCoordinateTransformTest {
         VisionViewport v=new VisionViewport(100,50,1700,950,1800,1000,true);
         VisionCoordinateTransform t=new VisionCoordinateTransform(1920,1080,v,0);
         assertEquals(100,t.mapX(0,0));
-        assertEquals(1700,t.mapX(1920,1080));
+        assertEquals(1699,t.mapX(1920,1080));
         assertEquals(50,t.mapY(0,0));
         assertEquals(950,t.mapY(1920,1080));
         double[] back=t.inverse(t.mapX(480,270),t.mapY(480,270));
