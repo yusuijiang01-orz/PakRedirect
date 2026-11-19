@@ -1,6 +1,5 @@
 package com.example.pakredirect.vision;
 import static org.junit.Assert.*;
-import android.graphics.Rect;
 import org.junit.Test;
 
 public class VisionCoordinateTransformTest {
@@ -27,13 +26,16 @@ public class VisionCoordinateTransformTest {
         assertEquals(0,t270.mapX(0,0));
         assertEquals(1919,t270.mapY(0,0));
     }
-    @Test public void mapsRectAndRejectsUnsupportedAngles() {
+    @Test public void mapsRectangleCornersAndRejectsUnsupportedAngles() {
+        // android.graphics.Rect constructors are no-op stubs in local JVM tests;
+        // verify the pure coordinate transform here and cover Rect mapping on-device.
         VisionCoordinateTransform t=new VisionCoordinateTransform(100,100,VisionViewport.full(200,200),0);
-        Rect mapped=t.mapRect(new Rect(10,20,30,40));
-        assertEquals(19,mapped.left);
-        assertEquals(39,mapped.top);
-        assertEquals(61,mapped.right);
-        assertEquals(81,mapped.bottom);
+        double[] topLeft=t.map(10,20);
+        double[] bottomRight=t.map(30,40);
+        assertEquals(19.9,topLeft[0],0.001);
+        assertEquals(39.8,topLeft[1],0.001);
+        assertEquals(59.7,bottomRight[0],0.001);
+        assertEquals(79.6,bottomRight[1],0.001);
         try { new VisionCoordinateTransform(100,100,VisionViewport.full(200,200),45); fail(); }
         catch(IllegalArgumentException expected){}
     }
