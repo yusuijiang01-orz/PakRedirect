@@ -29,6 +29,8 @@ import com.example.pakredirect.vision.VisionBridge;
 import com.example.pakredirect.vision.VisionMatcher;
 import com.example.pakredirect.vision.VisionViewport;
 import com.example.pakredirect.vision.VisionViewportDetector;
+import com.example.pakredirect.vision.VisionCoordinateTransform;
+import com.example.pakredirect.vision.VisionGameStateMachine;
 
 /** Executes a decrypted CoraFlow graph through RYLUX's native Android input and OCR APIs. */
 public final class CoraFlowWorkflowRuntime {
@@ -142,6 +144,8 @@ public final class CoraFlowWorkflowRuntime {
     private final VisionMatcher visionMatcher = new VisionMatcher();
     private boolean openCvDisabled;
     private int openCvMatches, legacyMatches;
+    private VisionCoordinateTransform coordinateTransform;
+    private final VisionGameStateMachine visionStateMachine = new VisionGameStateMachine(3);
     // One captured-frame pixel array and decoded-template arrays are reused across slot matches.
     // Previously each match allocated a new full-screen int[] (~8 MiB at 1080p).
     private Bitmap pixelFrame;
@@ -1271,8 +1275,11 @@ public final class CoraFlowWorkflowRuntime {
     private void click(double x, double y) throws Exception {
         checkpoint();
         if (screenWidth <= 0 || screenHeight <= 0) throw new IllegalStateException("目标截图尺寸尚未确定");
-        double deviceX = x * screenWidth / coordinateWidth;
-        double deviceY = y * screenHeight / coordinateHeight;
+        double[] mapped = coordinateTransform == null
+                ? new double[]{x * screenWidth / coordinateWidth, y * screenHeight / coordinateHeight}
+                : coordinateTransform.map(x, y);
+        double deviceX = mapped[0];
+        double deviceY = mapped[1];
         if (!game.tap((float) deviceX, (float) deviceY, 60, CAPTURE_TIMEOUT_MS)) {
             throw new IllegalStateException("Android 无障碍触控未完成：工作流 (" + Math.round(x) + "," + Math.round(y)
                     + ") → 设备 (" + Math.round(deviceX) + "," + Math.round(deviceY) + ")");
@@ -1281,21 +1288,28 @@ public final class CoraFlowWorkflowRuntime {
 
     private void drag(JSONObject config) throws Exception {
         checkpoint();
-        double scaleX = screenWidth / (double) coordinateWidth;
-        double scaleY = screenHeight / (double) coordinateHeight;
         long duration = Math.max(30L, Math.min(5000L,
                 Math.round(config.optDouble("duration", 0.5) * 1000)));
-        boolean completed = game.swipe((float) (config.optDouble("x1", 0) * scaleX),
-                (float) (config.optDouble("y1", 0) * scaleY),
-                (float) (config.optDouble("x2", 0) * scaleX),
-                (float) (config.optDouble("y2", 0) * scaleY), duration, CAPTURE_TIMEOUT_MS);
+        double[] start = coordinateTransform == null
+                ? new double[]{config.optDouble("x1",0)*screenWidth/coordinateWidth,
+                               config.optDouble("y1",0)*screenHeight/coordinateHeight}
+                : coordinateTransform.map(config.optDouble("x1",0),config.optDouble("y1",0));
+        double[] end = coordinateTransform == null
+                ? new double[]{config.optDouble("x2",0)*screenWidth/coordinateWidth,
+                               config.optDouble("y2",0)*screenHeight/coordinateHeight}
+                : coordinateTransform.map(config.optDouble("x2",0),config.optDouble("y2",0));
+        boolean completed = game.swipe((float) start[0], (float) start[1],
+                (float) end[0], (float) end[1], duration, CAPTURE_TIMEOUT_MS);
         if (!completed) throw new IllegalStateException("Android 无障碍拖动未完成");
         long releaseDelay = Math.max(0L, Math.min(5000L, config.optLong("release_delay", 0L)));
         if (releaseDelay > 0) control.sleep(releaseDelay);
     }
 
     private void tapPixels(double x, double y, int frameWidth, int frameHeight) throws Exception {
-        click(x * coordinateWidth / frameWidth, y * coordinateHeight / frameHeight);
+        double[] reference = coordinateTransform == null
+                ? new double[]{x * coordinateWidth / frameWidth, y * coordinateHeight / frameHeight}
+                : coordinateTransform.inverse(x, y);
+        click(reference[0], reference[1]);
     }
 
     private Bitmap capture() throws Exception {
@@ -1303,6 +1317,20 @@ public final class CoraFlowWorkflowRuntime {
         Bitmap frame = game.captureDisplay(CAPTURE_TIMEOUT_MS);
         screenWidth = frame.getWidth();
         screenHeight = frame.getHeight();
+        try {
+            VisionViewport viewport = VisionViewportDetector.detect(frame);
+            int rotation = config.optInt("screen_rotation_degrees",
+                    config.optInt("屏幕旋转角度", 0));
+            coordinateTransform = new VisionCoordinateTransform(coordinateWidth, coordinateHeight, viewport, rotation);
+            if (viewport.calibrated || rotation != 0) {
+                note("Vision 坐标校准：视口 " + viewport.left + "," + viewport.top + "-"
+                        + viewport.right + "," + viewport.bottom + "；旋转 " + rotation + "°。");
+            }
+        } catch (RuntimeException invalidViewport) {
+            coordinateTransform = new VisionCoordinateTransform(coordinateWidth, coordinateHeight,
+                    VisionViewport.full(screenWidth, screenHeight), 0);
+            note("Vision 视口校准不确定，回退全屏缩放坐标；不推测设备旋转。");
+        }
         return frame;
     }
 
@@ -2116,10 +2144,16 @@ public final class CoraFlowWorkflowRuntime {
 
     private Rect pixelRegion(Rect base, int width, int height) {
         if (base == null) base = new Rect(0, 0, coordinateWidth, coordinateHeight);
-        int left = clamp((int) Math.floor(base.left * width / (double) coordinateWidth), 0, width);
-        int top = clamp((int) Math.floor(base.top * height / (double) coordinateHeight), 0, height);
-        int right = clamp((int) Math.ceil(base.right * width / (double) coordinateWidth), 0, width);
-        int bottom = clamp((int) Math.ceil(base.bottom * height / (double) coordinateHeight), 0, height);
+        Rect mapped = coordinateTransform == null
+                ? new Rect((int)Math.floor(base.left*width/(double)coordinateWidth),
+                           (int)Math.floor(base.top*height/(double)coordinateHeight),
+                           (int)Math.ceil(base.right*width/(double)coordinateWidth),
+                           (int)Math.ceil(base.bottom*height/(double)coordinateHeight))
+                : coordinateTransform.mapRect(base);
+        int left = clamp(mapped.left, 0, width);
+        int top = clamp(mapped.top, 0, height);
+        int right = clamp(mapped.right, 0, width);
+        int bottom = clamp(mapped.bottom, 0, height);
         return new Rect(Math.min(left, right), Math.min(top, bottom), Math.max(left, right), Math.max(top, bottom));
     }
 
