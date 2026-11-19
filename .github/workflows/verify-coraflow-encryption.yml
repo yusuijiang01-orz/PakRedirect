@@ -38,6 +38,35 @@ jobs:
           fi
           echo "Required secret names are configured."
 
+      - name: Verify CoraFlow token repository access (do not print token)
+        shell: bash
+        env:
+          CORAFLOW_PAT: \${{ secrets.CORAFLOW_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          body="$(mktemp)"
+          status="$(curl --silent --show-error --output "$body" --write-out '%{http_code}' \
+            --header "Authorization: Bearer $CORAFLOW_PAT" \
+            --header "Accept: application/vnd.github+json" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/yusuijiang01-orz/CoraFlow/contents/SCRIPT_PROJECT_GUIDE.md?ref=codex/complete-script-project-20261119")"
+          if [[ "$status" == "200" ]]; then
+            echo "PASS: Token can read CoraFlow contents API."
+          else
+            echo "::error::CoraFlow token check failed with HTTP $status."
+            python - "$body" "$status" <<'PY'
+          import json, pathlib, sys
+          try:
+              payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
+              print("GitHub response:", payload.get("message", "No message returned"))
+          except Exception:
+              print("GitHub returned a non-JSON error response.")
+          print("HTTP status:", sys.argv[2])
+          PY
+            exit 1
+          fi
+          rm -f "$body"
+
       - name: Checkout private CoraFlow at audited commit
         uses: actions/checkout@v4
         with:
