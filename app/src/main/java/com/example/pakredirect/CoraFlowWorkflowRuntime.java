@@ -578,10 +578,16 @@ public final class CoraFlowWorkflowRuntime {
         return message != null && (message.contains("OCR 置信度")
                 || message.contains("OCR 没有返回结果")
                 || message.contains("药瓶图标候选")
-                || message.contains("药瓶数量 OCR 不可靠"));
+                || message.contains("药瓶数量 OCR 不可靠")
+                || message.contains("物品详情遮挡背包")
+                || message.contains("药品数量未确认"));
     }
 
     private Boolean recognizeNode(String type, String id, String name, JSONObject config) throws Exception {
+        if ("recognize_number".equals(type) && config.optBoolean("ocr_expected_consensus", false)
+                && config.optString("item_image", "").trim().isEmpty()) {
+            return recognizeExpectedQuantity(name, config);
+        }
         int retries = Math.max(0, Math.min(3, config.optInt("ocr_retry_count", 0)));
         float minimum = (float) Math.max(0, Math.min(100, config.optDouble("min_confidence", 30)));
         OcrRead result = null;
@@ -652,6 +658,49 @@ public final class CoraFlowWorkflowRuntime {
         note("OCR 数字：" + value + "（原文“" + raw + "”，" + percent(result.confidence)
                 + "）；" + value + " " + op + " " + target + " → " + (matched ? "是" : "否") + "。");
         return matched;
+    }
+
+    /** Require two independently captured confirmations for purchase quantity. */
+    private Boolean recognizeExpectedQuantity(String name, JSONObject config) throws Exception {
+        String op = config.optString("number_operator", config.optString("operator", "="));
+        double targetValue = config.optDouble("number_value", Double.NaN);
+        if (!("=".equals(op) || "==".equals(op)) || !Double.isFinite(targetValue)
+                || targetValue != Math.rint(targetValue) || targetValue < 0 || targetValue > 999) {
+            throw new IllegalArgumentException("“" + name + "”双帧数量校验要求 0–999 的明确整数和等于比较符。");
+        }
+        int expected = (int) targetValue;
+        float minimum = (float) Math.max(0, Math.min(100, config.optDouble("min_confidence", 90)));
+        int attempts = Math.max(2, Math.min(4, config.optInt("ocr_retry_count", 1) + 1));
+        long retryDelay = Math.max(150L, Math.min(2_000L, config.optLong("ocr_retry_delay_ms", 500L)));
+        int scale = Math.max(1, Math.min(4, config.optInt("ocr_scale", 4)));
+        Rect crop = region(config.optJSONArray("region"));
+        if (crop.width() <= 0 || crop.height() <= 0) throw new IllegalArgumentException("购买数量校验缺少有效识别区域。");
+
+        for (int attempt = 1; attempt <= attempts; attempt++) {
+            checkpoint();
+            if (attempt > 1) control.sleep(retryDelay);
+            OcrRead first;
+            OcrRead second;
+            Bitmap frame = capture();
+            try { first = readOcr(frame, crop, "eng", "number", scale); }
+            finally { frame.recycle(); }
+            control.sleep(180L);
+            frame = capture();
+            try { second = readOcr(frame, crop, "eng", "number", scale); }
+            finally { frame.recycle(); }
+
+            if (CoraFlowNumberConsensus.matchesReadings(
+                    first.text, first.confidence, second.text, second.confidence, expected, minimum)) {
+                note("购买数量 " + expected + " 已通过两张独立截图复核（"
+                        + percent(first.confidence) + " / " + percent(second.confidence) + "），允许进入下一节点。");
+                return true;
+            }
+            note("购买数量双帧不一致或低置信度，期望 " + expected + "，实际“"
+                    + first.text.trim() + "”/" + percent(first.confidence) + " 与“"
+                    + second.text.trim() + "”/" + percent(second.confidence)
+                    + "；" + attempt + "/" + attempts + "，未提交交易。");
+        }
+        throw new IllegalStateException("OCR 置信度或购买数量双帧一致性未通过；未确认数量，未执行购买。");
     }
 
     private void applyPanelBindings(JSONObject graph, JSONObject bindings, JSONObject panelValues) throws Exception {
@@ -790,6 +839,15 @@ public final class CoraFlowWorkflowRuntime {
         String detailPath = "captures/templates/RYLUX_背包_物品详情左上角_1920.png";
         if (workflowPackage.images.containsKey(detailPath)
                 && findTemplate(frame, detailPath, new Rect(400, 70, 1550, 300), 0.90f) != null) {
+            // Close a blocking item detail only when the inventory header is confirmed.
+            // The bounded OCR retry will obtain a fresh frame before deciding stock.
+            String titlePath = "captures/templates/RYLUX_挂机_背包标题.png";
+            if (workflowPackage.images.containsKey(titlePath)
+                    && findTemplate(frame, titlePath, new Rect(1080, 20, 1420, 140), 0.88f) != null) {
+                note("背包详情遮挡药瓶计数；已确认背包标题，尝试关闭详情后重新截图。");
+                click(1200, 80);
+                control.sleep(250L);
+            }
             throw new IllegalStateException("物品详情遮挡背包；药品数量未确认，不按零处理。");
         }
         String path = config.optString("item_image", "").trim();
