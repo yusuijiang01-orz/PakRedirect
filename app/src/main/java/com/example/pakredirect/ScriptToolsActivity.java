@@ -1108,6 +1108,9 @@ public final class ScriptToolsActivity extends Activity {
                 LocalizationLaunchPreparation.prepare(this, message -> runOnUiThread(
                         () -> Toast.makeText(this, message, Toast.LENGTH_SHORT).show()));
             }
+            if (!isWorkflowPreflightReady(confirmedConfig)) {
+                throw new IllegalStateException("工作流预检缓存已过期；游戏尚未启动，请重新点击“配置方案并启动”。");
+            }
             runOnUiThread(() -> startRuntimeServicesAndLaunchGame(confirmedConfig));
         } catch (Exception error) {
             failRuntimeLaunch(error.getMessage());
