@@ -9,7 +9,7 @@ public final class WorkflowVersionValidatorTest {
         JSONObject graph = new JSONObject().put("name", "RYLUX 完整自动化 v3.82")
                 .put("version", "1.0");
         WorkflowVersionValidator.Info info =
-                WorkflowVersionValidator.validate("coraflow-3.82-medicine-sale", graph);
+                WorkflowVersionValidator.validate("coraflowy-3.82-medicine-sale", graph);
         assertEquals("3.82", info.manifestVersion);
         assertEquals("3.82", info.embeddedVersion);
     }
@@ -18,7 +18,7 @@ public final class WorkflowVersionValidatorTest {
         JSONObject graph = new JSONObject().put("name", "RYLUX 完整自动化 v3.79")
                 .put("id", "rylux-v3.40").put("version", "1.0");
         try {
-            WorkflowVersionValidator.validate("coraflow-3.82-medicine-sale", graph);
+            WorkflowVersionValidator.validate("coraflowy-3.82-medicine-sale", graph);
             fail("version mismatch must block launch");
         } catch (IllegalStateException expected) {
             assertTrue(expected.getMessage().contains("v3.82"));
@@ -33,7 +33,7 @@ public final class WorkflowVersionValidatorTest {
                 .put("id", "rylux-v3.40").put("version", "1.0")
                 .put("nodes", new org.json.JSONArray().put(node));
         WorkflowVersionValidator.Info info =
-                WorkflowVersionValidator.validate("coraflow-3.82-medicine-sale", graph);
+                WorkflowVersionValidator.validate("coraflowy-3.82-medicine-sale", graph);
         assertEquals("3.82", info.embeddedVersion);
     }
 
