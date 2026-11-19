@@ -609,7 +609,9 @@ public final class ProtectedContentManager {
             if (!matches(link, bundle.linkspak.size, bundle.linkspak.sha256)) return false;
             for (ProtectedEntry entry : bundle.entries.values()) {
                 File file = new File(dir, entry.encryptedName);
-                if (!file.isFile() || file.length() != entry.encryptedSize) return false;
+                // Offline fallback must validate EVERY encrypted byte against
+                // the device-authenticated manifest, not just length/header.
+                if (!matches(file, entry.encryptedSize, entry.encryptedSha256)) return false;
                 EncryptedHeader header = readHeader(file);
                 validateHeader(header, entry, bundle.contentKey);
             }
