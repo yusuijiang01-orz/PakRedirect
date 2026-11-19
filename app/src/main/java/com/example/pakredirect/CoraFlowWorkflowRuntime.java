@@ -1073,10 +1073,14 @@ public final class CoraFlowWorkflowRuntime {
         Rect bounds = pixelRegion(region, frame.getWidth(), frame.getHeight());
         VisionViewport viewport = coordinateTransform == null
                 ? VisionViewport.full(frame.getWidth(), frame.getHeight()) : coordinateTransform.viewport;
+        boolean quarterTurn = coordinateTransform != null
+                && (coordinateTransform.rotationDegrees == 90 || coordinateTransform.rotationDegrees == 270);
+        int referenceX = quarterTurn ? coordinateHeight : coordinateWidth;
+        int referenceY = quarterTurn ? coordinateWidth : coordinateHeight;
         int targetWidth = Math.max(1, Math.round(original.getWidth()
-                * (viewport.right - viewport.left) / (float) coordinateWidth));
+                * (viewport.right - viewport.left) / (float) referenceX));
         int targetHeight = Math.max(1, Math.round(original.getHeight()
-                * (viewport.bottom - viewport.top) / (float) coordinateHeight));
+                * (viewport.bottom - viewport.top) / (float) referenceY));
         if (targetWidth > frame.getWidth() || targetHeight > frame.getHeight()
                 || bounds.width() < targetWidth || bounds.height() < targetHeight) return null;
 
