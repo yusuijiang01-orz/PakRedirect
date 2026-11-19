@@ -527,7 +527,7 @@ public final class CoraFlowWorkflowRuntime {
         while (!ScriptGameAdapter.isTargetGameForeground()
                 && SystemClock.elapsedRealtime() < deadline) {
             checkpoint();
-            control.sleep(400L);
+            control.sleep(250L);
         }
         if (!ScriptGameAdapter.isTargetGameForeground()) {
             throw new IllegalStateException("“" + name + "”启动后 " + (waitMs / 1000)
@@ -1348,7 +1348,7 @@ public final class CoraFlowWorkflowRuntime {
             note("确认处于大夫商店（标题命中 " + percent(shop.score * 100) + "）；开始装备扫描。");
         } finally { shopStart.recycle(); }
         click(1075, 170);
-        control.sleep(400);
+        control.sleep(250);
         if (config.optBoolean("sell_medicine_surplus", false)) {
             sellExcessMedicine(config);
         }
@@ -1663,10 +1663,23 @@ public final class CoraFlowWorkflowRuntime {
             Match detail = findTemplate(frame, detailPath, new Rect(400, 70, 1550, 300), 0.90f);
             if (detail == null) { note("扫描结束：未发现物品详情浮层。"); return; }
         } finally { frame.recycle(); }
-        click(INVENTORY_DETAIL_CLOSE_X, INVENTORY_DETAIL_CLOSE_Y); control.sleep(300);
+        note("检测到物品详情浮层；点击旧版脚本确认的关闭位置（"
+                + INVENTORY_DETAIL_CLOSE_X + "," + INVENTORY_DETAIL_CLOSE_Y + "）。");
+        click(INVENTORY_DETAIL_CLOSE_X, INVENTORY_DETAIL_CLOSE_Y);
+        control.sleep(400);
         frame = capture();
         try {
-            if (findTemplate(frame, detailPath, new Rect(400, 70, 1550, 300), 0.90f) != null)
+            Match remaining = findTemplate(frame, detailPath, new Rect(400, 70, 1550, 300), 0.90f);
+            if (remaining != null) {
+                note("游戏内关闭按钮未生效；尝试系统返回键关闭详情浮层。");
+                if (!game.inputKey("escape"))
+                    throw new IllegalStateException("无法关闭遮挡背包的物品详情。");
+                control.sleep(400);
+                frame.recycle();
+                frame = capture();
+                remaining = findTemplate(frame, detailPath, new Rect(400, 70, 1550, 300), 0.90f);
+            }
+            if (remaining != null)
                 throw new IllegalStateException("装备扫描后物品详情仍遮挡背包；停止药品统计。");
             note("扫描结束：已关闭物品详情浮层并复核。");
         } finally { frame.recycle(); }
@@ -1725,6 +1738,8 @@ public final class CoraFlowWorkflowRuntime {
             String detailPath = "captures/templates/RYLUX_背包_物品详情左上角_1920.png";
             Match detail = findTemplate(frame, detailPath, new Rect(400, 70, 1550, 300), 0.97f);
             if (detail != null) {
+                note("空格预检发现物品详情浮层；点击旧版脚本确认的关闭位置（"
+                        + INVENTORY_DETAIL_CLOSE_X + "," + INVENTORY_DETAIL_CLOSE_Y + "）。");
                 click(INVENTORY_DETAIL_CLOSE_X, INVENTORY_DETAIL_CLOSE_Y);
                 control.sleep(400);
                 frame.recycle();
