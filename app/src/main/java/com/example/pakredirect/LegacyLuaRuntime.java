@@ -1511,7 +1511,12 @@ final class LegacyLuaRuntime {
         int mask = args.narg() >= 6 ? parseColor(args.arg(6).tojstring()) : -1;
         double threshold = args.narg() >= 8 ? args.arg(8).optdouble(0.95) : 0.95;
         LegacyImageMatcher.Pixels screenPixels = bitmapPixels(screen);
-        for (double scale : LegacyTemplateScalePlan.candidates(mapper.scaleX(), mapper.scaleY())) {
+        VisionCoordinateTransform transform=transformFor(screen);
+        VisionViewport viewport=transform.viewport;
+        boolean quarterTurn=transform.rotationDegrees==90||transform.rotationDegrees==270;
+        double scaleX=(viewport.right-viewport.left)/(double)(quarterTurn?transform.referenceHeight:transform.referenceWidth);
+        double scaleY=(viewport.bottom-viewport.top)/(double)(quarterTurn?transform.referenceWidth:transform.referenceHeight);
+        for (double scale : LegacyTemplateScalePlan.candidates(scaleX, scaleY)) {
             control.checkpoint();
             int width = Math.max(1, (int) Math.round(sourceTemplate.getWidth() * scale));
             int height = Math.max(1, (int) Math.round(sourceTemplate.getHeight() * scale));
