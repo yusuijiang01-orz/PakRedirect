@@ -1103,6 +1103,16 @@ final class LegacyLuaRuntime {
         state.set("recoveryFailed", new ZeroFunction() {
             @Override public LuaValue invoke(){visionStateMachine.recoveryFailed();return LuaValue.TRUE;}
         });
+        state.set("canMutateInventory", new ZeroFunction() {
+            @Override public LuaValue invoke(){
+                return LuaValue.valueOf(visionStateMachine.allowsInventoryMutation());
+            }
+        });
+        state.set("canConfirmSale", new ZeroFunction() {
+            @Override public LuaValue invoke(){
+                return LuaValue.valueOf(visionStateMachine.allowsSaleConfirmation());
+            }
+        });
         api.set("state",state);
         globals.set("ryluxVision",api);
     }
