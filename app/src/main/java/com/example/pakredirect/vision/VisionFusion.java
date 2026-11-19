@@ -17,8 +17,7 @@ public final class VisionFusion {
         if(first==null||second==null||first.isEmpty()||!first.equals(second)
                 ||!Double.isFinite(firstConfidence)||!Double.isFinite(secondConfidence)
                 ||firstConfidence<minimum||secondConfidence<minimum
-                ||Math.abs(firstConfidence-secondConfidence)<0d
-                ||Math.min(firstConfidence,secondConfidence)<minimumMargin)
+                ||Math.min(firstConfidence,secondConfidence)<Math.max(minimum,minimumMargin))
             return new Result("UNKNOWN",0d,false);
         return new Result(first,Math.min(firstConfidence,secondConfidence),true);
     }
