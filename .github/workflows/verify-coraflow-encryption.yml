@@ -1,4 +1,5 @@
 name: Verify CoraFlow encrypted workflow (no publish)
+# Token access preflight: validates private-repository read access without exposing credentials.
 
 on:
   push:
