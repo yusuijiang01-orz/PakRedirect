@@ -1020,6 +1020,45 @@ final class LegacyLuaRuntime {
                 return LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(point[0]),LuaValue.valueOf(point[1])});
             }
         });
+        api.set("mapRect", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                Bitmap screen=frame();
+                Rect rect=transformFor(screen).mapRect(new Rect(args.arg(1).toint(),args.arg(2).toint(),
+                        args.arg(3).toint(),args.arg(4).toint()));
+                return LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(rect.left),LuaValue.valueOf(rect.top),
+                        LuaValue.valueOf(rect.right),LuaValue.valueOf(rect.bottom)});
+            }
+        });
+        api.set("fitViewport", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                Bitmap screen=frame();
+                LuaTable source=args.arg(1).checktable();
+                java.util.List<VisionViewportDetector.Anchor> anchors=new java.util.ArrayList<>();
+                for(int i=1;i<=source.length();i++){
+                    LuaValue item=source.get(i);
+                    anchors.add(new VisionViewportDetector.Anchor(item.get("refX").todouble(),
+                            item.get("refY").todouble(),item.get("screenX").todouble(),
+                            item.get("screenY").todouble()));
+                }
+                LegacyCoordinateMapper mapper=mapperFor(screen);
+                int rw=args.arg(2).optint(mapper.referenceWidth());
+                int rh=args.arg(3).optint(mapper.referenceHeight());
+                double residual=args.arg(4).optdouble(3d);
+                VisionViewport fitted=VisionViewportDetector.fitAnchors(screen.getWidth(),screen.getHeight(),
+                        rw,rh,anchors,residual);
+                LuaTable result=new LuaTable();
+                result.set("calibrated",LuaValue.valueOf(fitted.calibrated));
+                result.set("left",LuaValue.valueOf(fitted.left));result.set("top",LuaValue.valueOf(fitted.top));
+                result.set("right",LuaValue.valueOf(fitted.right));result.set("bottom",LuaValue.valueOf(fitted.bottom));
+                if(fitted.calibrated){
+                    currentViewport=fitted;
+                    visionTransform=new VisionCoordinateTransform(rw,rh,fitted,
+                            config.optInt("screen_rotation_degrees",config.optInt("屏幕旋转角度",0)));
+                    result.set("status",LuaValue.valueOf("CALIBRATED"));
+                }else result.set("status",LuaValue.valueOf("UNKNOWN"));
+                return result;
+            }
+        });
         api.set("findPic", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) { return findImage(args,false); }
         });
@@ -1028,6 +1067,9 @@ final class LegacyLuaRuntime {
         });
         api.set("scanInventory35", new VarArgFunction() {
             @Override public Varargs invoke(Varargs args) { return scanInventory35(args); }
+        });
+        api.set("scanPotionStacks35", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return scanPotionStacks35(args); }
         });
         LuaTable state = new LuaTable();
         state.set("current", new ZeroFunction() {
@@ -1180,6 +1222,44 @@ final class LegacyLuaRuntime {
             if(blue!=null&&!blue.isRecycled())blue.recycle();
             if(other!=null&&!other.isRecycled())other.recycle();
         }
+    }
+
+    private Varargs scanPotionStacks35(Varargs args) {
+        Varargs scan=scanInventory35(args);
+        if(!scan.arg1().istable())return scan;
+        LuaTable inventory=scan.arg1().checktable();
+        LuaTable cells=inventory.get("cells").checktable();
+        int left=args.arg(1).toint(),top=args.arg(2).toint();
+        int right=args.arg(3).toint(),bottom=args.arg(4).toint();
+        double cellW=(right-left)/5d,cellH=(bottom-top)/7d;
+        LuaTable stacks=new LuaTable();
+        boolean complete=inventory.get("complete").toboolean();
+        int count=0;
+        for(int slot=1;slot<=35;slot++){
+            LuaTable cell=cells.get(slot).checktable();
+            String state=cell.get("state").tojstring();
+            if(!"RED_POTION".equals(state)&&!"BLUE_POTION".equals(state))continue;
+            int row=(slot-1)/5,col=(slot-1)%5;
+            int x1=(int)Math.round(left+col*cellW+cellW*0.03);
+            int y1=(int)Math.round(top+row*cellH+cellH*0.58);
+            int x2=(int)Math.round(left+(col+1)*cellW-cellW*0.40);
+            int y2=(int)Math.round(top+(row+1)*cellH-cellH*0.05);
+            Varargs reading=readDigits(LuaValue.varargsOf(new LuaValue[]{
+                    LuaValue.valueOf(x1),LuaValue.valueOf(y1),LuaValue.valueOf(x2),
+                    LuaValue.valueOf(y2),LuaValue.valueOf(1),LuaValue.valueOf(999)}));
+            LuaTable stack=new LuaTable();
+            stack.set("slot",LuaValue.valueOf(slot));
+            stack.set("color",LuaValue.valueOf(state));
+            stack.set("status",reading.arg1().get("status"));
+            stack.set("count",reading.arg1().get("value"));
+            stack.set("confidence",reading.arg1().get("confidence"));
+            stacks.set(++count,stack);
+            if(!reading.arg1().get("confirmed").toboolean())complete=false;
+        }
+        inventory.set("potionStacks",stacks);
+        inventory.set("potionStackCount",LuaValue.valueOf(count));
+        inventory.set("complete",LuaValue.valueOf(complete));
+        return inventory;
     }
 
     private static int countStable(InventoryVision.Grid first,InventoryVision.Grid second,
