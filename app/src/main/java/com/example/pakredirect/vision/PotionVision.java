@@ -31,6 +31,22 @@ public final class PotionVision {
     private final InventoryVision inventory;
     public PotionVision(InventoryVision inventory){if(inventory==null)throw new IllegalArgumentException("inventory vision required");this.inventory=inventory;}
 
+    public Result fromFusedGrid(InventoryVision.Grid grid,List<DigitVision.Reading> quantities){
+        if(grid==null)throw new IllegalArgumentException("fused inventory grid required");
+        List<PotionStack> stacks=new ArrayList<>();
+        boolean complete=grid.complete;
+        for(InventoryVision.Cell cell:grid.cells){
+            if(cell.state==InventoryVision.CellState.RED_POTION||cell.state==InventoryVision.CellState.BLUE_POTION){
+                DigitVision.Reading reading=quantities!=null&&cell.slot<=quantities.size()
+                        ?quantities.get(cell.slot-1):null;
+                stacks.add(new PotionStack(cell.slot,cell.state,reading));
+                if(reading==null||reading.status!=DigitVision.Status.CONFIRMED
+                        ||reading.value==null||reading.value<=0)complete=false;
+            }else if(cell.state==InventoryVision.CellState.UNKNOWN)complete=false;
+        }
+        return new Result(stacks,complete);
+    }
+
     public Result classify(Bitmap frame,Rect grid,Bitmap empty,Bitmap red,Bitmap blue,Bitmap other,
                            List<DigitVision.Reading> quantities,double threshold,double margin,
                            int insetX,int insetY){
