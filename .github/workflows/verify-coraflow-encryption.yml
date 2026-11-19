@@ -1,0 +1,120 @@
+name: Verify CoraFlow encrypted workflow (no publish)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-coraflow-encryption.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dry-run-encryption:
+    name: Secret and RYLUXE01 dry run
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout PakRedirect
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check publishing prerequisites (never print secret values)
+        shell: bash
+        env:
+          RYLUX_KEY_B64: ${{ secrets.RYLUX_SG_LOCALIZATION_KEY_B64 }}
+          CORAFLOW_PAT: ${{ secrets.CORAFLOW_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$RYLUX_KEY_B64" ]]; then
+            echo "::error::Missing RYLUX_SG_LOCALIZATION_KEY_B64 repository secret"
+            exit 1
+          fi
+          if [[ -z "$CORAFLOW_PAT" ]]; then
+            echo "::error::Missing CORAFLOW_READ_TOKEN repository secret"
+            exit 1
+          fi
+          echo "Required secret names are configured."
+
+      - name: Checkout private CoraFlow at audited commit
+        uses: actions/checkout@v4
+        with:
+          repository: yusuijiang01-orz/CoraFlow
+          ref: 2b405582cfb21c69c651eec0e016b11e31dd4a87
+          token: ${{ secrets.CORAFLOW_READ_TOKEN }}
+          path: coraflow
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install encryption dependency
+        run: python -m pip install 'cryptography==45.0.6'
+
+      - name: Validate graph and referenced captures
+        run: node coraflow/scripts/verify-rylux-json.cjs scripts/RYLUX_完整自动化_启动恢复与OCR修复_v3.79.json
+
+      - name: Test existing content key and encrypted ZIP round-trip
+        env:
+          RYLUX_KEY_B64: ${{ secrets.RYLUX_SG_LOCALIZATION_KEY_B64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import base64, importlib.util, json, os, pathlib
+          import tempfile, time, zipfile
+
+          root = pathlib.Path.cwd()
+          tool_path = root / "tools/package-coraflow-workflow.py"
+          spec = importlib.util.spec_from_file_location("rylux_workflow_package", tool_path)
+          pkg = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(pkg)
+
+          key = base64.b64decode(os.environ["RYLUX_KEY_B64"], validate=True)
+          if len(key) != 32:
+              raise SystemExit("Content key is not an AES-256 key")
+          current_manifest = json.loads((root / "workflow/manifest.json").read_text(encoding="utf-8"))
+          if pkg.key_id(key) != current_manifest["key_id"]:
+              raise SystemExit("Configured content key_id differs from the currently published workflow key_id")
+
+          source = root / "coraflow/scripts/RYLUX_完整自动化_启动恢复与OCR修复_v3.79.json"
+          graph = json.loads(source.read_text(encoding="utf-8"))
+          if not graph["name"].endswith("v3.79") or len(graph["nodes"]) != 441 or len(graph["edges"]) != 632:
+              raise SystemExit("Unexpected CoraFlow workflow source")
+          assets = pkg.image_references(graph)
+          if len(assets) != 36:
+              raise SystemExit(f"Expected 36 unique captures, found {len(assets)}")
+
+          with tempfile.TemporaryDirectory(prefix="rylux-workflow-smoke-") as tmp:
+              temp = pathlib.Path(tmp)
+              zip_path = temp / "workflow.zip"
+              with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=7) as zf:
+                  zf.write(source, "workflow.json")
+                  zf.writestr("workflow_bindings.json", json.dumps({
+                      "schema": 1, "workflow_id": graph["id"],
+                      "workflow_version": graph["version"], "variables": [], "fixed": {}
+                  }, ensure_ascii=False))
+                  for asset in assets:
+                      zf.write(pkg.resolve_asset(root / "coraflow", asset), asset)
+              with zipfile.ZipFile(zip_path) as zf:
+                  if zf.testzip() is not None or len(zf.namelist()) != len(assets) + 2:
+                      raise SystemExit("ZIP integrity check failed")
+                  if json.loads(zf.read("workflow.json")) != graph:
+                      raise SystemExit("Packaged workflow does not match source")
+
+              encrypted = temp / "workflow.rpe"
+              manifest_path = temp / "manifest.json"
+              pkg.encrypt_zip(zip_path, encrypted, manifest_path, key, "coraflow-3.79-smoke", int(time.time()))
+              manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+              payload = json.loads(base64.b64decode(manifest["payload_b64"]))
+              if payload["sha256"] != pkg.sha256_file(encrypted):
+                  raise SystemExit("Encrypted bundle hash mismatch")
+              if payload["key_id"] != current_manifest["key_id"]:
+                  raise SystemExit("Encrypted bundle key ID mismatch")
+              print("PASS: credentials, private checkout, 441/632 graph, 36 assets, ZIP CRC, AES-256-GCM/HMAC round-trip")
+              print("DRY RUN ONLY: existing workflow.rpe and workflow/manifest.json were not modified")
+          PY
