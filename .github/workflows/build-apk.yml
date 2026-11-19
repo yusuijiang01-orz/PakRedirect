@@ -1,5 +1,6 @@
 name: Build RYLUX APK (release optional)
 # RYLUX Vision Engine 2.6.1 signed validation build; never auto-publish.
+# 2.6.1 device hotfix: bounded inventory overlay retry and corrected Bán ROI.
 
 on:
   workflow_dispatch:
