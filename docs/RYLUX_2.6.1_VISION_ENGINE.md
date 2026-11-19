@@ -77,3 +77,8 @@
 - 已核对 PakRedirect/main 的 workflow/manifest.json：payload 声明 coraflow-3.82-medicine-sale。CoraFlow 分支 codex/complete-script-project-20261119 的 SCRIPT_PROJECT_GUIDE.md 当前仍写 v3.79；其 v3.79 JSON 的顶层名称也是 v3.79、ID 为 v3.40，且部分节点名保留 v3.46 前缀。**这代表源分支与生产清单之间存在需要核实的版本差异**，不能仅凭 manifest 标签断言密文内实际图也是 v3.82。
 - 如果解密后实际 graph name 为 v3.79，而签名 manifest 声明 v3.82，新版本会在启动前明确报“签名清单/解密内容版本不一致”并阻止打开游戏。这是预期的保护，不应绕过；应先从真正的 v3.82 源工作流重新导出、加密并发布。
 - WorkflowVersionValidatorTest 覆盖匹配版本、清单/内容不匹配、忽略 v3.46 节点标签和低版本阻断。
+
+## 2.6.1 HF2（versionCode 183）
+
+- HF1（versionCode 182）之后新增启动前工作流解密与版本闸门；Android 安装包版本号递增至 183，确保已安装 HF1 的设备可以覆盖升级。
+- GitHub Actions 的默认 version_code 和 app/build.gradle 默认值均设为 183；继续使用原签名配置，默认 publish_release=false。
