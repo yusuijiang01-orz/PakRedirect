@@ -1075,7 +1075,7 @@ public final class ScriptToolsActivity extends Activity {
                 showMembershipBlocked(result);
                 return;
             }
-            if (!CoraFlowWorkflowUpdateManager.isPreparedForLaunch(new JSONObject(confirmedConfig))) {
+            if (!isWorkflowPreflightReady(confirmedConfig)) {
                 CoraFlowWorkflowUpdateManager.discardPrepared();
                 showRyluxDialog("脚本预检已失效",
                         "配置内容已变化或预检缓存已过期。游戏尚未启动，请重新点击“配置方案并启动”完成脚本解密和版本核验。",
@@ -1088,9 +1088,17 @@ public final class ScriptToolsActivity extends Activity {
         }));
     }
 
+    private boolean isWorkflowPreflightReady(String configJson) {
+        try {
+            return CoraFlowWorkflowUpdateManager.isPreparedForLaunch(new JSONObject(configJson));
+        } catch (JSONException invalidConfig) {
+            return false;
+        }
+    }
+
     private void prepareLocalizationThenStartRuntime(String confirmedConfig) {
         try {
-            if (!CoraFlowWorkflowUpdateManager.isPreparedForLaunch(new JSONObject(confirmedConfig))) {
+            if (!isWorkflowPreflightReady(confirmedConfig)) {
                 throw new IllegalStateException("启动前工作流版本核验已过期；请重新点击“配置方案并启动”。");
             }
             String confirmedMode = targetModeFromConfig(confirmedConfig);
