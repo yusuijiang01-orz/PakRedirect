@@ -42,3 +42,8 @@
 -keepclassmembers class com.example.pakredirect.CoraFlowOcr$Bridge {
     @android.webkit.JavascriptInterface <methods>;
 }
+
+
+# OpenCV 4.14 Java wrapper resolves prebuilt JNI symbols by their original
+# org.opencv class / native method names. R8 must not rename these bridges.
+-keep class org.opencv.** { *; }
