@@ -66,6 +66,12 @@ public final class InventoryVision {
         if(template==null||template.isRecycled())return -1d;
         List<VisionMatcher.Candidate> candidates=matcher.candidates(frame,template,cell,
                 template.getWidth(),template.getHeight(),false);
-        return candidates.isEmpty()?-1d:candidates.get(0).signal;
+        double best=-1d;
+        int limit=Math.min(3,candidates.size());
+        for(int i=0;i<limit;i++){
+            double verified=matcher.verify(frame,template,candidates.get(i),false,-1);
+            if(verified>best)best=verified;
+        }
+        return best;
     }
 }
