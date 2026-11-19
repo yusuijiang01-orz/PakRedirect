@@ -126,5 +126,14 @@ public final class VisionMatcher implements AutoCloseable {
         return mask;
     }
 
+    public Candidate bestCandidate(Bitmap frame,Bitmap template,Rect search,
+                                    int baseWidth,int baseHeight,boolean coloredOnly,
+                                    int maskColor){
+        List<Candidate> found=candidates(frame,template,search,baseWidth,baseHeight,coloredOnly,maskColor);
+        return found.isEmpty()?null:found.get(0);
+    }
+
+    public void invalidateFrame(){frameCache.invalidate();}
+
     @Override public void close() { frameCache.close(); }
 }
