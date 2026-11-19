@@ -41,7 +41,7 @@ jobs:
       - name: Verify CoraFlow token repository access (do not print token)
         shell: bash
         env:
-          CORAFLOW_PAT: \${{ secrets.CORAFLOW_READ_TOKEN }}
+          CORAFLOW_PAT: ${{ secrets.CORAFLOW_READ_TOKEN }}
         run: |
           set -euo pipefail
           body="$(mktemp)"
