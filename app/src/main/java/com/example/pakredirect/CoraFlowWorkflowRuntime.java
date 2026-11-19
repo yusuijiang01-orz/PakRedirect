@@ -25,6 +25,11 @@ import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import com.example.pakredirect.vision.VisionBridge;
+import com.example.pakredirect.vision.VisionMatcher;
+import com.example.pakredirect.vision.VisionViewport;
+import com.example.pakredirect.vision.VisionViewportDetector;
+
 /** Executes a decrypted CoraFlow graph through RYLUX's native Android input and OCR APIs. */
 public final class CoraFlowWorkflowRuntime {
     private static final int MAX_STEPS = 100_000;
@@ -134,6 +139,9 @@ public final class CoraFlowWorkflowRuntime {
     private final CoraFlowOcr ocr;
     private final BooleanSupplier gameLauncher;
     private final Map<String, Bitmap> scaledTemplates = new HashMap<>();
+    private final VisionMatcher visionMatcher = new VisionMatcher();
+    private boolean openCvDisabled;
+    private int openCvMatches, legacyMatches;
     // One captured-frame pixel array and decoded-template arrays are reused across slot matches.
     // Previously each match allocated a new full-screen int[] (~8 MiB at 1080p).
     private Bitmap pixelFrame;
@@ -201,6 +209,8 @@ public final class CoraFlowWorkflowRuntime {
         try {
             JSONObject graph = new JSONObject(workflowPackage.workflow.toString());
             applyPanelBindings(graph, workflowPackage.bindings, workflowPackage.panelValues);
+            note("RYLUX 2.6.1 Vision Engine: " + VisionBridge.status()
+                    + "；OpenCV 负责候选定位，原有像素阈值执行最后校验；Tesseract 保留为数字/文本后备。");
             note("OCR engine: CoraFlow Tesseract.js/core 7.0.0; offline models, Lanczos3 and numeric variants");
             JSONArray nodes = graph.optJSONArray("nodes");
             JSONArray edges = graph.optJSONArray("edges");
@@ -234,6 +244,7 @@ public final class CoraFlowWorkflowRuntime {
                     screenWidth = initial.getWidth();
                     screenHeight = initial.getHeight();
                     note("游戏画面已就绪：" + initial.getWidth() + "×" + initial.getHeight() + "。");
+                    reportViewport(initial);
                 } finally { initial.recycle(); }
             }
             note("工作流坐标基准：" + coordinateWidth + "×" + coordinateHeight);
@@ -290,6 +301,9 @@ public final class CoraFlowWorkflowRuntime {
             checkpoint();
             note("CoraFlow JSON 工作流执行完成。");
         } finally {
+            note("视觉识别统计：OpenCV 精确校验成功 " + openCvMatches
+                    + " 次，Legacy 回退命中 " + legacyMatches + " 次。");
+            visionMatcher.close();
             pixelFrame = null;
             pixelFrameData = null;
             templatePixelData.clear();
@@ -1031,6 +1045,14 @@ public final class CoraFlowWorkflowRuntime {
         int targetHeight = Math.max(1, Math.round(original.getHeight() * frame.getHeight() / (float) coordinateHeight));
         if (targetWidth > frame.getWidth() || targetHeight > frame.getHeight()
                 || bounds.width() < targetWidth || bounds.height() < targetHeight) return null;
+
+        // OpenCV is a fast multi-scale candidate generator, not a transaction
+        // decision engine. Candidate pixels MUST pass the original strict
+        // average-RGB error threshold before any workflow node can act on it.
+        Match visionHit = findOpenCvVerified(frame, original, bounds, targetWidth,
+                targetHeight, threshold, coloredInventoryPixelsOnly);
+        if (visionHit != null) { openCvMatches++; return visionHit; }
+
         String cacheKey = System.identityHashCode(original) + ":" + targetWidth + "x" + targetHeight;
         Bitmap template = scaledTemplates.get(cacheKey);
         if (template == null || template.isRecycled()) {
@@ -1093,8 +1115,70 @@ public final class CoraFlowWorkflowRuntime {
                     x, y, 1, coloredInventoryPixelsOnly);
             if (score >= verifiedScore) { verifiedScore = score; verifiedX = x; verifiedY = y; }
         }
+        if (verifiedX >= 0) legacyMatches++;
         return verifiedX < 0 ? null : new Match(verifiedX + targetWidth / 2f,
                 verifiedY + targetHeight / 2f, (float) verifiedScore);
+    }
+
+    private Match findOpenCvVerified(Bitmap frame, Bitmap original, Rect bounds, int baseWidth,
+                                     int baseHeight, float threshold, boolean coloredOnly) {
+        if (openCvDisabled || !VisionBridge.ready()) return null;
+        try {
+            java.util.List<VisionMatcher.Candidate> choices = visionMatcher.candidates(
+                    frame, original, bounds, baseWidth, baseHeight, coloredOnly);
+            if (choices.isEmpty()) return null;
+            int[] screen = framePixels(frame);
+            double bestScore = threshold;
+            Match best = null;
+            for (VisionMatcher.Candidate candidate : choices) {
+                checkpoint();
+                String key = System.identityHashCode(original) + ":"
+                        + candidate.width + "x" + candidate.height;
+                Bitmap scaled = scaledTemplates.get(key);
+                if (scaled == null || scaled.isRecycled()) {
+                    scaled = original.getWidth() == candidate.width && original.getHeight() == candidate.height
+                            ? original : Bitmap.createScaledBitmap(original, candidate.width, candidate.height, true);
+                    scaledTemplates.put(key, scaled);
+                }
+                int[] target = templatePixels(scaled);
+                // Native matchTemplate finds a rough candidate. Verify its
+                // immediate neighborhood with the exact pre-2.6.1 pixel rule.
+                for (int dy = -3; dy <= 3; dy++) {
+                    int y = candidate.top + dy;
+                    if (y < bounds.top || y + candidate.height > bounds.bottom) continue;
+                    for (int dx = -3; dx <= 3; dx++) {
+                        int x = candidate.left + dx;
+                        if (x < bounds.left || x + candidate.width > bounds.right) continue;
+                        double score = scoreAt(screen, frame.getWidth(), target, candidate.width,
+                                candidate.height, x, y, 1, coloredOnly);
+                        if (score >= bestScore) {
+                            bestScore = score;
+                            best = new Match(x + candidate.width / 2f,
+                                    y + candidate.height / 2f, (float) score);
+                        }
+                    }
+                }
+            }
+            return best;
+        } catch (RuntimeException | LinkageError failure) {
+            openCvDisabled = true;
+            note("OpenCV 识别器出现异常，已关闭该次工作流的 OpenCV 路径并使用旧版安全匹配："
+                    + failure.getClass().getSimpleName());
+            return null;
+        }
+    }
+
+    private void reportViewport(Bitmap frame) {
+        try {
+            VisionViewport viewport = VisionViewportDetector.detect(frame);
+            note(viewport.calibrated
+                    ? "Vision 视口检测到对称黑边：(" + viewport.left + "," + viewport.top
+                        + ")-(" + viewport.right + "," + viewport.bottom
+                        + ")；需 UI 锚点二次确认，当前暂保留原始坐标以保护交易。"
+                    : "Vision 视口检测：使用完整画面坐标；未检测到可信的对称黑边。");
+        } catch (RuntimeException ignored) {
+            note("Vision 视口检测不确定，保留原有 1920×1080 坐标映射。");
+        }
     }
 
     private static double scoreAt(int[] screen, int screenWidth, int[] target, int targetWidth,
