@@ -18,12 +18,17 @@ public class VisionGameStateMachineTest {
         m.recoveryFailed();
         assertEquals(VisionGameStateMachine.State.UNKNOWN,m.state());
     }
-    @Test public void saleNeedsExplicitSaleConfirmState() {
+    @Test public void mutationRequiresCleanInventoryAndSaleNeedsExplicitConfirmState() {
         VisionGameStateMachine m=new VisionGameStateMachine();
+        assertFalse(m.allowsInventoryMutation());
         assertFalse(m.allowsSaleConfirmation());
         m.observe(VisionGameStateMachine.State.INVENTORY,0.99,true);
+        assertTrue(m.allowsInventoryMutation());
         assertFalse(m.allowsSaleConfirmation());
+        m.observe(VisionGameStateMachine.State.ITEM_DETAIL,0.99,true);
+        assertFalse(m.allowsInventoryMutation());
         m.observe(VisionGameStateMachine.State.SALE_CONFIRM,0.99,true);
+        assertFalse(m.allowsInventoryMutation());
         assertTrue(m.allowsSaleConfirmation());
     }
 }
