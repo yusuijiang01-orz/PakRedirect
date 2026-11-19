@@ -94,13 +94,15 @@ public final class ProtectedContentManager {
             remote = fetchManifest(token);
             PatchUpdateInfo.rememberRevision(context, latestRevision(remote));
         } catch (NetworkException network) {
+            android.util.Log.w("RYLUX-Content", "内容清单暂不可用，正在检查已验证的本地资源", network);
             ManifestBundle installed = loadInstalledManifest(context);
             if (installed != null && installedFilesPresent(context, installed)) {
                 PatchUpdateInfo.rememberRevision(context, latestRevision(installed));
                 notifyProgress(listener, "内容服务暂不可用，继续使用已验证资源", 100, false);
                 return UpdateResult.softFailure(installed.version, "继续使用已验证资源");
             }
-            throw new IllegalStateException("无法连接汉化内容服务，请检查网络后重试");
+            throw new IllegalStateException(
+                    "汉化内容服务暂不可用，且本机没有完整的已验证加密资源；请检查内容服务器与 Gitee 镜像后重试", network);
         }
 
         File dir = moduleDir(context);
@@ -466,10 +468,13 @@ public final class ProtectedContentManager {
                     message = error.optString("detail", message);
                 } catch (Throwable ignored) {
                 }
-                if (code == 401 || code == 403 || code == 404 || code == 503) {
+                if (ContentManifestFailurePolicy.isPermanentAuthorizationFailure(code)) {
                     throw new IllegalStateException(message);
                 }
-                throw new NetworkException(message);
+                // HTTP 503 (e.g. upstream Gitee unavailable) is transient, not a
+                // license denial. Only allow the existing VERIFIED encrypted-cache
+                // recovery path; never accept unsigned or incomplete local files.
+                throw new NetworkException("内容服务 HTTP " + code + "：" + message);
             }
             return parseServerManifest(text);
         } catch (IllegalStateException e) {
