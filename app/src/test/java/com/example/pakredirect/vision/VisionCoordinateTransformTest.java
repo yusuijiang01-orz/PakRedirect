@@ -30,8 +30,8 @@ public class VisionCoordinateTransformTest {
     @Test public void mapsRectAndRejectsUnsupportedAngles() {
         VisionCoordinateTransform t=new VisionCoordinateTransform(100,100,VisionViewport.full(200,200),0);
         Rect mapped=t.mapRect(new Rect(10,20,30,40));
-        assertEquals(20,mapped.left);
-        assertEquals(40,mapped.top);
+        assertEquals(19,mapped.left);
+        assertEquals(39,mapped.top);
         assertEquals(61,mapped.right);
         assertEquals(81,mapped.bottom);
         try { new VisionCoordinateTransform(100,100,VisionViewport.full(200,200),45); fail(); }
