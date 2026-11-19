@@ -886,10 +886,13 @@ final class LegacyLuaRuntime {
     private LuaTable recognizeTextRegion(Varargs args, String errorLabel) {
         Bitmap screen = frame();
         LegacyCoordinateMapper mapper = mapperFor(screen);
-        int left = Math.max(0, mapper.left(args.arg(1).todouble()));
-        int top = Math.max(0, mapper.top(args.arg(2).todouble()));
-        int right = mapper.edgeRight(args.arg(3).todouble());
-        int bottom = mapper.edgeBottom(args.arg(4).todouble());
+        Rect mappedRegion = transformFor(screen).mapRect(new Rect(
+                (int)args.arg(1).todouble(),(int)args.arg(2).todouble(),
+                (int)args.arg(3).todouble(),(int)args.arg(4).todouble()));
+        int left = Math.max(0,mappedRegion.left);
+        int top = Math.max(0,mappedRegion.top);
+        int right = Math.min(screen.getWidth(),mappedRegion.right);
+        int bottom = Math.min(screen.getHeight(),mappedRegion.bottom);
         LuaTable table = new LuaTable();
         if (right <= left || bottom <= top) return table;
         android.util.Log.d("RYLUX-ScriptOcr", "Lua OCR region ref="
@@ -907,8 +910,9 @@ final class LegacyLuaRuntime {
                 LuaTable item = new LuaTable();
                 item.set("words", LuaValue.valueOf(words));
                 item.set("text", LuaValue.valueOf(words));
-                item.set("x", LuaValue.valueOf(mapper.toReferenceX(line.optInt("x") + left)));
-                item.set("y", LuaValue.valueOf(mapper.toReferenceY(line.optInt("y") + top)));
+                double[] reference=transformFor(screen).inverse(line.optInt("x")+left,line.optInt("y")+top);
+                item.set("x", LuaValue.valueOf(reference[0]));
+                item.set("y", LuaValue.valueOf(reference[1]));
                 item.set("score", LuaValue.valueOf(line.optDouble("score", 0d)));
                 item.set("success", LuaValue.TRUE);
                 table.set(i + 1, item);
@@ -1360,10 +1364,13 @@ final class LegacyLuaRuntime {
                 int scaledHeight = Math.max(1, mapper.toScreenDeltaY(sourceTemplate.getHeight()));
                 template = Bitmap.createScaledBitmap(sourceTemplate, scaledWidth, scaledHeight, true);
             }
-            int left = Math.max(0, mapper.left(args.arg(1).todouble()));
-            int top = Math.max(0, mapper.top(args.arg(2).todouble()));
-            int right = mapper.edgeRight(args.arg(3).todouble());
-            int bottom = mapper.edgeBottom(args.arg(4).todouble());
+            Rect mappedRegion = transformFor(screen).mapRect(new Rect(
+                    (int)args.arg(1).todouble(),(int)args.arg(2).todouble(),
+                    (int)args.arg(3).todouble(),(int)args.arg(4).todouble()));
+            int left = Math.max(0,mappedRegion.left);
+            int top = Math.max(0,mappedRegion.top);
+            int right = Math.min(screen.getWidth(),mappedRegion.right);
+            int bottom = Math.min(screen.getHeight(),mappedRegion.bottom);
             int mask = args.narg() >= 6 ? parseColor(args.arg(6).tojstring()) : -1;
             double threshold = args.narg() >= 8 ? args.arg(8).optdouble(0.95) : 0.95;
             Bitmap matchedTemplate = template;
@@ -1397,10 +1404,13 @@ final class LegacyLuaRuntime {
 
     private Varargs findAdaptiveImage(Varargs args, boolean fast, Bitmap screen,
                                       LegacyCoordinateMapper mapper, Bitmap sourceTemplate) {
-        int left = Math.max(0, mapper.left(args.arg(1).todouble()));
-        int top = Math.max(0, mapper.top(args.arg(2).todouble()));
-        int right = mapper.edgeRight(args.arg(3).todouble());
-        int bottom = mapper.edgeBottom(args.arg(4).todouble());
+        Rect mappedRegion = transformFor(screen).mapRect(new Rect(
+                (int)args.arg(1).todouble(),(int)args.arg(2).todouble(),
+                (int)args.arg(3).todouble(),(int)args.arg(4).todouble()));
+        int left = Math.max(0,mappedRegion.left);
+        int top = Math.max(0,mappedRegion.top);
+        int right = Math.min(screen.getWidth(),mappedRegion.right);
+        int bottom = Math.min(screen.getHeight(),mappedRegion.bottom);
         int mask = args.narg() >= 6 ? parseColor(args.arg(6).tojstring()) : -1;
         double threshold = args.narg() >= 8 ? args.arg(8).optdouble(0.95) : 0.95;
         LegacyImageMatcher.Pixels screenPixels = bitmapPixels(screen);
