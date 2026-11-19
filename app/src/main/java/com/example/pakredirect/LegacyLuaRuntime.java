@@ -5,6 +5,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Matrix;
+import android.graphics.Rect;
 import android.os.SystemClock;
 import android.os.Build;
 import android.util.Log;
@@ -36,6 +38,17 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
+import com.example.pakredirect.vision.DigitVision;
+import com.example.pakredirect.vision.InventoryVision;
+import com.example.pakredirect.vision.VisionBridge;
+import com.example.pakredirect.vision.VisionCoordinateTransform;
+import com.example.pakredirect.vision.VisionFrameCache;
+import com.example.pakredirect.vision.VisionGameStateMachine;
+import com.example.pakredirect.vision.VisionMatcher;
+import com.example.pakredirect.vision.VisionTemporalConsensus;
+import com.example.pakredirect.vision.VisionViewport;
+import com.example.pakredirect.vision.VisionViewportDetector;
+
 /** Minimal, fail-closed bridge for the recovered LuaJ-compatible scripts. */
 final class LegacyLuaRuntime {
     interface Listener { void onStatus(String text); }
@@ -61,6 +74,13 @@ final class LegacyLuaRuntime {
     private volatile Bitmap latestFrame;
     private volatile LegacyCoordinateMapper coordinateMapper;
     private ScriptOcr ocr;
+    private final VisionMatcher visionMatcher = new VisionMatcher();
+    private final InventoryVision inventoryVision = new InventoryVision(visionMatcher);
+    private final VisionGameStateMachine visionStateMachine = new VisionGameStateMachine(3);
+    private volatile VisionViewport currentViewport;
+    private volatile VisionCoordinateTransform visionTransform;
+    private volatile long openCvFindHits;
+    private volatile long legacyFindFallbacks;
     private LuaInstructionGate instructionGate;
     private volatile float touchStartX, touchStartY, touchEndX, touchEndY;
     private volatile long touchDurationMs = LegacyLuaCompat.defaultTouchDurationMs();
@@ -94,6 +114,7 @@ final class LegacyLuaRuntime {
         instructionGate = new LuaInstructionGate(globals, control);
         restrictDangerousLibraries();
         installHostApi();
+        installVisionApi();
         try {
             control.attachCurrentThread();
             listener.onStatus("检查 Lua 更新");
@@ -123,6 +144,7 @@ final class LegacyLuaRuntime {
                 }
             }
             releaseFrame();
+            visionMatcher.close();
             if (ocr != null) ocr.close();
             control.detachCurrentThread();
         }
@@ -1094,10 +1116,18 @@ final class LegacyLuaRuntime {
                 @Override public int height() { return matchedTemplate.getHeight(); }
                 @Override public int getPixel(int x, int y) { return matchedTemplate.getPixel(x, y); }
             };
-            LegacyImageMatcher.Match match = LegacyImageMatcher.find(screenPixels, templatePixels,
-                    left, top, right, bottom, mask, threshold, control::checkpoint);
+            LegacyImageMatcher.Match match = findOpenCvVerified(screen, matchedTemplate,
+                    left, top, right, bottom, mask, threshold);
+            if (match != null) {
+                openCvFindHits++;
+            } else {
+                legacyFindFallbacks++;
+                match = LegacyImageMatcher.find(screenPixels, templatePixels,
+                        left, top, right, bottom, mask, threshold, control::checkpoint);
+            }
+            double[] reference = match == null ? null : transformFor(screen).inverse(match.x, match.y);
             return match == null ? imageNotFound(fast)
-                    : imageMatch(fast, mapper.toReferenceX(match.x), mapper.toReferenceY(match.y));
+                    : imageMatch(fast, (int)Math.round(reference[0]), (int)Math.round(reference[1]));
         } finally {
             if (template != sourceTemplate && !template.isRecycled()) template.recycle();
             if (!sourceTemplate.isRecycled()) sourceTemplate.recycle();
@@ -1120,12 +1150,18 @@ final class LegacyLuaRuntime {
             if (right - left < width || bottom - top < height) continue;
             Bitmap scaled = Bitmap.createScaledBitmap(sourceTemplate, width, height, true);
             try {
-                LegacyImageMatcher.Match match = LegacyImageMatcher.find(screenPixels,
-                        bitmapPixels(scaled), left, top, right, bottom, mask, threshold,
-                        control::checkpoint);
+                LegacyImageMatcher.Match match = findOpenCvVerified(screen, scaled,
+                        left, top, right, bottom, mask, threshold);
+                if (match == null) {
+                    legacyFindFallbacks++;
+                    match = LegacyImageMatcher.find(screenPixels,
+                            bitmapPixels(scaled), left, top, right, bottom, mask, threshold,
+                            control::checkpoint);
+                } else openCvFindHits++;
                 if (match != null) {
-                    int centerX = mapper.toReferenceX(match.x + width / 2d);
-                    int centerY = mapper.toReferenceY(match.y + height / 2d);
+                    double[] center = transformFor(screen).inverse(match.x + width / 2d, match.y + height / 2d);
+                    int centerX = (int)Math.round(center[0]);
+                    int centerY = (int)Math.round(center[1]);
                     return LuaValue.varargsOf(new LuaValue[]{LuaValue.valueOf(1),
                             LuaValue.valueOf(centerX), LuaValue.valueOf(centerY)});
                 }
@@ -1224,6 +1260,11 @@ final class LegacyLuaRuntime {
             Bitmap old = latestFrame;
             latestFrame = capture;
             coordinateMapper = mapperFor(capture.getWidth(), capture.getHeight());
+            currentViewport = VisionViewportDetector.detect(capture);
+            LegacyCoordinateMapper mapper = coordinateMapper;
+            visionTransform = new VisionCoordinateTransform(mapper.referenceWidth(), mapper.referenceHeight(),
+                    currentViewport, config.optInt("screen_rotation_degrees",
+                    config.optInt("屏幕旋转角度", 0)));
             if (old != null && !old.isRecycled()) old.recycle();
         } catch (InterruptedException interrupted) {
             control.checkpoint();
@@ -1306,6 +1347,9 @@ final class LegacyLuaRuntime {
         Bitmap old = latestFrame;
         latestFrame = null;
         coordinateMapper = null;
+        currentViewport = null;
+        visionTransform = null;
+        visionMatcher.invalidateFrame();
         if (old != null && !old.isRecycled()) old.recycle();
     }
 
