@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -128,6 +129,11 @@ public final class CoraFlowWorkflowRuntime {
     private final CoraFlowOcr ocr;
     private final BooleanSupplier gameLauncher;
     private final Map<String, Bitmap> scaledTemplates = new HashMap<>();
+    // One captured-frame pixel array and decoded-template arrays are reused across slot matches.
+    // Previously each match allocated a new full-screen int[] (~8 MiB at 1080p).
+    private Bitmap pixelFrame;
+    private int[] pixelFrameData;
+    private final Map<Bitmap, int[]> templatePixelData = new IdentityHashMap<>();
     private final Map<String, int[]> previousRegions = new HashMap<>();
     private final Map<String, Integer> visits = new HashMap<>();
     private final Map<String, Integer> recoveryAttempts = new HashMap<>();
@@ -279,6 +285,9 @@ public final class CoraFlowWorkflowRuntime {
             checkpoint();
             note("CoraFlow JSON 工作流执行完成。");
         } finally {
+            pixelFrame = null;
+            pixelFrameData = null;
+            templatePixelData.clear();
             for (Bitmap bitmap : scaledTemplates.values()) if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
             scaledTemplates.clear();
             ocr.close();
@@ -1024,7 +1033,7 @@ public final class CoraFlowWorkflowRuntime {
                     ? original : Bitmap.createScaledBitmap(original, targetWidth, targetHeight, true);
             scaledTemplates.put(cacheKey, template);
         }
-        int[] screen = pixels(frame), target = pixels(template);
+        int[] screen = framePixels(frame), target = templatePixels(template);
         int sampleStep = Math.max(1, Math.min(targetWidth, targetHeight) / 20);
         int positionStep = Math.max(1, Math.min(targetWidth, targetHeight) / 28);
         int sampleCount = 0;
@@ -1117,7 +1126,7 @@ public final class CoraFlowWorkflowRuntime {
         int target = Color.parseColor(colorText.startsWith("#") ? colorText : "#" + colorText);
         Rect bounds = pixelRegion(region, frame.getWidth(), frame.getHeight());
         int step = Math.max(1, Math.min(bounds.width(), bounds.height()) / 80);
-        int[] pixels = pixels(frame);
+        int[] pixels = framePixels(frame);
         int bestX = -1, bestY = -1, best = Integer.MAX_VALUE;
         for (int y = bounds.top; y < bounds.bottom; y += step) for (int x = bounds.left; x < bounds.right; x += step) {
             int pixel = pixels[y * frame.getWidth() + x];
@@ -1130,7 +1139,7 @@ public final class CoraFlowWorkflowRuntime {
 
     private int[] regionSample(Bitmap frame, Rect region) {
         Rect bounds = pixelRegion(region, frame.getWidth(), frame.getHeight());
-        int[] source = pixels(frame);
+        int[] source = framePixels(frame);
         int[] result = new int[32 * 18];
         int index = 0;
         for (int row = 0; row < 18; row++) for (int column = 0; column < 32; column++) {
@@ -1755,7 +1764,7 @@ public final class CoraFlowWorkflowRuntime {
                     ? original : Bitmap.createScaledBitmap(original, targetWidth, targetHeight, true);
             scaledTemplates.put(cacheKey, template);
         }
-        int[] screen = pixels(frame), target = pixels(template);
+        int[] screen = framePixels(frame), target = templatePixels(template);
         int sampleStep = 2;
         int shiftX = Math.max(1, Math.round(8 * frame.getWidth() / (float) coordinateWidth));
         int shiftY = Math.max(1, Math.round(8 * frame.getHeight() / (float) coordinateHeight));
@@ -1797,7 +1806,7 @@ public final class CoraFlowWorkflowRuntime {
                     ? original : Bitmap.createScaledBitmap(original, targetWidth, targetHeight, true);
             scaledTemplates.put(cacheKey, template);
         }
-        int[] screen = pixels(frame), target = pixels(template);
+        int[] screen = framePixels(frame), target = templatePixels(template);
         int sampleStep = 2;
         int baseX = Math.round(centerX * frame.getWidth() / (float) coordinateWidth) - targetWidth / 2;
         int baseY = Math.round(centerY * frame.getHeight() / (float) coordinateHeight) - targetHeight / 2;
@@ -1867,7 +1876,7 @@ public final class CoraFlowWorkflowRuntime {
     private int countColorPixels(Bitmap frame, String colorText, Rect baseRegion, int tolerance) {
         int target = Color.parseColor(colorText);
         Rect bounds = pixelRegion(baseRegion, frame.getWidth(), frame.getHeight());
-        int[] data = pixels(frame);
+        int[] data = framePixels(frame);
         int count = 0;
         for (int y = bounds.top; y < bounds.bottom; y++) for (int x = bounds.left; x < bounds.right; x++) {
             int pixel = data[y * frame.getWidth() + x];
@@ -1880,7 +1889,7 @@ public final class CoraFlowWorkflowRuntime {
 
     private java.util.List<YellowTextCandidate> yellowTextCandidates(Bitmap frame, Rect baseRegion) {
         Rect bounds = pixelRegion(baseRegion, frame.getWidth(), frame.getHeight());
-        int[] data = pixels(frame);
+        int[] data = framePixels(frame);
         java.util.List<YellowTextCandidate> result = new java.util.ArrayList<>();
         int groupTop = -1, groupBottom = -1, groupPixels = 0, groupLeft = frame.getWidth(), groupRight = -1;
         for (int y = bounds.top; y < bounds.bottom; y++) {
@@ -1991,7 +2000,23 @@ public final class CoraFlowWorkflowRuntime {
         return new Rect(Math.min(left, right), Math.min(top, bottom), Math.max(left, right), Math.max(top, bottom));
     }
 
-    private static int[] pixels(Bitmap bitmap) {
+    private int[] framePixels(Bitmap bitmap) {
+        if (bitmap == pixelFrame && pixelFrameData != null && !bitmap.isRecycled()) return pixelFrameData;
+        int[] result = readPixels(bitmap);
+        pixelFrame = bitmap;
+        pixelFrameData = result;
+        return result;
+    }
+
+    private int[] templatePixels(Bitmap bitmap) {
+        int[] result = templatePixelData.get(bitmap);
+        if (result != null && !bitmap.isRecycled()) return result;
+        result = readPixels(bitmap);
+        templatePixelData.put(bitmap, result);
+        return result;
+    }
+
+    private static int[] readPixels(Bitmap bitmap) {
         int[] result = new int[bitmap.getWidth() * bitmap.getHeight()];
         bitmap.getPixels(result, 0, bitmap.getWidth(), 0, 0, bitmap.getWidth(), bitmap.getHeight());
         return result;
