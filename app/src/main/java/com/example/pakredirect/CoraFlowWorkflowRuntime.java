@@ -51,19 +51,37 @@ public final class CoraFlowWorkflowRuntime {
         final Map<String, Bitmap> images;
         final JSONObject panelValues;
         final String releaseVersion;
+        final String embeddedVersion;
+        final String workflowName;
+        final long revision;
 
         WorkflowPackage(JSONObject workflow, JSONObject bindings, Map<String, Bitmap> images,
                         JSONObject panelValues) {
-            this(workflow, bindings, images, panelValues, "");
+            this(workflow, bindings, images, panelValues, "", "", "", 0L);
         }
 
         WorkflowPackage(JSONObject workflow, JSONObject bindings, Map<String, Bitmap> images,
                         JSONObject panelValues, String releaseVersion) {
+            this(workflow, bindings, images, panelValues, releaseVersion, "", "", 0L);
+        }
+
+        WorkflowPackage(JSONObject workflow, JSONObject bindings, Map<String, Bitmap> images,
+                        JSONObject panelValues, String releaseVersion, String embeddedVersion,
+                        String workflowName, long revision) {
             this.workflow = workflow;
             this.bindings = bindings;
             this.images = images;
             this.panelValues = panelValues;
             this.releaseVersion = releaseVersion == null ? "" : releaseVersion.trim();
+            this.embeddedVersion = embeddedVersion == null ? "" : embeddedVersion.trim();
+            this.workflowName = workflowName == null ? "" : workflowName.trim();
+            this.revision = Math.max(0L, revision);
+        }
+
+        String versionSummary() {
+            return "v" + (embeddedVersion.isEmpty() ? "未知" : embeddedVersion)
+                    + "（签名清单：" + (releaseVersion.isEmpty() ? "未知" : releaseVersion)
+                    + "；修订 " + revision + "）";
         }
 
         @Override public void close() {
@@ -238,9 +256,8 @@ public final class CoraFlowWorkflowRuntime {
                 coordinateWidth = positiveInt(sizeConfig.optInt("width", 1920), 1920);
                 coordinateHeight = positiveInt(sizeConfig.optInt("height", 1080), 1080);
             }
-            String version = workflowPackage.releaseVersion.isEmpty()
-                    ? "未标注" : workflowPackage.releaseVersion;
-            note("已加载脚本版本：" + version + "；工作流“" + graph.optString("name", "CoraFlow 工作流")
+            note("已通过启动前版本核验：" + workflowPackage.versionSummary()
+                    + "；工作流“" + graph.optString("name", "CoraFlow 工作流")
                     + "”，" + nodes.length() + " 个节点 / " + edges.length() + " 条连线。");
             if (startsWithStartupGate(workflowPackage)) {
                 note("工作流先检查并启动目标游戏；确认游戏前台后才截图，避免启动前因无画面而失败。");
@@ -265,7 +282,7 @@ public final class CoraFlowWorkflowRuntime {
                 JSONObject config = data == null ? new JSONObject() : data.optJSONObject("config");
                 if (config == null) config = new JSONObject();
                 String name = data == null ? type : data.optString("name", type);
-                note("运行：" + name);
+                note("运行：" + cleanNodeLabel(name));
                 int visitsForNode = visits.merge(currentId, 1, Integer::sum);
                 int maxCount = config.optInt("count", -1);
                 if (maxCount >= 0 && visitsForNode > maxCount) {
@@ -2208,6 +2225,13 @@ public final class CoraFlowWorkflowRuntime {
             }
         }
         return null;
+    }
+
+    private static String cleanNodeLabel(String name) {
+        if (name == null) return "";
+        // Old node captions often carry historical "v3.46" prefixes. They
+        // are not workflow versions; the verified release version is logged once.
+        return name.replaceFirst("(?i)^v\\d+(?:\\.\\d+){1,2}\\s*", "");
     }
 
     private static boolean isDual(String type) {
