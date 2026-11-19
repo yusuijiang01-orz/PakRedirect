@@ -1047,16 +1047,26 @@ public final class ScriptToolsActivity extends Activity {
     }
 
     private void showStartConfirmation(String confirmedConfig, String versionSummary) {
+        final JSONObject snapshot;
+        try {
+            snapshot = new JSONObject(confirmedConfig);
+        } catch (JSONException invalid) {
+            CoraFlowWorkflowUpdateManager.discardPrepared();
+            showRyluxDialog("配置快照无效", "无法确认本次启动配置。游戏尚未启动，请返回重新检查配置。",
+                    null, "知道了", null);
+            return;
+        }
+        String targetCaption = targetModeCaption(confirmedConfig);
         String summary = "方案：" + profileName + "\n目标：封神榜手游\n运行来源："
-                + targetModeCaption() + "\n运行模式：无障碍截图与触控"
+                + targetCaption + "\n运行模式：无障碍截图与触控"
                 + "\n已解密并核验脚本版本：" + versionSummary
-                + "\n路线：" + mapName(values.optInt("挂机点地图", 0))
-                + "（" + values.optString("挂机点x", "100") + ", " + values.optString("挂机点y", "200") + "）"
-                + "\n自动登录与崩溃恢复：" + onOff("自动登录")
-                + "\n自动战斗：" + onOff("自动战斗")
-                + "\n装备出售：" + onOff("出售装备") + "；装备保护："
-                + (values.optBoolean("保护装备不出售", true) ? "开启" : "关闭")
-                + "\n启动目标：" + targetModeCaption()
+                + "\n路线：" + mapName(snapshot.optInt("挂机点地图", 0))
+                + "（" + snapshot.optString("挂机点x", "100") + ", " + snapshot.optString("挂机点y", "200") + "）"
+                + "\n自动登录与崩溃恢复：" + onOff("自动登录", snapshot)
+                + "\n自动战斗：" + onOff("自动战斗", snapshot)
+                + "\n装备出售：" + onOff("出售装备", snapshot) + "；装备保护："
+                + (snapshot.optBoolean("保护装备不出售", true) ? "开启" : "关闭")
+                + "\n启动目标：" + targetCaption
                 + "\n\n点击开始后才会打开所选游戏并运行已核验的脚本。";
         showRyluxDialog("确认本次运行", summary, "返回检查", "开始",
                 () -> startRuntime(confirmedConfig));
@@ -1082,7 +1092,7 @@ public final class ScriptToolsActivity extends Activity {
                         null, "知道了", null);
                 return;
             }
-            Toast.makeText(this, "正在准备并启动" + targetModeCaption() + "…", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "正在准备并启动" + targetModeCaption(confirmedConfig) + "…", Toast.LENGTH_SHORT).show();
             new Thread(() -> prepareLocalizationThenStartRuntime(confirmedConfig),
                     "RYLUX-Script-Launch").start();
         }));
@@ -1183,6 +1193,11 @@ public final class ScriptToolsActivity extends Activity {
         return TARGET_MODE_DESKTOP.equals(targetMode()) ? "桌面安装版封神榜手游" : "RYLUX 沙箱中的封神榜";
     }
 
+    private String targetModeCaption(String config) {
+        return TARGET_MODE_DESKTOP.equals(targetModeFromConfig(config))
+                ? "桌面安装版封神榜手游" : "RYLUX 沙箱中的封神榜";
+    }
+
     private String targetSummaryText() {
         return "封神榜脚本 · 当前目标：" + targetModeCaption() + " · 打开页面不会自动启动游戏或脚本";
     }
@@ -1276,6 +1291,12 @@ public final class ScriptToolsActivity extends Activity {
         String defaultValue = LegacyLuaConfig.defaults().get(key);
         boolean fallback = defaultValue != null && Boolean.parseBoolean(defaultValue);
         return values.optBoolean(key, fallback) ? "开启" : "关闭";
+    }
+
+    private String onOff(String key, JSONObject snapshot) {
+        String defaultValue = LegacyLuaConfig.defaults().get(key);
+        boolean fallback = defaultValue != null && Boolean.parseBoolean(defaultValue);
+        return snapshot.optBoolean(key, fallback) ? "开启" : "关闭";
     }
 
     private String configurationIssues() {
