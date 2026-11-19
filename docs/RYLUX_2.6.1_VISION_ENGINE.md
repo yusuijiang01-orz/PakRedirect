@@ -6,7 +6,7 @@
 
 - 基线分支：`codex/rylux-2546-vision-stability`，原 HEAD `cdb745dbc6516449cec04becbff1dafc349bb607`
 - 新分支：`codex/rylux-261-vision-engine`
-- Android：`versionName=2.6.1`，`versionCode=181`
+- Android：`versionName=2.6.1`，`versionCode=182`（2.6.1 首轮实机故障修正构建）
 - 真实使用的脚本执行器：`app/src/main/java/com/example/pakredirect/CoraFlowWorkflowRuntime.java`
 - Lua 兼容执行器：`LegacyLuaRuntime.java` 仍保留，尚未切换其旧接口的底层实现。
 - OpenCV：`org.opencv:opencv:4.14.0`（官方 Android AAR；内部封装 C++ 原生库）；当前项目仍使用原有 NDK `Android.mk` 构建别的模块，不添加第二份不受管理的 OpenCV .so。
@@ -23,6 +23,9 @@
 
 ### UI / Object Vision
 - `vision/VisionBridge.java` 使用 `OpenCVLoader.initLocal()` 初始化官方原生引擎；失败时禁用 OpenCV 并保留旧版匹配器。
+- `countInventoryIcon()` 在确认背包标题后关闭详情并重新截图，最多恢复 2 次，不再关闭后立即抛出异常。
+- `executeEquipmentSale()` 的 `Bán` 按钮搜索 ROI 已扩展到 `Rect(1180,420,1620,620)`，覆盖实机截图中的按钮位置。
+- 每格装备处理的 `finally` 都尝试安全清理物品详情，避免识别异常时把弹窗留在屏幕上。
 - `vision/VisionMatcher.java` 使用 `Imgproc.matchTemplate()` 在传入的有效 ROI 中做原生模板搜索，支持 100%、94%、106% 三种候选缩放，并保留透明区域及药瓶颜色 mask。
 - **已连接生产执行路径**：`CoraFlowWorkflowRuntime.findTemplate()` 首先使用 OpenCV 找候选位置；只在候选对应的像素满足旧版节点原有 RGB 严格阈值时才接受。失败再回退旧版匹配器。任何 OpenCV 内部异常只会禁用本次工作流的 OpenCV 分支，不会盲点屏幕。
 - 日志包含 OpenCV 初始化状态、识别成功次数、旧引擎回退次数。
@@ -55,3 +58,12 @@
 ## 新窗口续作指令
 
 > 请先阅读 PakRedirect 的 docs/RYLUX_2.6.1_VISION_ENGINE.md。2.6.1 的独立测试分支是 codex/rylux-261-vision-engine。只修脚本视觉和状态恢复，保留账号授权、汉化、PAK、GitHub 签名。检查 GitHub Actions 构建及签名结果，并根据真实模拟器日志优先修复 OpenCV ROI 多尺度匹配、背包 35 格 UNKNOWN 与物品详情状态恢复、数字 OCR 一致性。当前 OpenCV 已通过 VisionMatcher 接入 CoraFlowWorkflowRuntime.findTemplate，但尚未完成专用数字识别和全面实机稳定性验收；不得宣称替代 OCR 达 100%、不得直接发布 main。
+
+
+## 2.6.1 首轮实机故障修正（versionCode 182）
+
+- 实机截图显示背包“火羽”详情弹窗仍打开，底部错误消息被 UI 截断，不能单凭截图确定根异常。
+- 源码审计发现出售按钮 ROI 左边界 1450 高于截图按钮实际约 x=1305 的参考坐标，导致模板区域裁掉按钮左侧；已扩大 ROI。
+- 药瓶计数遇到详情时，旧代码点击关闭后仍无条件抛出异常；已改为关闭、重新截图并有界重试。
+- 单格识别/出售流程异常退出时新增详情清理，保留原异常日志。
+- 以上修复尚待模拟器验证；不得将源码推断当作已确认的实机根因。
