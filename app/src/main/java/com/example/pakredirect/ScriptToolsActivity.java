@@ -1075,7 +1075,7 @@ public final class ScriptToolsActivity extends Activity {
                 showMembershipBlocked(result);
                 return;
             }
-            if (!CoraFlowWorkflowUpdateManager.isPreparedForLaunch(safeConfig(confirmedConfig))) {
+            if (!CoraFlowWorkflowUpdateManager.isPreparedForLaunch(new JSONObject(confirmedConfig))) {
                 CoraFlowWorkflowUpdateManager.discardPrepared();
                 showRyluxDialog("脚本预检已失效",
                         "配置内容已变化或预检缓存已过期。游戏尚未启动，请重新点击“配置方案并启动”完成脚本解密和版本核验。",
