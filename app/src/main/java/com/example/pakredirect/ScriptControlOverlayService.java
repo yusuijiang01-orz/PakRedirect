@@ -497,8 +497,12 @@ public final class ScriptControlOverlayService extends Service {
                     if (game == null) throw new IllegalStateException("未找到桌面版封神榜");
                     game.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                     startActivity(game);
-                } else if (!BlackBoxCore.get().launchApk(ScriptGameAdapter.TARGET_GAME_PACKAGE, 0)) {
-                    throw new IllegalStateException("无法前置沙箱中的封神榜");
+                } else {
+                    // Old saved configs and the floating controller must never bypass the Admin gate.
+                    SandboxAdminAccess.requireNow(this);
+                    if (!BlackBoxCore.get().launchApk(ScriptGameAdapter.TARGET_GAME_PACKAGE, 0)) {
+                        throw new IllegalStateException("无法前置沙箱中的封神榜");
+                    }
                 }
                 mainHandler.post(() -> {
                     if (restartRequested) {
