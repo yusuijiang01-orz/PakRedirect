@@ -251,7 +251,9 @@ public final class ScriptRuntimeService extends Service {
         String targetMode = config.optString("目标运行环境", ScriptToolsActivity.TARGET_MODE_DESKTOP);
         if (!ScriptToolsActivity.TARGET_MODE_SANDBOX.equals(targetMode)
                 && !ScriptToolsActivity.TARGET_MODE_DESKTOP.equals(targetMode)) {
-            throw new SecurityException("脚本目标运行环境无效，已拒绝启动");
+            SecurityException denied = new SecurityException("脚本目标运行环境无效，已拒绝启动");
+            if (runControl.fail(denied)) reportFailure(denied);
+            return;
         }
         ScriptGameProcessMonitor processMonitor = new ScriptGameProcessMonitor();
         boolean gameWasObserved = false;
@@ -720,8 +722,8 @@ public final class ScriptRuntimeService extends Service {
     private boolean launchConfiguredGame(String targetMode) {
         if (ScriptToolsActivity.TARGET_MODE_SANDBOX.equals(targetMode)) {
             // Auto recovery is a new privileged launch, not a continuation of a previous grant.
-            SandboxAdminAccess.requireNow(this);
             try {
+                SandboxAdminAccess.requireNow(this);
                 return top.niunaijun.blackbox.BlackBoxCore.get()
                         .launchApk(ScriptGameAdapter.TARGET_GAME_PACKAGE, 0);
             } catch (RuntimeException unavailable) {
