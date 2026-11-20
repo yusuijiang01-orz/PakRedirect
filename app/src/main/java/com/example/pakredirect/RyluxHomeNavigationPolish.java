@@ -131,12 +131,16 @@ public final class RyluxHomeNavigationPolish {
         // fillViewport expands this spacer on tall phones; on short screens it
         // collapses to zero and the page scrolls rather than hiding controls.
         root.addView(new Space(activity), new LinearLayout.LayoutParams(1, 0, 1f));
-        View sandbox = sandboxButton(activity);
-        int sandboxWidth = widthDp >= 600
-                ? dp(activity, 470) : dp(activity, Math.max(1, Math.round(widthDp * 0.84f)));
-        LinearLayout.LayoutParams sandboxLp = new LinearLayout.LayoutParams(sandboxWidth, -2);
-        sandboxLp.topMargin = dp(activity, 28);
-        root.addView(sandbox, sandboxLp);
+        // Experimental BlackBox is not a VIP perk. Only the server-returned Admin
+        // role may expose its home entry; activity checks role again online.
+        if (SandboxAdminAccess.isAdminRole(MainActivity.currentRole)) {
+            View sandbox = sandboxButton(activity);
+            int sandboxWidth = widthDp >= 600
+                    ? dp(activity, 470) : dp(activity, Math.max(1, Math.round(widthDp * 0.84f)));
+            LinearLayout.LayoutParams sandboxLp = new LinearLayout.LayoutParams(sandboxWidth, -2);
+            sandboxLp.topMargin = dp(activity, 28);
+            root.addView(sandbox, sandboxLp);
+        }
     }
 
     private static int gameCardHeightDp(int cardWidthDp) {
