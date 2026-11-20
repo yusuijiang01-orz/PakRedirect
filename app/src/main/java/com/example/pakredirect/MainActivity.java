@@ -228,6 +228,7 @@ public class MainActivity extends Activity {
         currentMembershipKind = "expired";
         currentExpiresAt = null;
         currentProfile = null;
+        currentRole = "user"; // Never preserve a previously logged-in Admin badge on logout.
         confirmPasswordEdit = null;
         inviteCodeEdit = null;
         captchaEdit = null;
