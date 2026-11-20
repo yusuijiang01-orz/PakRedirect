@@ -42,10 +42,22 @@ public final class BagMemoryProbeService extends Service {
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         if (started) return START_NOT_STICKY;
         started = true;
-        startForeground(NOTIFICATION_ID, notification("正在启动只读读取器"));
+        startForeground(NOTIFICATION_ID, notification("正在验证 Admin 沙箱权限"));
+        SandboxAdminAccess.checkAsync(this, access -> handler.post(() -> {
+            if (finished) return;
+            if (!access.allowed) {
+                finishWith("内存探测未启动：" + access.message, true);
+                return;
+            }
+            startAuthorizedProbe();
+        }));
+        return START_NOT_STICKY;
+    }
+
+    private void startAuthorizedProbe() {
         if (new File(getFilesDir(), "sandbox-bag-relay.endpoint").isFile()) {
             finishWith("内存探测未启动：已有工作流正在使用读取桥。请先停止工作流。", false);
-            return START_NOT_STICKY;
+            return;
         }
         try {
             relay = new SandboxBagSnapshotRelay(this);
@@ -58,7 +70,6 @@ public final class BagMemoryProbeService extends Service {
             finishWith("内存探测失败：中继启动失败：" + failure.getClass().getSimpleName()
                     + "：" + String.valueOf(failure.getMessage()), true);
         }
-        return START_NOT_STICKY;
     }
 
     private void poll() {
