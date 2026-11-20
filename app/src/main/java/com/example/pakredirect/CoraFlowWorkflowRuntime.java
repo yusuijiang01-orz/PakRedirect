@@ -1045,6 +1045,16 @@ public final class CoraFlowWorkflowRuntime {
             count += value;
             note("药瓶图标定位：第 " + (row + 1) + " 行第 " + (column + 1) + " 列，数量 " + value + "。");
         }
+        if (hits == 0) {
+            // No template hit is not automatically proof of zero stock: reject wrong
+            // screens/failed localization before authorizing any restocking path.
+            String titlePath = "captures/templates/RYLUX_挂机_背包标题.png";
+            if (!workflowPackage.images.containsKey(titlePath)
+                    || findTemplate(frame, titlePath, new Rect(1080, 20, 1420, 140), 0.88f) == null) {
+                throw new IllegalStateException("背包药瓶图标候选为空且背包标题未确认；"
+                        + "保持 UNKNOWN，不将识别缺失当作零库存。");
+            }
+        }
         note("背包图标扫描 35 格，定位到 " + hits + " 个“" + path.substring(path.lastIndexOf('/') + 1) + "”堆栈，单帧候选 " + count + " 个；仍需独立帧核验。");
         return stacks;
     }
