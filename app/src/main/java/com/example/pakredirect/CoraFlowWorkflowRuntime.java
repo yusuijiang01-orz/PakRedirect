@@ -191,6 +191,11 @@ public final class CoraFlowWorkflowRuntime {
     private final Map<String, Integer> recoveryAttempts = new HashMap<>();
     private final Map<String, Integer> ocrRecoveryAttempts = new HashMap<>();
     private final Set<String> exhaustedOcrRecoveries = new HashSet<>();
+    // Once a potion quantity cannot be confirmed, do not OCR it repeatedly in this run.
+    // Every future visit skips the whole potion-dependent branch as UNKNOWN.
+    private final Set<String> skippedUncertainPotionNodes = new HashSet<>();
+    private long potionSkipWindowStartMs;
+    private int rapidPotionSkips;
     private final Map<String, ArrayDeque<NumberSample>> numberHistory = new HashMap<>();
     private final ArrayDeque<LoopFrame> loops = new ArrayDeque<>();
     private JSONArray currentNodes;
@@ -298,6 +303,16 @@ public final class CoraFlowWorkflowRuntime {
                 if (config == null) config = new JSONObject();
                 String name = data == null ? type : data.optString("name", type);
                 note("运行：" + cleanNodeLabel(name));
+                if (isPotionInventoryNode(type, config) && skippedUncertainPotionNodes.contains(currentId)) {
+                    overrideNext = null;
+                    if (!skipPotionCycle()) {
+                        stoppedForUncertainPotionQuantity = true;
+                        note("药瓶数量此前已标记 UNKNOWN；没有安全的下一轮工作流，停止当前脚本，未执行交易。");
+                        return;
+                    }
+                    currentId = overrideNext;
+                    continue;
+                }
                 int visitsForNode = visits.merge(currentId, 1, Integer::sum);
                 int maxCount = config.optInt("count", -1);
                 if (maxCount >= 0 && visitsForNode > maxCount) {
@@ -311,13 +326,21 @@ public final class CoraFlowWorkflowRuntime {
                 try {
                     condition = execute(type, currentId, name, config, edges, nodeMap);
                 } catch (Exception failure) {
-                    if (!recoverUncertainOcr(type, currentId, name, config, failure, nodeMap.keySet())) {
-                        if (isPotionInventoryNode(type, config) && isOcrUncertainty(failure)) {
+                    if (isPotionInventoryNode(type, config) && isOcrUncertainty(failure)) {
+                        skippedUncertainPotionNodes.add(currentId);
+                        note("药瓶数量 UNKNOWN（" + rootMessage(failure)
+                                + "）；不再重试该药瓶统计，不进入 true/false 购买或出售分支，"
+                                + "跳过本轮补药交易并继续安全循环。");
+                        overrideNext = null;
+                        if (!skipPotionCycle()) {
                             stoppedForUncertainPotionQuantity = true;
-                            note("背包药瓶数量仍为 UNKNOWN；已安全结束本次工作流，未将未知值当 0，未执行后续补药或交易。"
-                                    + "请检查截图/识别区域后重新启动。原因：" + rootMessage(failure));
+                            note("当前工作流无可确认的安全循环，已停止；不会猜测药瓶数量或继续交易。");
                             return;
                         }
+                        currentId = overrideNext;
+                        continue;
+                    }
+                    if (!recoverUncertainOcr(type, currentId, name, config, failure, nodeMap.keySet())) {
                         throw failure;
                     }
                     currentId = overrideNext;
@@ -603,6 +626,36 @@ public final class CoraFlowWorkflowRuntime {
 
     private String overrideNext;
 
+    /**
+     * Bypass the complete remainder of the active main loop, not an unsafe
+     * boolean branch. No trade, click, sell, or purchase node executes on this
+     * unknown inventory observation. Future visits do not OCR the disabled node.
+     * Without a known loop, fail closed rather than guessing a graph target.
+     */
+    private boolean skipPotionCycle() {
+        LoopFrame outer = loops.peekFirst();
+        if (outer == null) return false;
+        long now = SystemClock.elapsedRealtime();
+        if (potionSkipWindowStartMs == 0L || now - potionSkipWindowStartMs > 30_000L) {
+            potionSkipWindowStartMs = now;
+            rapidPotionSkips = 0;
+        }
+        if (++rapidPotionSkips > 12) {
+            note("30 秒内连续跳过药瓶统计超过 12 次，疑似卡在同一背包流程；"
+                    + "停止空转，避免无意义的高速循环。");
+            return false;
+        }
+        CoraFlowPotionSkipPolicy.Decision next = CoraFlowPotionSkipPolicy.nextCycle(
+                outer.bodyStart, outer.iteration, outer.count);
+        if (!next.canContinue) return false;
+        while (loops.size() > 1) loops.removeLast();
+        outer.iteration = next.nextIteration;
+        overrideNext = next.nextBody;
+        // This is a whole-cycle skip, not a retry of the failed OCR node.
+        control.sleep(250L);
+        return true;
+    }
+
     private boolean recoverUncertainOcr(String type, String id, String name, JSONObject config,
                                         Exception failure, Set<String> nodeIds) throws Exception {
         if (!isOcrNode(type) || !isOcrUncertainty(failure)) return false;
@@ -676,10 +729,9 @@ public final class CoraFlowWorkflowRuntime {
             return recognizeExpectedQuantity(name, config);
         }
         boolean potionCount = isPotionInventoryNode(type, config);
-        // Potion counts need at least two independently captured, matching 35-slot snapshots.
-        // Unlike ordinary OCR nodes, they get native retries even without a graph retry setting.
-        int retries = potionCount
-                ? Math.max(3, Math.min(5, config.optInt("ocr_retry_count", 4)))
+        // Potion counts need at most two independent observations: if either is
+        // UNKNOWN, skip this potion task immediately (never enter OCR recovery).
+        int retries = potionCount ? 1
                 : Math.max(0, Math.min(3, config.optInt("ocr_retry_count", 0)));
         float minimum = (float) Math.max(0, Math.min(100, config.optDouble("min_confidence", 30)));
         Map<Integer, Integer> previousPotionScan = null;
@@ -699,14 +751,10 @@ public final class CoraFlowWorkflowRuntime {
                         observed = countInventoryIcon(frame, config);
                     } catch (Exception uncertainInventory) {
                         if (isOcrUncertainty(uncertainInventory)) {
-                            previousPotionScan = null; // Never confirm across an intervening UNKNOWN frame.
-                            if (attempt < retries) {
-                                note("背包数量为 UNKNOWN（" + rootMessage(uncertainInventory)
-                                        + "）；重新截图 " + (attempt + 1) + "/" + retries
-                                        + "，禁止据此购买或出售。");
-                                continue;
-                            }
-                            throw new IllegalStateException("背包药瓶数量多帧一致性未通过；"
+                            // Do not waste additional screenshots on an already UNKNOWN read.
+                            // The outer workflow will skip the complete supply cycle.
+                            previousPotionScan = null;
+                            throw new IllegalStateException("背包药瓶数量不确定；本轮跳过补药交易："
                                     + rootMessage(uncertainInventory), uncertainInventory);
                         }
                         throw uncertainInventory;
@@ -1022,7 +1070,9 @@ public final class CoraFlowWorkflowRuntime {
             OcrRead bestRead = null;
             Integer value = null;
             Set<Integer> confidentValues = new HashSet<>();
-            for (int scale : new int[]{4, 3, 2}) {
+            // A single numeric pass per frame is enough to decide confirmation or UNKNOWN.
+            // A second independent screenshot is used only when this pass succeeds.
+            for (int scale : new int[]{4}) {
                 OcrRead candidate = readOcr(frame, countRegion, false, scale);
                 Integer candidateValue = parseNumber(candidate.text);
                 if (candidateValue != null && candidateValue > 0 && candidateValue <= 999999) {
@@ -1033,17 +1083,8 @@ public final class CoraFlowWorkflowRuntime {
                     if (candidate.confidence >= minConfidence) confidentValues.add(candidateValue);
                 }
             }
-            // The enhanced crop can recover thin or antialiased digits without lowering the
-            // decision confidence threshold. A contradictory strong read stays UNKNOWN.
-            if (confidentValues.isEmpty()) {
-                InventoryMetric enhanced = readNumericMetricOnce(frame, countRegion);
-                if (enhanced != null && enhanced.value > 0
-                        && enhanced.value <= 999999 && enhanced.confidence >= minConfidence) {
-                    confidentValues.add(enhanced.value);
-                    bestRead = new OcrRead(enhanced.text, enhanced.confidence);
-                    value = enhanced.value;
-                }
-            }
+            // No enhanced/multi-scale OCR fallback on UNKNOWN; skip this supply
+            // cycle rather than repeatedly reprocessing tiny inventory numbers.
             if (confidentValues.size() != 1 || bestRead == null || value == null
                     || bestRead.confidence < minConfidence) {
                 String text = bestRead == null ? "" : bestRead.text;
