@@ -87,6 +87,7 @@ public final class ScriptToolsActivity extends Activity {
     private JSONObject values;
     private String profileName;
     private String entryTargetMode;
+    private boolean adminRoleConfirmed;
     private LinearLayout root;
     private TextView environment;
     private TextView accessibilityState;
@@ -330,10 +331,15 @@ public final class ScriptToolsActivity extends Activity {
                 showMembershipBlocked(result);
                 return;
             }
+            adminRoleConfirmed = SandboxAdminAccess.isAdminProfile(result.profile);
+            if (!adminRoleConfirmed) entryTargetMode = TARGET_MODE_DESKTOP;
             if (!workbenchReady) {
                 preferences = getSharedPreferences("script_workbench_profiles_v1", MODE_PRIVATE);
                 profileName = preferences.getString("selected", "默认方案");
                 loadProfile();
+                if (!adminRoleConfirmed && TARGET_MODE_SANDBOX.equals(values.optString(TARGET_MODE_KEY, ""))) {
+                    put(TARGET_MODE_KEY, TARGET_MODE_DESKTOP);
+                }
                 buildUi();
                 workbenchReady = true;
                 entitlementHandler.postDelayed(entitlementWatchdog, 5_000L);
@@ -612,7 +618,11 @@ public final class ScriptToolsActivity extends Activity {
         desktopTarget.setId(View.generateViewId());
         sandboxTarget.setId(View.generateViewId());
         targets.addView(desktopTarget);
-        targets.addView(sandboxTarget);
+        if (adminRoleConfirmed) {
+            targets.addView(sandboxTarget);
+        } else {
+            sandboxTarget.setEnabled(false);
+        }
         String selectedMode = targetMode();
         targets.check(TARGET_MODE_DESKTOP.equals(selectedMode)
                 ? desktopTarget.getId() : sandboxTarget.getId());
@@ -882,9 +892,10 @@ public final class ScriptToolsActivity extends Activity {
     }
 
     private String targetMode() {
-        String fallback = entryTargetMode == null ? TARGET_MODE_SANDBOX : entryTargetMode;
-        return TARGET_MODE_DESKTOP.equals(values.optString(TARGET_MODE_KEY, fallback))
-                ? TARGET_MODE_DESKTOP : TARGET_MODE_SANDBOX;
+        if (!adminRoleConfirmed) return TARGET_MODE_DESKTOP;
+        String fallback = entryTargetMode == null ? TARGET_MODE_DESKTOP : entryTargetMode;
+        return TARGET_MODE_SANDBOX.equals(values.optString(TARGET_MODE_KEY, fallback))
+                ? TARGET_MODE_SANDBOX : TARGET_MODE_DESKTOP;
     }
 
     private String runtimeConfigSnapshot() {
@@ -1003,6 +1014,11 @@ public final class ScriptToolsActivity extends Activity {
     }
 
     private void confirmAndStart() {
+        if (TARGET_MODE_SANDBOX.equals(targetMode()) && !adminRoleConfirmed) {
+            showRyluxDialog("Admin 专用沙箱", "BlackBox 沙箱仅限 Admin。请选择桌面客户端。",
+                    null, "知道了", null);
+            return;
+        }
         if (!MembershipAccess.hasCachedAccess(this)) {
             closeWorkbenchForExpiredMembership();
             return;
@@ -1085,6 +1101,15 @@ public final class ScriptToolsActivity extends Activity {
                 showMembershipBlocked(result);
                 return;
             }
+            adminRoleConfirmed = SandboxAdminAccess.isAdminProfile(result.profile);
+            if (TARGET_MODE_SANDBOX.equals(targetModeFromConfig(confirmedConfig))
+                    && !adminRoleConfirmed) {
+                CoraFlowWorkflowUpdateManager.discardPrepared();
+                showRyluxDialog("Admin 专用沙箱",
+                        "当前账号没有 Admin 权限，已拒绝启动沙箱脚本。桌面客户端不受影响。",
+                        null, "知道了", null);
+                return;
+            }
             if (!isWorkflowPreflightReady(confirmedConfig)) {
                 CoraFlowWorkflowUpdateManager.discardPrepared();
                 showRyluxDialog("脚本预检已失效",
@@ -1112,7 +1137,8 @@ public final class ScriptToolsActivity extends Activity {
                 throw new IllegalStateException("启动前工作流版本核验已过期；请重新点击“配置方案并启动”。");
             }
             String confirmedMode = targetModeFromConfig(confirmedConfig);
-            boolean sandbox = !TARGET_MODE_DESKTOP.equals(confirmedMode);
+            boolean sandbox = TARGET_MODE_SANDBOX.equals(confirmedMode);
+            if (sandbox) SandboxAdminAccess.requireNow(this);
             boolean localizationEnabled = LocalizationSettings.isEnabled(this);
             if (sandbox || localizationEnabled) {
                 LocalizationLaunchPreparation.prepare(this, message -> runOnUiThread(
@@ -1177,7 +1203,10 @@ public final class ScriptToolsActivity extends Activity {
 
     private boolean launchSelectedGame(String confirmedConfig) {
         String mode = targetModeFromConfig(confirmedConfig);
-        if (!TARGET_MODE_DESKTOP.equals(mode)) return BlackBoxCore.get().launchApk(GAME, 0);
+        if (TARGET_MODE_SANDBOX.equals(mode)) {
+            if (!adminRoleConfirmed) return false;
+            return BlackBoxCore.get().launchApk(GAME, 0);
+        }
         Intent launch = getPackageManager().getLaunchIntentForPackage(GAME);
         if (launch == null) return false;
         launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -1204,10 +1233,10 @@ public final class ScriptToolsActivity extends Activity {
 
     static String targetModeFromConfig(String config) {
         try {
-            String mode = new JSONObject(config).optString(TARGET_MODE_KEY, TARGET_MODE_SANDBOX);
-            return TARGET_MODE_DESKTOP.equals(mode) ? TARGET_MODE_DESKTOP : TARGET_MODE_SANDBOX;
+            String mode = new JSONObject(config).optString(TARGET_MODE_KEY, TARGET_MODE_DESKTOP);
+            return TARGET_MODE_SANDBOX.equals(mode) ? TARGET_MODE_SANDBOX : TARGET_MODE_DESKTOP;
         } catch (JSONException invalid) {
-            return TARGET_MODE_SANDBOX;
+            return TARGET_MODE_DESKTOP;
         }
     }
 
