@@ -36,7 +36,7 @@ public final class ScriptGameAdapter extends AccessibilityService {
     private static final long RECONNECT_WAIT_MS = 10_000L;
     static final String TARGET_GAME_PACKAGE = "com.tepaylink.tamgioiphantranhmobile";
     private static volatile ScriptGameAdapter instance;
-    private static volatile String targetMode = ScriptToolsActivity.TARGET_MODE_SANDBOX;
+    private static volatile String targetMode = ScriptToolsActivity.TARGET_MODE_DESKTOP;
     private volatile ForegroundEvent foregroundEvent = ForegroundEvent.EMPTY;
     private volatile String targetGameLabel = "";
     private volatile boolean useDisplayScreenshotFallback;
@@ -75,8 +75,8 @@ public final class ScriptGameAdapter extends AccessibilityService {
     public static boolean isConnected() { return instance != null; }
 
     static void setTargetMode(String mode) {
-        targetMode = ScriptToolsActivity.TARGET_MODE_DESKTOP.equals(mode)
-                ? ScriptToolsActivity.TARGET_MODE_DESKTOP : ScriptToolsActivity.TARGET_MODE_SANDBOX;
+        targetMode = ScriptToolsActivity.TARGET_MODE_SANDBOX.equals(mode)
+                ? ScriptToolsActivity.TARGET_MODE_SANDBOX : ScriptToolsActivity.TARGET_MODE_DESKTOP;
         ScriptGameAdapter current = instance;
         if (current != null) {
             current.targetGameLabel = current.loadTargetGameLabel();
