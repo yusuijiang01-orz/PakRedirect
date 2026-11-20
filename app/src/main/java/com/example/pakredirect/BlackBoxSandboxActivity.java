@@ -129,8 +129,10 @@ public final class BlackBoxSandboxActivity extends Activity {
 
     /** Recheck the live server role before every privileged user action. */
     private void withAdmin(Runnable action) {
-        if (!adminAuthorized || isFinishing()) {
-            Toast.makeText(this, "正在验证 Admin 权限，当前操作已禁止", Toast.LENGTH_SHORT).show();
+        // Android may deliver the APK picker result while onResume is rechecking Admin.
+        // Always verify the current role online rather than dropping that selected file.
+        if (!adminUiBuilt || isFinishing()) {
+            Toast.makeText(this, "Admin 沙箱尚未就绪", Toast.LENGTH_SHORT).show();
             return;
         }
         worker.execute(() -> {
