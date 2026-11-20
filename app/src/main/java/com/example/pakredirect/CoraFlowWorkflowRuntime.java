@@ -194,8 +194,7 @@ public final class CoraFlowWorkflowRuntime {
     // Once a potion quantity cannot be confirmed, do not OCR it repeatedly in this run.
     // Every future visit skips the whole potion-dependent branch as UNKNOWN.
     private final Set<String> skippedUncertainPotionNodes = new HashSet<>();
-    private long potionSkipWindowStartMs;
-    private int rapidPotionSkips;
+    private final Map<String, String> uncertainPotionSkipTargets = new HashMap<>();
     private final Map<String, ArrayDeque<NumberSample>> numberHistory = new HashMap<>();
     private final ArrayDeque<LoopFrame> loops = new ArrayDeque<>();
     private JSONArray currentNodes;
@@ -304,13 +303,15 @@ public final class CoraFlowWorkflowRuntime {
                 String name = data == null ? type : data.optString("name", type);
                 note("运行：" + cleanNodeLabel(name));
                 if (isPotionInventoryNode(type, config) && skippedUncertainPotionNodes.contains(currentId)) {
+                    String skipTarget = uncertainPotionSkipTargets.get(currentId);
                     overrideNext = null;
-                    if (!skipPotionCycle()) {
+                    if (skipTarget == null || !nodeMap.containsKey(skipTarget)) {
                         stoppedForUncertainPotionQuantity = true;
-                        note("药瓶数量此前已标记 UNKNOWN；没有安全的下一轮工作流，停止当前脚本，未执行交易。");
+                        note("药瓶数量此前已标记 UNKNOWN，但共同续行节点不存在；安全停止，未执行交易。");
                         return;
                     }
-                    currentId = overrideNext;
+                    note("药瓶数量节点已标记 UNKNOWN；本次不再 OCR，直接跳过两条药瓶判断分支，继续后续工作流。");
+                    currentId = skipTarget;
                     continue;
                 }
                 int visitsForNode = visits.merge(currentId, 1, Integer::sum);
@@ -327,17 +328,25 @@ public final class CoraFlowWorkflowRuntime {
                     condition = execute(type, currentId, name, config, edges, nodeMap);
                 } catch (Exception failure) {
                     if (isPotionInventoryNode(type, config) && isOcrUncertainty(failure)) {
-                        skippedUncertainPotionNodes.add(currentId);
-                        note("药瓶数量 UNKNOWN（" + rootMessage(failure)
-                                + "）；不再重试该药瓶统计，不进入 true/false 购买或出售分支，"
-                                + "跳过本轮补药交易并继续安全循环。");
-                        overrideNext = null;
-                        if (!skipPotionCycle()) {
+                        String skipTarget = CoraFlowBranchSkipPolicy.findJoin(edges, currentId, nodeMap.keySet());
+                        if (skipTarget == null || !nodeMap.containsKey(skipTarget)) {
                             stoppedForUncertainPotionQuantity = true;
-                            note("当前工作流无可确认的安全循环，已停止；不会猜测药瓶数量或继续交易。");
+                            note("药瓶数量 UNKNOWN（" + rootMessage(failure)
+                                    + "）；true/false 两条分支没有可确认的共同续行节点，"
+                                    + "为避免误买误卖而安全停止。");
                             return;
                         }
-                        currentId = overrideNext;
+                        skippedUncertainPotionNodes.add(currentId);
+                        uncertainPotionSkipTargets.put(currentId, skipTarget);
+                        JSONObject continuation = nodeMap.get(skipTarget);
+                        JSONObject continuationData = continuation == null ? null : continuation.optJSONObject("data");
+                        String continuationName = continuationData == null ? skipTarget
+                                : cleanNodeLabel(continuationData.optString("name", skipTarget));
+                        note("药瓶数量 UNKNOWN（" + rootMessage(failure)
+                                + "）；已跳过 true/false 两条药瓶判断分支，不再重试 OCR，"
+                                + "从共同续行节点“" + continuationName + "”继续。");
+                        overrideNext = null;
+                        currentId = skipTarget;
                         continue;
                     }
                     if (!recoverUncertainOcr(type, currentId, name, config, failure, nodeMap.keySet())) {
@@ -625,36 +634,6 @@ public final class CoraFlowWorkflowRuntime {
     }
 
     private String overrideNext;
-
-    /**
-     * Bypass the complete remainder of the active main loop, not an unsafe
-     * boolean branch. No trade, click, sell, or purchase node executes on this
-     * unknown inventory observation. Future visits do not OCR the disabled node.
-     * Without a known loop, fail closed rather than guessing a graph target.
-     */
-    private boolean skipPotionCycle() {
-        LoopFrame outer = loops.peekFirst();
-        if (outer == null) return false;
-        long now = SystemClock.elapsedRealtime();
-        if (potionSkipWindowStartMs == 0L || now - potionSkipWindowStartMs > 30_000L) {
-            potionSkipWindowStartMs = now;
-            rapidPotionSkips = 0;
-        }
-        if (++rapidPotionSkips > 12) {
-            note("30 秒内连续跳过药瓶统计超过 12 次，疑似卡在同一背包流程；"
-                    + "停止空转，避免无意义的高速循环。");
-            return false;
-        }
-        CoraFlowPotionSkipPolicy.Decision next = CoraFlowPotionSkipPolicy.nextCycle(
-                outer.bodyStart, outer.iteration, outer.count);
-        if (!next.canContinue) return false;
-        while (loops.size() > 1) loops.removeLast();
-        outer.iteration = next.nextIteration;
-        overrideNext = next.nextBody;
-        // This is a whole-cycle skip, not a retry of the failed OCR node.
-        control.sleep(250L);
-        return true;
-    }
 
     private boolean recoverUncertainOcr(String type, String id, String name, JSONObject config,
                                         Exception failure, Set<String> nodeIds) throws Exception {
