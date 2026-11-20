@@ -176,6 +176,11 @@ public final class CoraFlowWorkflowRuntime {
     private int openCvMatches, legacyMatches;
     private VisionCoordinateTransform coordinateTransform;
     private final VisionGameStateMachine visionStateMachine = new VisionGameStateMachine(3);
+    private boolean stoppedForUncertainPotionQuantity;
+
+    boolean stoppedForUncertainPotionQuantity() {
+        return stoppedForUncertainPotionQuantity;
+    }
     // One captured-frame pixel array and decoded-template arrays are reused across slot matches.
     // Previously each match allocated a new full-screen int[] (~8 MiB at 1080p).
     private Bitmap pixelFrame;
@@ -308,6 +313,7 @@ public final class CoraFlowWorkflowRuntime {
                 } catch (Exception failure) {
                     if (!recoverUncertainOcr(type, currentId, name, config, failure, nodeMap.keySet())) {
                         if (isPotionInventoryNode(type, config) && isOcrUncertainty(failure)) {
+                            stoppedForUncertainPotionQuantity = true;
                             note("背包药瓶数量仍为 UNKNOWN；已安全结束本次工作流，未将未知值当 0，未执行后续补药或交易。"
                                     + "请检查截图/识别区域后重新启动。原因：" + rootMessage(failure));
                             return;
