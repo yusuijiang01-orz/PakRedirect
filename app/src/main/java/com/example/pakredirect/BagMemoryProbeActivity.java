@@ -26,6 +26,19 @@ public final class BagMemoryProbeActivity extends Activity {
         result.setTextSize(18);
         result.setText("只读读取背包中……\n不会执行游戏点击或 Lua 流程。");
         setContentView(result);
+        result.setText("正在核验 Admin 沙箱诊断权限…");
+        SandboxAdminAccess.checkAsync(this, access -> runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed() || finished) return;
+            if (!access.allowed) {
+                finishWith(access.message);
+                finish();
+                return;
+            }
+            startProbeAuthorized();
+        }));
+    }
+
+    private void startProbeAuthorized() {
         try {
             relay = new SandboxBagSnapshotRelay(this);
             relay.start();
