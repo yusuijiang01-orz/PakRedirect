@@ -57,6 +57,7 @@ public final class ScriptRuntimeService extends Service {
     private SandboxBagSnapshotRelay bagSnapshotRelay;
     private ScriptRuntimeLog runtimeLog;
     private volatile boolean workerRunning;
+    private final AtomicBoolean safeStoppedForUncertainPotionQuantity = new AtomicBoolean(false);
     private volatile boolean entitlementCheckPending;
     private volatile int entitlementGeneration;
     private volatile boolean serviceDestroyed;
@@ -210,6 +211,7 @@ public final class ScriptRuntimeService extends Service {
         bagSnapshotRelay.close();
         control = new ScriptExecutionControl();
         control.start();
+        safeStoppedForUncertainPotionQuantity.set(false);
         final ScriptExecutionControl runControl = control;
         workerRunning = true;
         state = ScriptExecutionControl.State.RUNNING.name();
@@ -242,6 +244,9 @@ public final class ScriptRuntimeService extends Service {
                 if (runControl.isStopRequested()) {
                     runControl.complete();
                     publish("已停止");
+                } else if (safeStoppedForUncertainPotionQuantity.get()) {
+                    runControl.complete();
+                    publish("药瓶数量仍为 UNKNOWN，已安全结束本次脚本；未执行后续购买、出售或丢弃");
                 } else {
                     runControl.complete();
                     publish("脚本已完成");
@@ -536,8 +541,13 @@ public final class ScriptRuntimeService extends Service {
                     verifyStartupDisplayCapture();
                     waitForFirstUseTermsIfNeeded();
                 }
-                new CoraFlowWorkflowRuntime(workflow, runControl, this::publish,
-                        () -> launchConfiguredGame(targetMode)).run();
+                CoraFlowWorkflowRuntime workflowRuntime =
+                        new CoraFlowWorkflowRuntime(workflow, runControl, this::publish,
+                                () -> launchConfiguredGame(targetMode));
+                workflowRuntime.run();
+                if (workflowRuntime.stoppedForUncertainPotionQuantity()) {
+                    safeStoppedForUncertainPotionQuantity.set(true);
+                }
                 Throwable workerFailure = runControl.getFailure();
                 if (workerFailure != null) throw workerFailure;
             } catch (Throwable scriptFailure) {
