@@ -718,7 +718,9 @@ public final class ScriptRuntimeService extends Service {
     }
 
     private boolean launchConfiguredGame(String targetMode) {
-        if (!ScriptToolsActivity.TARGET_MODE_DESKTOP.equals(targetMode)) {
+        if (ScriptToolsActivity.TARGET_MODE_SANDBOX.equals(targetMode)) {
+            // Auto recovery is a new privileged launch, not a continuation of a previous grant.
+            SandboxAdminAccess.requireNow(this);
             try {
                 return top.niunaijun.blackbox.BlackBoxCore.get()
                         .launchApk(ScriptGameAdapter.TARGET_GAME_PACKAGE, 0);
