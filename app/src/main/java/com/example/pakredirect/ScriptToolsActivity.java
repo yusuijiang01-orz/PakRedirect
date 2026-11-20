@@ -605,7 +605,9 @@ public final class ScriptToolsActivity extends Activity {
         addButton(logs, openLogs);
         openLogs.setOnClickListener(v -> showRuntimeLogViewer());
 
-        String targetDescription = "工作台会按打开入口预选运行目标；如果实际游戏在 RYLUX 沙箱中，可在此切换为沙箱副本。运行前检查会再次确认目标。";
+        String targetDescription = adminRoleConfirmed
+                ? "工作台会按打开入口预选运行目标，可在桌面客户端与 Admin 专用沙箱之间切换。运行前会再次确认。"
+                : "普通账号仅支持桌面客户端；BlackBox 沙箱为 Admin 专用内测功能。";
         LinearLayout selection = section("目标游戏", targetDescription
                 + " Android 不允许 RYLUX 可靠强制结束桌面客户端，桌面版重启时会退回桌面并尝试重新打开。");
         RadioGroup targets = new RadioGroup(this);
@@ -925,6 +927,7 @@ public final class ScriptToolsActivity extends Activity {
     }
 
     private boolean sandboxGameAvailable() {
+        if (!adminRoleConfirmed) return false;
         RyluxApplication app = (RyluxApplication) getApplication();
         if (!app.isBlackBoxReady()) return false;
         try {
@@ -959,7 +962,8 @@ public final class ScriptToolsActivity extends Activity {
 
     private String gameStatus() {
         String desktop = desktopGameAvailable() ? "已安装" : "未检测到";
-        String sandbox = sandboxGameAvailable() ? "已导入" : "未导入 / 沙箱未就绪";
+        String sandbox = !adminRoleConfirmed ? "仅限 Admin"
+                : sandboxGameAvailable() ? "已导入" : "未导入 / 沙箱未就绪";
         String mode = TARGET_MODE_DESKTOP.equals(targetMode()) ? "桌面客户端" : "RYLUX 沙箱副本";
         String selected = selectedTargetAvailable() ? "可用" : "不可用，请检查安装状态";
         return "桌面客户端：" + desktop + "\n沙箱副本：" + sandbox
