@@ -64,6 +64,9 @@ public final class ScriptRuntimeService extends Service {
     private String pendingRestartConfig;
     private int latestStartId;
     private long lastMembershipRefreshAt;
+    private volatile String activeTargetMode = ScriptToolsActivity.TARGET_MODE_DESKTOP;
+    private volatile boolean sandboxRoleCheckPending;
+    private long lastSandboxRoleCheckAt;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final Runnable entitlementWatchdog = new Runnable() {
         @Override public void run() {
@@ -78,6 +81,20 @@ public final class ScriptRuntimeService extends Service {
                     if (result != null && result.requestOk
                             && (!result.success || !result.allowed)) {
                         stopForMembershipDenied(result.message + "，脚本与汉化已停用");
+                    }
+                });
+            }
+            if (workerRunning && ScriptToolsActivity.TARGET_MODE_SANDBOX.equals(activeTargetMode)
+                    && !sandboxRoleCheckPending
+                    && System.currentTimeMillis() - lastSandboxRoleCheckAt >= 20_000L) {
+                sandboxRoleCheckPending = true;
+                lastSandboxRoleCheckAt = System.currentTimeMillis();
+                SandboxAdminAccess.checkAsync(ScriptRuntimeService.this, result -> {
+                    sandboxRoleCheckPending = false;
+                    if (serviceDestroyed || !workerRunning
+                            || !ScriptToolsActivity.TARGET_MODE_SANDBOX.equals(activeTargetMode)) return;
+                    if (!result.allowed) {
+                        stopForSandboxAdminRevoked(result.message);
                     }
                 });
             }
@@ -203,8 +220,10 @@ public final class ScriptRuntimeService extends Service {
         JSONObject config;
         try { config = new JSONObject(json == null ? "{}" : json); }
         catch (Exception invalid) { publish("启动失败：方案配置无效"); stopSelf(latestStartId); return; }
-        ScriptGameAdapter.setTargetMode(config.optString("目标运行环境",
-                ScriptToolsActivity.TARGET_MODE_DESKTOP));
+        activeTargetMode = config.optString("目标运行环境",
+                ScriptToolsActivity.TARGET_MODE_DESKTOP);
+        lastSandboxRoleCheckAt = 0L;
+        ScriptGameAdapter.setTargetMode(activeTargetMode);
         runtimeLog.configure(config.optBoolean(ScriptRuntimeLog.AUTO_SAVE, true),
                 config.optBoolean(ScriptRuntimeLog.SOURCE_CONTEXT, true));
         routeBridge.close();
@@ -734,6 +753,7 @@ public final class ScriptRuntimeService extends Service {
     private synchronized void finishWorker(ScriptExecutionControl finished) {
         if (control != finished) return;
         workerRunning = false;
+        activeTargetMode = ScriptToolsActivity.TARGET_MODE_DESKTOP;
         routeBridge.close();
         if (bagSnapshotRelay != null) bagSnapshotRelay.close();
         String restart = pendingRestartConfig;
@@ -748,6 +768,16 @@ public final class ScriptRuntimeService extends Service {
 
     private synchronized void stopForExpiredMembership() {
         stopForMembershipDenied("VIP / 体验会员已到期，脚本与汉化已停用");
+    }
+
+    private synchronized void stopForSandboxAdminRevoked(String reason) {
+        ScriptExecutionControl current = control;
+        if (current != null) current.requestStop();
+        pendingRestartConfig = null;
+        publish("Admin 沙箱权限失效，已立即停止沙箱工作流：" + reason);
+        stopService(new Intent(this, ScriptControlOverlayService.class));
+        stopForeground(true);
+        stopSelf(latestStartId);
     }
 
     private synchronized void stopForMembershipDenied(String message) {
