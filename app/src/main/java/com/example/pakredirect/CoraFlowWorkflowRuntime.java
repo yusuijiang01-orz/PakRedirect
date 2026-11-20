@@ -602,8 +602,13 @@ public final class CoraFlowWorkflowRuntime {
         if (!isOcrNode(type) || !isOcrUncertainty(failure)) return false;
         String message = failure.getMessage() == null ? failure.getClass().getSimpleName() : failure.getMessage();
         String target = config.optString("recovery_target", "").trim();
-        if (target.isEmpty() && isPotionInventoryNode(type, config)) {
-            target = id; // Bounded native recovery when the encrypted graph has no recovery_target.
+        if (target.isEmpty() && isPotionInventoryNode(type, config)
+                && config.optInt("count", -1) < 0) {
+            target = id; // Bounded native retry only when node-visit limits cannot skip validation.
+        }
+        if (target.equals(id) && config.optInt("count", -1) >= 0) {
+            note("药瓶识别节点设置了访问次数上限，禁止自跳转绕过该限制；保持 UNKNOWN。");
+            return false;
         }
         if (target.isEmpty()) return false;
         CoraFlowRecoveryPolicy.Decision recovery = CoraFlowRecoveryPolicy.plan(
