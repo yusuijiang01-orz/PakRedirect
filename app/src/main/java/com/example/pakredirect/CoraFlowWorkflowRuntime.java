@@ -306,7 +306,14 @@ public final class CoraFlowWorkflowRuntime {
                 try {
                     condition = execute(type, currentId, name, config, edges, nodeMap);
                 } catch (Exception failure) {
-                    if (!recoverUncertainOcr(type, currentId, name, config, failure, nodeMap.keySet())) throw failure;
+                    if (!recoverUncertainOcr(type, currentId, name, config, failure, nodeMap.keySet())) {
+                        if (isPotionInventoryNode(type, config) && isOcrUncertainty(failure)) {
+                            note("背包药瓶数量仍为 UNKNOWN；已安全结束本次工作流，未将未知值当 0，未执行后续补药或交易。"
+                                    + "请检查截图/识别区域后重新启动。原因：" + rootMessage(failure));
+                            return;
+                        }
+                        throw failure;
+                    }
                     currentId = overrideNext;
                     continue;
                 }
@@ -595,6 +602,9 @@ public final class CoraFlowWorkflowRuntime {
         if (!isOcrNode(type) || !isOcrUncertainty(failure)) return false;
         String message = failure.getMessage() == null ? failure.getClass().getSimpleName() : failure.getMessage();
         String target = config.optString("recovery_target", "").trim();
+        if (target.isEmpty() && isPotionInventoryNode(type, config)) {
+            target = id; // Bounded native recovery when the encrypted graph has no recovery_target.
+        }
         if (target.isEmpty()) return false;
         CoraFlowRecoveryPolicy.Decision recovery = CoraFlowRecoveryPolicy.plan(
                 id, message, target, config.optInt("recovery_max_attempts", 3),
@@ -608,12 +618,20 @@ public final class CoraFlowWorkflowRuntime {
         }
         String exhaustedTarget = config.optString("recovery_exhausted_target", "").trim();
         if (exhaustedTarget.isEmpty()) {
+            if (isPotionInventoryNode(type, config)) {
+                note("药瓶数量 UNKNOWN：已用完本次节点的安全重拍次数，停止进入后续补药和出售节点。");
+                return false;
+            }
             throw new IllegalStateException(message + "；OCR恢复次数已用尽，已停止。", failure);
         }
         if (!nodeIds.contains(exhaustedTarget)) {
             throw new IllegalStateException(message + "；恢复次数耗尽后的入口不存在：" + exhaustedTarget, failure);
         }
         if (!exhaustedOcrRecoveries.add(id)) {
+            if (isPotionInventoryNode(type, config)) {
+                note("药瓶数量 UNKNOWN：恢复入口复查后仍未确认，安全结束本次工作流。");
+                return false;
+            }
             throw new IllegalStateException(message + "；已返回界面识别入口复查一次，仍无法读取；停止，避免无限重试。", failure);
         }
         if (config.optBoolean("recovery_exhausted_reset_context", false)) {
@@ -633,15 +651,12 @@ public final class CoraFlowWorkflowRuntime {
     }
 
     private static boolean isOcrUncertainty(Exception failure) {
-        Throwable cause = failure;
-        while (cause.getCause() != null && cause.getCause() != cause) cause = cause.getCause();
-        String message = cause.getMessage();
-        return message != null && (message.contains("OCR 置信度")
-                || message.contains("OCR 没有返回结果")
-                || message.contains("药瓶图标候选")
-                || message.contains("药瓶数量 OCR 不可靠")
-                || message.contains("物品详情遮挡背包")
-                || message.contains("药品数量未确认"));
+        return CoraFlowOcrUncertaintyPolicy.isUncertain(failure);
+    }
+
+    private static boolean isPotionInventoryNode(String type, JSONObject config) {
+        return "recognize_number".equals(type)
+                && !config.optString("item_image", "").trim().isEmpty();
     }
 
     private Boolean recognizeNode(String type, String id, String name, JSONObject config) throws Exception {
@@ -649,33 +664,59 @@ public final class CoraFlowWorkflowRuntime {
                 && config.optString("item_image", "").trim().isEmpty()) {
             return recognizeExpectedQuantity(name, config);
         }
-        int retries = Math.max(0, Math.min(3, config.optInt("ocr_retry_count", 0)));
+        boolean potionCount = isPotionInventoryNode(type, config);
+        // Potion counts need at least two independently captured, matching 35-slot snapshots.
+        // Unlike ordinary OCR nodes, they get native retries even without a graph retry setting.
+        int retries = potionCount
+                ? Math.max(3, Math.min(5, config.optInt("ocr_retry_count", 4)))
+                : Math.max(0, Math.min(3, config.optInt("ocr_retry_count", 0)));
         float minimum = (float) Math.max(0, Math.min(100, config.optDouble("min_confidence", 30)));
+        Map<Integer, Integer> previousPotionScan = null;
         OcrRead result = null;
         for (int attempt = 0; attempt <= retries; attempt++) {
             checkpoint();
             if (attempt > 0) {
                 note("OCR 结果不确定，重试截图 " + attempt + "/" + retries + "；尚未执行后续操作。");
-                control.sleep(Math.max(0, Math.min(5000, config.optLong("ocr_retry_delay_ms", 350))));
+                control.sleep(Math.max(potionCount ? 180L : 0L,
+                        Math.min(5000L, Math.max(0L, config.optLong("ocr_retry_delay_ms", 350)))));
             }
             Bitmap frame = capture();
             try {
-                if ("recognize_number".equals(type) && !config.optString("item_image", "").trim().isEmpty()) {
-                    Number total;
+                if (potionCount) {
+                    Map<Integer, Integer> observed;
                     try {
-                        total = countInventoryIcon(frame, config);
+                        observed = countInventoryIcon(frame, config);
                     } catch (Exception uncertainInventory) {
-                        if (attempt < retries && isOcrUncertainty(uncertainInventory)) {
-                            note("背包药瓶图标/数量本帧无法可靠确认；重新截图识别，不按 0 处理，也不执行购买或出售。 ");
-                            continue;
+                        if (isOcrUncertainty(uncertainInventory)) {
+                            previousPotionScan = null; // Never confirm across an intervening UNKNOWN frame.
+                            if (attempt < retries) {
+                                note("背包数量为 UNKNOWN（" + rootMessage(uncertainInventory)
+                                        + "）；重新截图 " + (attempt + 1) + "/" + retries
+                                        + "，禁止据此购买或出售。");
+                                continue;
+                            }
+                            throw new IllegalStateException("背包药瓶数量多帧一致性未通过；"
+                                    + rootMessage(uncertainInventory), uncertainInventory);
                         }
                         throw uncertainInventory;
                     }
+                    if (!CoraFlowInventoryCountConsensus.agrees(previousPotionScan, observed)) {
+                        previousPotionScan = observed;
+                        if (attempt < retries) {
+                            note("背包药瓶数量仅完成单帧识别，等待另一张独立截图核对 35 格及各格数量；"
+                                    + (attempt + 1) + "/" + (retries + 1) + "。");
+                            continue;
+                        }
+                        throw new IllegalStateException("背包药瓶数量多帧一致性未通过；"
+                                + "两张独立截图中的药瓶格位置或数量不一致；保持 UNKNOWN。");
+                    }
+                    int total = CoraFlowInventoryCountConsensus.total(observed);
                     double target = config.optDouble("number_value", config.optDouble("threshold", 0));
                     String op = config.optString("number_operator", config.optString("operator", ">="));
-                    boolean matched = compare(total.doubleValue(), op, target);
-                    note("全背包图标定位数量：" + total + "；" + total + " " + op + " " + target + " → " + (matched ? "是" : "否") + "。");
-                    addNumberSample(id, total.intValue());
+                    boolean matched = compare(total, op, target);
+                    note("全背包药瓶双帧确认：" + observed.size() + " 格，数量 " + total
+                            + "；" + total + " " + op + " " + target + " → " + (matched ? "是" : "否") + "。");
+                    addNumberSample(id, total);
                     return matched;
                 }
                 result = readOcr(frame, region(config.optJSONArray("region")),
@@ -896,11 +937,11 @@ public final class CoraFlowWorkflowRuntime {
         control.sleep(sleep);
     }
 
-    private Number countInventoryIcon(Bitmap frame, JSONObject config) throws Exception {
+    private Map<Integer, Integer> countInventoryIcon(Bitmap frame, JSONObject config) throws Exception {
         return countInventoryIcon(frame, config, 0);
     }
 
-    private Number countInventoryIcon(Bitmap frame, JSONObject config, int recoveryDepth) throws Exception {
+    private Map<Integer, Integer> countInventoryIcon(Bitmap frame, JSONObject config, int recoveryDepth) throws Exception {
         String detailPath = "captures/templates/RYLUX_背包_物品详情左上角_1920.png";
         if (workflowPackage.images.containsKey(detailPath)
                 && findTemplate(frame, detailPath, new Rect(400, 70, 1550, 300), 0.90f) != null) {
@@ -928,7 +969,8 @@ public final class CoraFlowWorkflowRuntime {
         if (icon == null) throw new IllegalStateException("工作流缺少物品图标素材：" + path);
         Rect grid = region(config.optJSONArray("region"));
         if (grid.width() < 200 || grid.height() < 300) throw new IllegalStateException("物品数量节点的范围没有覆盖完整背包");
-        int minConfidence = Math.max(0, Math.min(100, config.optInt("min_confidence", 30)));
+        int minConfidence = Math.max(75, Math.min(100, config.optInt("min_confidence", 80)));
+        Map<Integer, Integer> stacks = new HashMap<>();
         int count = 0;
         int hits = 0;
         int cellWidth = grid.width() / 5;
@@ -968,32 +1010,43 @@ public final class CoraFlowWorkflowRuntime {
                     cell.top + Math.round(cell.height() * 0.95f));
             OcrRead bestRead = null;
             Integer value = null;
+            Set<Integer> confidentValues = new HashSet<>();
             for (int scale : new int[]{4, 3, 2}) {
                 OcrRead candidate = readOcr(frame, countRegion, false, scale);
                 Integer candidateValue = parseNumber(candidate.text);
-                if (candidateValue != null && candidateValue > 0
-                        && (bestRead == null || candidate.confidence > bestRead.confidence)) {
-                    bestRead = candidate;
-                    value = candidateValue;
-                }
-                if (candidateValue != null && candidateValue > 0 && candidate.confidence >= minConfidence) {
-                    bestRead = candidate;
-                    value = candidateValue;
-                    break;
+                if (candidateValue != null && candidateValue > 0 && candidateValue <= 999999) {
+                    if (bestRead == null || candidate.confidence > bestRead.confidence) {
+                        bestRead = candidate;
+                        value = candidateValue;
+                    }
+                    if (candidate.confidence >= minConfidence) confidentValues.add(candidateValue);
                 }
             }
-            if (bestRead == null || value == null || bestRead.confidence < minConfidence) {
+            // The enhanced crop can recover thin or antialiased digits without lowering the
+            // decision confidence threshold. A contradictory strong read stays UNKNOWN.
+            if (confidentValues.isEmpty()) {
+                InventoryMetric enhanced = readNumericMetricOnce(frame, countRegion);
+                if (enhanced != null && enhanced.value > 0
+                        && enhanced.value <= 999999 && enhanced.confidence >= minConfidence) {
+                    confidentValues.add(enhanced.value);
+                    bestRead = new OcrRead(enhanced.text, enhanced.confidence);
+                    value = enhanced.value;
+                }
+            }
+            if (confidentValues.size() != 1 || bestRead == null || value == null
+                    || bestRead.confidence < minConfidence) {
                 String text = bestRead == null ? "" : bestRead.text;
                 float confidence = bestRead == null ? 0 : bestRead.confidence;
                 throw new IllegalStateException("第 " + (row + 1) + " 行第 " + (column + 1)
-                        + " 列命中药瓶图标但数量 OCR 不可靠（" + text + "，" + percent(confidence) + "）；停止统计。");
+                        + " 列命中药瓶图标但数量 OCR 不可靠（" + text + "，" + percent(confidence)
+                        + "）；本帧为 UNKNOWN，等待重拍。");
             }
-            if (bestRead.confidence < 80) note("药瓶数量 OCR 经过多尺度复读，采用置信度最高结果。");
+            stacks.put(slot, value);
             count += value;
             note("药瓶图标定位：第 " + (row + 1) + " 行第 " + (column + 1) + " 列，数量 " + value + "。");
         }
-        note("背包图标扫描 35 格，定位到 " + hits + " 个“" + path.substring(path.lastIndexOf('/') + 1) + "”堆栈，共 " + count + " 个。");
-        return count;
+        note("背包图标扫描 35 格，定位到 " + hits + " 个“" + path.substring(path.lastIndexOf('/') + 1) + "”堆栈，单帧候选 " + count + " 个；仍需独立帧核验。");
+        return stacks;
     }
 
     private OcrRead readOcr(Bitmap source, Rect baseRegion, boolean chinese, int scale) throws Exception {
