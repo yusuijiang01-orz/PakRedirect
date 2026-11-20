@@ -204,7 +204,7 @@ public final class ScriptRuntimeService extends Service {
         try { config = new JSONObject(json == null ? "{}" : json); }
         catch (Exception invalid) { publish("启动失败：方案配置无效"); stopSelf(latestStartId); return; }
         ScriptGameAdapter.setTargetMode(config.optString("目标运行环境",
-                ScriptToolsActivity.TARGET_MODE_SANDBOX));
+                ScriptToolsActivity.TARGET_MODE_DESKTOP));
         runtimeLog.configure(config.optBoolean(ScriptRuntimeLog.AUTO_SAVE, true),
                 config.optBoolean(ScriptRuntimeLog.SOURCE_CONTEXT, true));
         routeBridge.close();
@@ -229,7 +229,11 @@ public final class ScriptRuntimeService extends Service {
 
     private void runWithCrashRecovery(JSONObject config, ScriptExecutionControl runControl) {
         boolean autoLogin = config.optBoolean("自动登录", true);
-        String targetMode = config.optString("目标运行环境", ScriptToolsActivity.TARGET_MODE_SANDBOX);
+        String targetMode = config.optString("目标运行环境", ScriptToolsActivity.TARGET_MODE_DESKTOP);
+        if (!ScriptToolsActivity.TARGET_MODE_SANDBOX.equals(targetMode)
+                && !ScriptToolsActivity.TARGET_MODE_DESKTOP.equals(targetMode)) {
+            throw new SecurityException("脚本目标运行环境无效，已拒绝启动");
+        }
         ScriptGameProcessMonitor processMonitor = new ScriptGameProcessMonitor();
         boolean gameWasObserved = false;
         int restartsInWindow = 0;
@@ -237,6 +241,9 @@ public final class ScriptRuntimeService extends Service {
 
         while (!runControl.isStopRequested()) {
             try {
+                if (ScriptToolsActivity.TARGET_MODE_SANDBOX.equals(targetMode)) {
+                    SandboxAdminAccess.requireNow(this);
+                }
                 gameWasObserved |= runMonitoredAttempt(config, runControl, targetMode,
                         processMonitor);
                 Throwable workerFailure = runControl.getFailure();
@@ -253,6 +260,12 @@ public final class ScriptRuntimeService extends Service {
                 }
                 return;
             } catch (Throwable failure) {
+                if (failure instanceof SecurityException) {
+                    // Authorization denial is never a game crash and must not trigger automatic relaunch.
+                    if (runControl.fail(failure)) reportFailure(failure);
+                    else reportFailure(failure);
+                    return;
+                }
                 if (runControl.isStopRequested()) {
                     runControl.complete();
                     publish("已停止");
