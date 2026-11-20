@@ -45,6 +45,9 @@ public final class BlackBoxSandboxActivity extends Activity {
     private Switch localizationToggle;
     private Button desktopCloneButton;
     private volatile boolean desktopGameAvailable;
+    private boolean adminAuthorized;
+    private boolean adminCheckRunning;
+    private boolean adminUiBuilt;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -64,8 +67,11 @@ public final class BlackBoxSandboxActivity extends Activity {
                 // The sandbox screen can still report core startup failures.
             }
         }
-        buildUi();
-        refreshApps();
+        TextView verifying = label("正在在线核验 Admin 沙箱权限…", 15,
+                RyluxDesignSystem.TEXT, true);
+        verifying.setGravity(Gravity.CENTER);
+        setContentView(verifying);
+        verifyAdminAccess();
     }
 
     @Override
@@ -77,20 +83,67 @@ public final class BlackBoxSandboxActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        boolean cached = MembershipAccess.hasCachedAccess(this);
-        if (!cached && LocalizationSettings.isEnabled(this)) {
-            LocalizationSettings.setEnabled(this, false);
-            stopInterceptModule();
-        }
-        if (localizationToggle != null) {
-            localizationToggle.setOnCheckedChangeListener(null);
-            localizationToggle.setChecked(cached && LocalizationSettings.isEnabled(this));
-            localizationToggle.setEnabled(true);
-            bindLocalizationToggle();
-        }
-        MembershipAccess.refresh(this, result -> runOnUiThread(() -> {
-            if (!isFinishing() && !isDestroyed()) applyMembershipCheck(result);
+        if (!adminCheckRunning) verifyAdminAccess();
+    }
+
+    private void verifyAdminAccess() {
+        if (adminCheckRunning || isFinishing()) return;
+        adminCheckRunning = true;
+        adminAuthorized = false;
+        SandboxAdminAccess.checkAsync(this, result -> runOnUiThread(() -> {
+            adminCheckRunning = false;
+            if (isFinishing() || isDestroyed()) return;
+            if (result == null || !result.allowed) {
+                denyAdmin(result == null ? "Admin 权限验证失败" : result.message);
+                return;
+            }
+            adminAuthorized = true;
+            if (!adminUiBuilt) {
+                adminUiBuilt = true;
+                buildUi();
+            }
+            boolean cached = MembershipAccess.hasCachedAccess(this);
+            if (!cached && LocalizationSettings.isEnabled(this)) {
+                LocalizationSettings.setEnabled(this, false);
+                stopInterceptModule();
+            }
+            if (localizationToggle != null) {
+                localizationToggle.setOnCheckedChangeListener(null);
+                localizationToggle.setChecked(cached && LocalizationSettings.isEnabled(this));
+                localizationToggle.setEnabled(true);
+                bindLocalizationToggle();
+            }
+            MembershipAccess.refresh(this, membership -> runOnUiThread(() -> {
+                if (!isFinishing() && !isDestroyed()) applyMembershipCheck(membership);
+            }));
+            refreshApps();
         }));
+    }
+
+    private void denyAdmin(String message) {
+        adminAuthorized = false;
+        Toast.makeText(this, message == null ? "BlackBox 沙箱仅限 Admin" : message,
+                Toast.LENGTH_LONG).show();
+        finish();
+    }
+
+    /** Recheck the live server role before every privileged user action. */
+    private void withAdmin(Runnable action) {
+        if (!adminAuthorized || isFinishing()) {
+            Toast.makeText(this, "正在验证 Admin 权限，当前操作已禁止", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        worker.execute(() -> {
+            SandboxAdminAccess.Result result = SandboxAdminAccess.checkNow(this);
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                if (!result.allowed) {
+                    denyAdmin(result.message);
+                    return;
+                }
+                action.run();
+            });
+        });
     }
 
     private void buildUi() {
@@ -197,10 +250,12 @@ public final class BlackBoxSandboxActivity extends Activity {
     }
 
     private void pickApk() {
-        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-        intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType("application/vnd.android.package-archive");
-        startActivityForResult(intent, PICK_APK);
+        withAdmin(() -> {
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("application/vnd.android.package-archive");
+            startActivityForResult(intent, PICK_APK);
+        });
     }
 
     @Override
@@ -208,10 +263,14 @@ public final class BlackBoxSandboxActivity extends Activity {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode != PICK_APK || resultCode != RESULT_OK || data == null || data.getData() == null) return;
         Uri apkUri = data.getData();
+        withAdmin(() -> importSelectedApk(apkUri, data.getFlags()));
+    }
+
+    private void importSelectedApk(Uri apkUri, int permissionFlags) {
         try {
             getContentResolver().takePersistableUriPermission(
                     apkUri,
-                    data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                    permissionFlags & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
             );
         } catch (SecurityException ignored) {
             // The picker may provide a temporary read grant instead of a persistable one.
@@ -220,7 +279,9 @@ public final class BlackBoxSandboxActivity extends Activity {
         worker.execute(() -> {
             File stagedApk = null;
             try {
+                SandboxAdminAccess.requireNow(this);
                 stagedApk = stageApkForImport(apkUri);
+                SandboxAdminAccess.requireNow(this);
                 InstallResult result = BlackBoxCore.get().installPackageAsUser(stagedApk, 0);
                 runOnUiThread(() -> {
                     setBusy(false, result.success
@@ -264,6 +325,10 @@ public final class BlackBoxSandboxActivity extends Activity {
     }
 
     private void refreshApps() {
+        withAdmin(this::refreshAppsVerified);
+    }
+
+    private void refreshAppsVerified() {
         RyluxApplication application = (RyluxApplication) getApplication();
         if (!application.isBlackBoxReady()) {
             String detail = application.getBlackBoxError();
@@ -273,6 +338,7 @@ public final class BlackBoxSandboxActivity extends Activity {
         setBusy(true, "正在读取沙箱应用…");
         worker.execute(() -> {
             try {
+                SandboxAdminAccess.requireNow(this);
                 List<ApplicationInfo> apps = BlackBoxCore.get().getInstalledApplications(0, 0);
                 PackageInfo desktopGame = null;
                 try {
@@ -291,6 +357,7 @@ public final class BlackBoxSandboxActivity extends Activity {
     }
 
     private void showApps(List<ApplicationInfo> apps, PackageInfo desktopGame, PackageInfo sandboxGame) {
+        if (!adminAuthorized || isFinishing()) return;
         localizationToggle = null;
         appList.removeAllViews();
         desktopGameAvailable = desktopGame != null && desktopGame.applicationInfo != null
@@ -360,6 +427,10 @@ public final class BlackBoxSandboxActivity extends Activity {
     }
 
     private void cloneDesktopGame() {
+        withAdmin(this::cloneDesktopGameVerified);
+    }
+
+    private void cloneDesktopGameVerified() {
         if (!desktopGameAvailable) {
             setBusy(false, "未检测到系统桌面版封神榜，仍可选择 APK 文件导入");
             return;
@@ -367,6 +438,7 @@ public final class BlackBoxSandboxActivity extends Activity {
         setBusy(true, "正在从系统桌面同步封神榜到沙箱…");
         worker.execute(() -> {
             try {
+                SandboxAdminAccess.requireNow(this);
                 PackageInfo source = getPackageManager().getPackageInfo(LOCALIZED_GAME_PACKAGE, 0);
                 InstallResult result = BlackBoxCore.get().installPackageAsUser(LOCALIZED_GAME_PACKAGE, 0);
                 String message = result != null && result.success
@@ -392,6 +464,10 @@ public final class BlackBoxSandboxActivity extends Activity {
     }
 
     private void launch(String packageName, boolean withLocalization) {
+        withAdmin(() -> launchVerified(packageName, withLocalization));
+    }
+
+    private void launchVerified(String packageName, boolean withLocalization) {
         if (withLocalization && LOCALIZED_GAME_PACKAGE.equals(packageName)) {
             setBusy(true, "正在验证会员状态…");
             MembershipAccess.refresh(this, result -> runOnUiThread(() -> {
@@ -422,10 +498,12 @@ public final class BlackBoxSandboxActivity extends Activity {
         setBusy(true, withLocalization ? "正在准备 RYLUX 汉化…" : "正在启动 " + packageName + "…");
         worker.execute(() -> {
             try {
+                SandboxAdminAccess.requireNow(this);
                 if (withLocalization && LOCALIZED_GAME_PACKAGE.equals(packageName)) {
                     LocalizationLaunchPreparation.prepare(this,
                             message -> runOnUiThread(() -> setBusy(true, message)));
                 }
+                SandboxAdminAccess.requireNow(this);
                 boolean launched = BlackBoxCore.get().launchApk(packageName, 0);
                 String result = launched
                         ? (withLocalization ? "RYLUX 汉化已就绪，已请求在沙箱启动游戏" : "已请求启动：" + packageName)
@@ -448,10 +526,10 @@ public final class BlackBoxSandboxActivity extends Activity {
             localizationToggle.setOnCheckedChangeListener(null);
             localizationToggle.setChecked(false);
             localizationToggle.setEnabled(false);
-            MembershipAccess.refresh(this, result -> runOnUiThread(() -> {
+            withAdmin(() -> MembershipAccess.refresh(this, result -> runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed()) return;
                 applyMembershipCheck(result);
-                boolean allowed = result != null && result.allowed;
+                boolean allowed = adminAuthorized && result != null && result.allowed;
                 LocalizationSettings.setEnabled(this, allowed);
                 localizationToggle.setChecked(allowed);
                 localizationToggle.setEnabled(true);
@@ -461,7 +539,7 @@ public final class BlackBoxSandboxActivity extends Activity {
                     Toast.makeText(this, result == null ? "无法验证会员状态，请检查网络后重试"
                             : result.message, Toast.LENGTH_LONG).show();
                 }
-            }));
+            })));
         });
     }
 
@@ -482,7 +560,7 @@ public final class BlackBoxSandboxActivity extends Activity {
     }
 
     private void openScriptWorkbench() {
-        MembershipAccess.refresh(this, result -> runOnUiThread(() -> {
+        withAdmin(() -> MembershipAccess.refresh(this, result -> runOnUiThread(() -> {
             if (isFinishing() || isDestroyed()) return;
             applyMembershipCheck(result);
             if (result != null && result.allowed) {
@@ -493,7 +571,7 @@ public final class BlackBoxSandboxActivity extends Activity {
                 Toast.makeText(this, result == null ? "无法验证会员状态，请检查网络后重试"
                         : result.message, Toast.LENGTH_LONG).show();
             }
-        }));
+        })));
     }
 
     private void stopInterceptModule() {
