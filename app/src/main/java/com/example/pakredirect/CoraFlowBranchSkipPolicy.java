@@ -27,8 +27,8 @@ final class CoraFlowBranchSkipPolicy {
                 || !nodeIds.contains(trueHead) || !nodeIds.contains(falseHead)) return null;
         if (trueHead.equals(falseHead)) return trueHead;
 
-        Map<String, Integer> trueDistances = distances(edges, trueHead, sourceId, falseHead, nodeIds);
-        Map<String, Integer> falseDistances = distances(edges, falseHead, sourceId, trueHead, nodeIds);
+        Map<String, Integer> trueDistances = distances(edges, trueHead, sourceId, nodeIds);
+        Map<String, Integer> falseDistances = distances(edges, falseHead, sourceId, nodeIds);
         String best = null;
         int bestMax = Integer.MAX_VALUE;
         int bestSum = Integer.MAX_VALUE;
@@ -64,8 +64,7 @@ final class CoraFlowBranchSkipPolicy {
     }
 
     private static Map<String, Integer> distances(JSONArray edges, String start,
-                                                   String sourceId, String blocked,
-                                                   Set<String> nodeIds) {
+                                                   String sourceId, Set<String> nodeIds) {
         Map<String, Integer> result = new HashMap<>();
         ArrayDeque<String> queue = new ArrayDeque<>();
         result.put(start, 0);
@@ -77,7 +76,7 @@ final class CoraFlowBranchSkipPolicy {
                 JSONObject edge = edges.optJSONObject(i);
                 if (edge == null || !current.equals(edge.optString("source", ""))) continue;
                 String target = edge.optString("target", "").trim();
-                if (target.isEmpty() || target.equals(sourceId) || target.equals(blocked)
+                if (target.isEmpty() || target.equals(sourceId)
                         || !nodeIds.contains(target) || result.containsKey(target)) continue;
                 result.put(target, nextDistance);
                 queue.addLast(target);
